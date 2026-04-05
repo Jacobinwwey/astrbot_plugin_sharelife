@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sharelife.astrbot/schemas/plugin.manifest.v2.schema.json",
+  "title": "Sharelife Plugin Manifest v2",
+  "description": "Capability-declared plugin contract for Sharelife/AstrBot ecosystem.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "plugin_id",
+    "version",
+    "display_name",
+    "entry",
+    "capabilities",
+    "compatibility"
+  ],
+  "properties": {
+    "manifest_version": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "plugin_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/-]{2,120}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 280
+    },
+    "maintainer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "class_name"],
+      "properties": {
+        "module": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "class_name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "default": "run"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network", "file", "command", "provider", "mcp"],
+      "properties": {
+        "network": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["outbound", "internal", "loopback"]
+          },
+          "uniqueItems": true
+        },
+        "file": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["read", "write", "config", "tmp"]
+          },
+          "uniqueItems": true
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["exec", "shell"]
+          },
+          "uniqueItems": true
+        },
+        "provider": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["read", "write", "rotate"]
+          },
+          "uniqueItems": true
+        },
+        "mcp": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["invoke", "install"]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "default": "low"
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requires_admin_confirmation": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["astrbot", "sharelife"],
+      "properties": {
+        "astrbot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min", "max"],
+          "properties": {
+            "min": {
+              "type": "string",
+              "minLength": 1
+            },
+            "max": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "sharelife": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["plugin_api"],
+          "properties": {
+            "plugin_api": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sdk": {
+              "type": "string",
+              "enum": ["v3", "v4"]
+            }
+          }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 40
+      },
+      "uniqueItems": true
+    }
+  }
+}

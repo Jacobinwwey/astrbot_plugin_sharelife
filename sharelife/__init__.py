@@ -1,0 +1,1 @@
+"""Sharelife plugin package."""

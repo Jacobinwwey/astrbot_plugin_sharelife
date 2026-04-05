@@ -1,0 +1,87 @@
+name: public-market-backup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "docs/public/market/**"
+      - "scripts/build_market_snapshot.py"
+      - "scripts/publish_public_market_pack.py"
+      - "scripts/backup_public_market.py"
+      - "sharelife/infrastructure/public_market_backup.py"
+      - ".github/workflows/public-market-backup.yml"
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SHARELIFE_PUBLIC_MARKET_REMOTE: ${{ secrets.SHARELIFE_PUBLIC_MARKET_RCLONE_REMOTE }}
+      SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64: ${{ secrets.SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64 }}
+      SHARELIFE_PUBLIC_MARKET_RCLONE_BWLIMIT: ${{ vars.SHARELIFE_PUBLIC_MARKET_RCLONE_BWLIMIT }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Rebuild public market snapshot
+        run: python3 scripts/build_market_snapshot.py
+
+      - name: Install rclone when remote sync is enabled
+        if: env.SHARELIFE_PUBLIC_MARKET_REMOTE != '' && env.SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64 != ''
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rclone
+
+      - name: Configure rclone
+        if: env.SHARELIFE_PUBLIC_MARKET_REMOTE != '' && env.SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64 != ''
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.config/rclone"
+          printf '%s' "${SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64}" | base64 -d > "$HOME/.config/rclone/rclone.conf"
+          chmod 600 "$HOME/.config/rclone/rclone.conf"
+
+      - name: Archive public market locally
+        if: env.SHARELIFE_PUBLIC_MARKET_REMOTE == '' || env.SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64 == ''
+        run: |
+          python3 scripts/backup_public_market.py \
+            --archive-output-dir output/public-market-backups
+
+      - name: Archive and sync public market
+        if: env.SHARELIFE_PUBLIC_MARKET_REMOTE != '' && env.SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64 != ''
+        run: |
+          python3 scripts/backup_public_market.py \
+            --archive-output-dir output/public-market-backups \
+            --remote "${SHARELIFE_PUBLIC_MARKET_REMOTE}" \
+            --rclone-bwlimit "${SHARELIFE_PUBLIC_MARKET_RCLONE_BWLIMIT}"
+
+      - name: Publish summary
+        shell: bash
+        run: |
+          {
+            echo "## Public Market Backup"
+            echo ""
+            echo "- Source: \`docs/public/market\`"
+            if [[ -n "${SHARELIFE_PUBLIC_MARKET_REMOTE}" && -n "${SHARELIFE_PUBLIC_MARKET_RCLONE_CONF_BASE64}" ]]; then
+              echo "- Remote sync: enabled"
+            elif [[ -n "${SHARELIFE_PUBLIC_MARKET_REMOTE}" ]]; then
+              echo "- Remote sync: skipped (remote set but rclone config secret missing)"
+            else
+              echo "- Remote sync: disabled (artifact-only backup)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-market-backup-${{ github.run_id }}
+          path: output/public-market-backups
+          if-no-files-found: error
+          retention-days: 14

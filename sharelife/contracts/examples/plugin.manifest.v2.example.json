@@ -1,0 +1,39 @@
+{
+  "manifest_version": "2.0",
+  "plugin_id": "sharelife.demo.pipeline.uppercase",
+  "version": "1.0.0",
+  "display_name": "Sharelife Demo Uppercase",
+  "summary": "Demo processor for pipeline composition tests.",
+  "maintainer": {
+    "name": "Sharelife Team",
+    "email": "maintainers@example.com",
+    "url": "https://github.com/Jacobinwwey/astrbot_plugin_sharelife"
+  },
+  "entry": {
+    "module": "plugins.demo_uppercase",
+    "class_name": "DemoUppercasePlugin",
+    "method": "run"
+  },
+  "capabilities": {
+    "network": [],
+    "file": ["read"],
+    "command": [],
+    "provider": [],
+    "mcp": []
+  },
+  "risk_level": "low",
+  "permissions": {
+    "requires_admin_confirmation": false
+  },
+  "compatibility": {
+    "astrbot": {
+      "min": "4.0.0",
+      "max": "5.x"
+    },
+    "sharelife": {
+      "plugin_api": "v1",
+      "sdk": "v4"
+    }
+  },
+  "tags": ["demo", "pipeline", "text"]
+}

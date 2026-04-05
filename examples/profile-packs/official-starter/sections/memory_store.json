@@ -1,0 +1,5 @@
+{
+  "backend": "sqlite",
+  "path": "./data/memory.db",
+  "retention_days": 30
+}

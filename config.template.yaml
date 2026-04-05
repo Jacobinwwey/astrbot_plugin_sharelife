@@ -1,0 +1,141 @@
+# ==========================================
+# AstrBot + Sharelife Self-Documenting Config Template
+# ==========================================
+#
+# Copy this file to your local runtime config (for example, config.local.yaml),
+# then fill required values. Keep this file in source control as documentation;
+# keep real secrets out of git.
+#
+# --------------------------------------------------
+# Model provider block (required for real inference)
+# --------------------------------------------------
+provider: "openai" # allowed: openai | claude | deepseek
+
+providers:
+  openai:
+    # Required if provider == openai
+    api_key: "REPLACE_WITH_OPENAI_KEY"
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-5-mini"
+  claude:
+    # Optional provider profile
+    api_key: ""
+    base_url: ""
+    model: ""
+  deepseek:
+    # Optional provider profile
+    api_key: ""
+    base_url: ""
+    model: ""
+
+# --------------------------------------------------
+# Sharelife plugin block
+# --------------------------------------------------
+# This block is passed to astrbot_plugin_sharelife/main.py as plugin config.
+sharelife:
+  # Optional registry override (empty = bundled templates/index.json)
+  official_registry_url: ""
+
+  # Service state persistence backend
+  state_store:
+    # json (default): one json file per service state
+    # sqlite: one sqlite file for all service states
+    backend: "json"
+    # Used only when backend=sqlite. Empty => {data_dir}/sharelife_state.sqlite3
+    sqlite_file: ""
+    # Import legacy json state into sqlite on startup when the sqlite key is missing
+    migrate_from_json: true
+
+  # Runtime state adapter:
+  # - json_file: persist runtime_state.json under plugin data directory
+  # - in_memory: process memory only (for tests/dev)
+  runtime:
+    adapter: "json_file"
+    merge_mode: "replace" # replace | deep_merge
+    state_file: "" # optional absolute path override
+
+  # Standalone WebUI
+  webui:
+    enabled: true
+    host: "127.0.0.1"
+    port: 8106
+    cors:
+      # Empty => secure default. Set explicit origins for reverse-proxy deployment.
+      allow_origins: ""
+    security_headers:
+      # Keep enabled in production unless your reverse proxy already injects strict headers.
+      enabled: true
+      X-Content-Type-Options: "nosniff"
+      X-Frame-Options: "DENY"
+      Referrer-Policy: "no-referrer"
+      Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+      Content-Security-Policy: "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'"
+    auth:
+      # Keep empty for no auth (local dev only). For real usage set role passwords.
+      member_password: ""
+      reviewer_password: ""
+      # Runtime accepts admin login only when this secret is 12+ chars with no whitespace.
+      # For public/standalone deployment, prefer local secret TOML or SHARELIFE_ADMIN_PASSWORD
+      # instead of committing any real admin secret into tracked config.
+      admin_password: ""
+      token_ttl_seconds: 7200
+      # Reviewer session defaults to 7 days to reduce audit shift re-login churn.
+      reviewer_token_ttl_seconds: 604800
+      allow_query_token: false
+      login_rate_limit_window_seconds: 60
+      login_rate_limit_max_attempts: 10
+      api_rate_limit_window_seconds: 60
+      api_rate_limit_max_requests: 600
+    device_keys:
+      # Reviewer account can bind at most this number of devices.
+      max_reviewer_devices: 3
+    observability:
+      # Guardrail for metrics label cardinality under malformed/high-variance paths
+      metrics_max_paths: 128
+      metrics_overflow_path_label: "/__other__"
+      # Sensitive-route anomaly alerting for admin notifications + Prometheus metric
+      security_alert_window_seconds: 300
+      security_alert_threshold: 3
+      security_alert_cooldown_seconds: 300
+
+  # Bot/profile-pack replication and security
+  profile_pack:
+    signing_key_id: "default"
+    # Used for manifest HMAC signing on export
+    signing_secret: ""
+    # Trusted key map for signature verification on import
+    trusted_signing_keys: {}
+    # Required for include_encrypted_secrets mode
+    secrets_encryption_key: ""
+
+    # Plugin-install execution for extension/profile packs
+    plugin_install:
+      # Default false for safety. Must be explicitly enabled by admin.
+      enabled: false
+      # Timeout per install command in seconds
+      command_timeout_seconds: 180
+      # Comma-separated command prefix allowlist
+      allowed_command_prefixes: "astrbot,pip,uv,npm,pnpm"
+      # Keep false unless you accept plain HTTP sources
+      allow_http_source: false
+      # If true, plugins section apply requires successful install execution evidence
+      require_success_before_apply: false
+
+  feature_flags:
+    enable_enterprise_features: false
+
+# --------------------------------------------------
+# Operator notes
+# --------------------------------------------------
+# 1) First-run onboarding:
+#    bash scripts/sharelife-init-wizard --output config.generated.yaml
+#
+# 2) Fast smoke test commands:
+#    /sharelife_pref
+#    /sharelife_market
+#    /sharelife_trial community/basic
+#    /sharelife_trial_status community/basic
+#
+# 3) Profile replication loop:
+#    /sharelife_profile_export profile/basic 1.0.0
+#    /sharelife_profile_import <artifact_id> --dryrun --plan-id profile-plan-basic --sections plugins,providers

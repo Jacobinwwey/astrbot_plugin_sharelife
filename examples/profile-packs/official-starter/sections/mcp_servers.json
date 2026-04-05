@@ -1,0 +1,5 @@
+{
+  "filesystem": {
+    "endpoint": "https://mcp.example.invalid/filesystem"
+  }
+}

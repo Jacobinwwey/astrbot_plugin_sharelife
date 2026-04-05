@@ -1,0 +1,49 @@
+{
+  "pack_type": "bot_profile_pack",
+  "pack_id": "profile/official-starter",
+  "version": "1.0.0",
+  "created_at": "2026-04-03T00:00:00Z",
+  "astrbot_version": "main",
+  "plugin_compat": ">=0.4.0",
+  "sections": [
+    "astrbot_core",
+    "providers",
+    "plugins",
+    "skills",
+    "personas",
+    "mcp_servers",
+    "sharelife_meta",
+    "memory_store",
+    "conversation_history",
+    "knowledge_base",
+    "environment_manifest"
+  ],
+  "capabilities": [
+    "network.outbound",
+    "provider.access",
+    "mcp.invoke",
+    "memory.export",
+    "conversation.export",
+    "knowledge.export",
+    "environment.reconfigure"
+  ],
+  "redaction_policy": {
+    "mode": "exclude_secrets",
+    "include_sections": [],
+    "mask_paths": [],
+    "drop_paths": []
+  },
+  "hashes": {
+    "sections/astrbot_core.json": "ead653f122307aaf325d9c6473a7ca3eee0e684a5883b935fc51aa34714d00db",
+    "sections/providers.json": "05663166f2ba1b42b9f178aa1260c2246d66a22d4218411f261d29916812604b",
+    "sections/plugins.json": "f133542aba31eb89248db991fc3817a0ebb4ddf78907082934df1bdaf314c71e",
+    "sections/skills.json": "3130a876835f7f40a2d8f837a59c509ac840a00417bb8200bf6f54c15c0e053e",
+    "sections/personas.json": "b42041ac411b087c86ef8e4f630ed8e931e11eed50c89bf2dde4b35ef54af1ea",
+    "sections/mcp_servers.json": "8994152089442724fae64d17c8f3cdea6fe0b57437d9ee3e4d855f4625f91c5e",
+    "sections/sharelife_meta.json": "c66728264498d73a58a24146fedcabc363e87cdbb260a5dc4a1227c70b4a5331",
+    "sections/memory_store.json": "bac9c74efb6ff2aa2c488df58bf356806b32d10416b8c7cef4f958080dbce49d",
+    "sections/conversation_history.json": "5619ee032982b277f286225151d2749204d72b352821f7fbc0ad062e6b0cccc5",
+    "sections/knowledge_base.json": "ca941ea3973af5d6e6b1a0e6ce011cc2f63d7d0b67242bac2c198be61b1bb20d",
+    "sections/environment_manifest.json": "94a68d14fe29565eb938068ab734b6a8db5e98877ef15308b281cf5c025ef6a1"
+  }
+}

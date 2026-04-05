@@ -1,0 +1,11 @@
+{
+  "container_runtime": "docker",
+  "python_version": "3.11",
+  "system_dependencies": [
+    "ffmpeg",
+    "sqlite3"
+  ],
+  "plugin_binaries": [
+    "/usr/local/bin/astrbot-helper"
+  ]
+}

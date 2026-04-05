@@ -1,0 +1,90 @@
+# 存储持久化与冷备执行方案
+
+> 日期：`2026-04-04`  
+> 负责人：Backend / Platform  
+> 范围：本地运行态持久化 + Google Drive 异地冷备
+
+## 1. 问题定义
+
+1. 本地磁盘容量有限，不适合长期保留大量历史数据。
+2. 运行态需要低延迟读写，容灾又需要异地可恢复。
+3. 目标冷备后端为 Google Drive，必须显式处理配额与 API 限制。
+
+## 2. 运行原则
+
+1. 热存储与冷存储严格分离。
+2. 不把 Google Drive 当业务热存储挂载。
+3. 先打包再上传，避免小文件 API 崩塌。
+4. 上传前加密。
+5. 备份/恢复作业必须可审计、状态可确定。
+
+## 3. 参考架构
+
+1. 热平面：
+   - 本地 SQLite/Postgres 承载运行态数据
+2. 备份平面：
+   - 快照构建（DB dump + 必需配置导出）
+   - 打包（`tar.zst` / `tar.gz`）
+   - 加密去重（`restic`）
+   - 远端同步（`rclone crypt` -> Google Drive）
+3. 控制平面：
+   - 备份策略服务
+   - 作业调度 + 保留策略管理
+   - 恢复 prepare/commit
+   - 审计事件日志
+
+## 4. 管理员接口
+
+1. `GET /api/admin/storage/local-summary`
+2. `GET /api/admin/storage/policies`
+3. `POST /api/admin/storage/policies`
+4. `POST /api/admin/storage/jobs/run`
+5. `GET /api/admin/storage/jobs`
+6. `GET /api/admin/storage/jobs/{job_id}`
+7. `POST /api/admin/storage/restore/prepare`
+8. `POST /api/admin/storage/restore/commit`
+9. `POST /api/admin/storage/restore/cancel`
+
+全部接口要求管理员权限并写入审计事件。
+
+## 5. 数据模型（MVP）
+
+1. `storage_policies`
+2. `backup_jobs`
+3. `backup_artifacts`
+4. `restore_jobs`
+5. `storage_audit_events`
+
+## 6. 默认策略
+
+1. RPO：`24h`
+2. 本地保留：最近 `2~3` 个快照
+3. 远端保留：滚动 `30` 天
+4. 上传带宽上限：默认开启
+5. 每日上传预算保护：默认开启
+6. 单活备份作业锁：默认开启
+
+## 7. Drive 限制处理
+
+1. 每日上传硬上限保护。
+2. 通过 rclone 启用分块与断点续传。
+3. 禁止上传明文数据库/PII，强制加密路径。
+4. 通过“打包 + 去重”降低 API 压力。
+
+## 8. SRE 护栏
+
+1. 备份作业成功率 SLI。
+2. 恢复准备校验成功率 SLI。
+3. 存储压力控制：
+   - 高水位阻断全量备份
+   - 降级为关键数据快照并发告警
+4. 周期性 canary restore 演练。
+
+## 9. 风险与控制
+
+1. 风险：密钥管理失误导致备份不可恢复  
+   控制：密钥托管 SOP + 恢复演练门禁。
+2. 风险：打包阶段冲击本地磁盘  
+   控制：打包前配额检测 + 可流式打包。
+3. 风险：备份成功但不可恢复  
+   控制：发布前必须通过 restore-prepare 校验。

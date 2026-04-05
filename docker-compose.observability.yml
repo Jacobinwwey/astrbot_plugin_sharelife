@@ -1,0 +1,33 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    depends_on:
+      - sharelife-webui
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "${SHARELIFE_PROM_HOST_PORT:-9090}:9090"
+    volumes:
+      - ./ops/prometheus/prometheus.sample.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/sharelife-webui-alerts.rules.yml:/etc/prometheus/sharelife-webui-alerts.rules.yml:ro
+      - ${SHARELIFE_DOCKER_DATA_DIR:-./output/docker-data}/prometheus:/prometheus
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "sharelife-change-me"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${SHARELIFE_GRAFANA_HOST_PORT:-3000}:3000"
+    volumes:
+      - ./ops/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./ops/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ${SHARELIFE_DOCKER_DATA_DIR:-./output/docker-data}/grafana:/var/lib/grafana

@@ -1,0 +1,182 @@
+{
+  "schema_version": "v1",
+  "generated_at": "2026-04-05T07:17:53.365485+00:00",
+  "rows": [
+    {
+      "pack_id": "profile/official-starter",
+      "template_id": "profile/official-starter",
+      "title": "Official Starter",
+      "description": "Starter baseline profile-pack for first import, compare, and apply walkthrough.",
+      "version": "1.0.1",
+      "pack_type": "bot_profile_pack",
+      "artifact_id": "public:official:profile-official-starter-1-0-1",
+      "import_id": "public:official-import:profile-official-starter-1-0-1",
+      "source_submission_id": "official:profile-official-starter-1-0-1",
+      "filename": "profile-official-starter-1-0-1.zip",
+      "sha256": "be2d8c98a0a6b33aa87323fc6c4f11790ceea7ec818346dcbd570b88fb63e344",
+      "size_bytes": 2159,
+      "sections": [
+        "astrbot_core",
+        "providers",
+        "plugins",
+        "skills",
+        "personas",
+        "mcp_servers",
+        "sharelife_meta"
+      ],
+      "redaction_mode": "exclude_secrets",
+      "capability_summary": {
+        "declared": [
+          "file.read",
+          "file.write",
+          "mcp.invoke",
+          "provider.access"
+        ],
+        "derived": [
+          "file.read",
+          "file.write",
+          "mcp.invoke",
+          "provider.access"
+        ],
+        "high_risk_declared": [],
+        "missing_declared": [],
+        "high_risk_count": 0
+      },
+      "compatibility_matrix": {
+        "compatibility": "compatible",
+        "issues": []
+      },
+      "review_evidence": {
+        "review_labels": [
+          "approved",
+          "official_profile_pack",
+          "risk_low"
+        ],
+        "warning_flags": [],
+        "risk_level": "low",
+        "redaction_mode": "exclude_secrets"
+      },
+      "featured": true,
+      "featured_note": "Official starter profile for first-time import/dry-run/apply walkthrough.",
+      "featured_by": "official:sharelife",
+      "featured_at": "2026-04-05T00:00:00+00:00",
+      "review_note": "Bundled official profile-pack baseline for market reference.",
+      "review_labels": [
+        "approved",
+        "official_profile_pack",
+        "risk_low"
+      ],
+      "warning_flags": [],
+      "risk_level": "low",
+      "scan_summary": {
+        "risk_level": "low",
+        "review_labels": [
+          "approved",
+          "official_profile_pack",
+          "risk_low"
+        ],
+        "warning_flags": []
+      },
+      "compatibility": "compatible",
+      "compatibility_issues": [],
+      "source_channel": "bundled_official",
+      "maintainer": "Sharelife",
+      "published_at": "2026-04-05T00:00:00+00:00",
+      "engagement": {
+        "installs": 248,
+        "trial_requests": 61
+      },
+      "package_path": "/market/packages/official/profile-official-starter-1-0-1.zip",
+      "catalog_origin": "public",
+      "runtime_available": false
+    },
+    {
+      "pack_id": "profile/official-safe-reference",
+      "template_id": "profile/official-safe-reference",
+      "title": "Official Safe Reference",
+      "description": "Safety-first reference profile-pack for strict apply, rollback, and audit review.",
+      "version": "1.0.1",
+      "pack_type": "bot_profile_pack",
+      "artifact_id": "public:official:profile-official-safe-reference-1-0-1",
+      "import_id": "public:official-import:profile-official-safe-reference-1-0-1",
+      "source_submission_id": "official:profile-official-safe-reference-1-0-1",
+      "filename": "profile-official-safe-reference-1-0-1.zip",
+      "sha256": "fb26c403571e2f840b30dc665c1d4422d275fec226a01a4ee097aa3e3cfc49ad",
+      "size_bytes": 2174,
+      "sections": [
+        "astrbot_core",
+        "providers",
+        "plugins",
+        "skills",
+        "personas",
+        "mcp_servers",
+        "sharelife_meta"
+      ],
+      "redaction_mode": "exclude_secrets",
+      "capability_summary": {
+        "declared": [
+          "file.read",
+          "file.write",
+          "mcp.invoke",
+          "provider.access"
+        ],
+        "derived": [
+          "file.read",
+          "file.write",
+          "mcp.invoke",
+          "provider.access"
+        ],
+        "high_risk_declared": [],
+        "missing_declared": [],
+        "high_risk_count": 0
+      },
+      "compatibility_matrix": {
+        "compatibility": "compatible",
+        "issues": []
+      },
+      "review_evidence": {
+        "review_labels": [
+          "approved",
+          "official_profile_pack",
+          "risk_low"
+        ],
+        "warning_flags": [],
+        "risk_level": "low",
+        "redaction_mode": "exclude_secrets"
+      },
+      "featured": true,
+      "featured_note": "Official safety-first reference profile for review and compare workflows.",
+      "featured_by": "official:sharelife",
+      "featured_at": "2026-04-05T00:00:00+00:00",
+      "review_note": "Bundled official profile-pack baseline for safety-first market reference.",
+      "review_labels": [
+        "approved",
+        "official_profile_pack",
+        "risk_low"
+      ],
+      "warning_flags": [],
+      "risk_level": "low",
+      "scan_summary": {
+        "risk_level": "low",
+        "review_labels": [
+          "approved",
+          "official_profile_pack",
+          "risk_low"
+        ],
+        "warning_flags": []
+      },
+      "compatibility": "compatible",
+      "compatibility_issues": [],
+      "source_channel": "bundled_official",
+      "maintainer": "Sharelife",
+      "published_at": "2026-04-05T00:00:00+00:00",
+      "engagement": {
+        "installs": 179,
+        "trial_requests": 47
+      },
+      "package_path": "/market/packages/official/profile-official-safe-reference-1-0-1.zip",
+      "catalog_origin": "public",
+      "runtime_available": false
+    }
+  ]
+}

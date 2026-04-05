@@ -1,0 +1,979 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sharelife Admin Console</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body class="console-page console-page-admin">
+    <div class="console-layout">
+      <aside class="console-sidebar">
+        <div class="sidebar-brand">
+          <div class="sidebar-logo" aria-hidden="true">SL</div>
+          <div>
+            <div class="sidebar-title" data-i18n-key="brand.name">Sharelife</div>
+            <div class="sidebar-subtitle" data-i18n-key="console.admin.subtitle">Admin Console</div>
+          </div>
+        </div>
+        <nav class="sidebar-nav" aria-label="Admin console navigation">
+          <a class="sidebar-link is-active" href="#section-overview" data-i18n-key="console.nav.overview">Overview</a>
+          <a class="sidebar-link" href="#section-preferences" data-i18n-key="console.nav.preferences">Preferences</a>
+          <a class="sidebar-link" href="#section-profile-pack" data-i18n-key="console.nav.profile_pack">Profile Pack</a>
+          <a class="sidebar-link" href="#section-admin-submissions" data-i18n-key="console.nav.moderation">Moderation</a>
+          <a class="sidebar-link" href="#submissionWorkspaceSection" data-i18n-key="console.nav.submission_workspace">Submission Workspace</a>
+          <a class="sidebar-link" href="#section-reliability" data-i18n-key="console.nav.ops">Ops</a>
+          <a class="sidebar-link" href="#section-response" data-i18n-key="console.nav.response">Response Log</a>
+        </nav>
+      </aside>
+
+      <main class="console-main">
+        <section class="top-utility-bar" id="section-overview" data-console-scope="all">
+          <div class="locale-cluster">
+            <div class="detail-card-label" data-i18n-key="ui.locale.label">UI Locale</div>
+            <div class="locale-quick-row" role="group" aria-label="UI locale quick switch">
+              <button type="button" class="locale-pill" data-locale-option="en-US" aria-pressed="false">
+                <span data-i18n-key="option.locale.en_us">English</span>
+              </button>
+              <button type="button" class="locale-pill" data-locale-option="zh-CN" aria-pressed="false">
+                <span data-i18n-key="option.locale.zh_cn">中文</span>
+              </button>
+              <button type="button" class="locale-pill" data-locale-option="ja-JP" aria-pressed="false">
+                <span data-i18n-key="option.locale.ja_jp">日本語</span>
+              </button>
+            </div>
+            <select id="uiLocale">
+              <option value="en-US" data-i18n-key="option.locale.en_us">English</option>
+              <option value="zh-CN" data-i18n-key="option.locale.zh_cn">中文</option>
+              <option value="ja-JP" data-i18n-key="option.locale.ja_jp">日本語</option>
+            </select>
+          </div>
+          <div class="inline-form wrap top-quick-links">
+            <a id="memberConsoleLink" href="/member" class="market-link" data-i18n-key="console.switch.member">Member Console</a>
+            <a id="reviewerConsoleLink" href="/reviewer" class="market-link" data-i18n-key="console.switch.reviewer">Reviewer Console</a>
+            <a id="adminConsoleLink" href="/admin" class="market-link hidden" data-i18n-key="console.switch.admin">Admin Console</a>
+            <a id="marketConsoleLink" href="/market" class="market-link" data-i18n-key="console.switch.market">Market Hub</a>
+            <a id="fullConsoleLink" href="/" class="market-link" data-i18n-key="console.switch.full">Unified Console</a>
+            <button id="btnToggleDeveloperMode" type="button" class="btn-ghost developer-mode-toggle" data-i18n-key="button.developer_mode_off">Developer Mode: OFF</button>
+          </div>
+        </section>
+
+        <header class="hero" id="section-hero">
+          <div>
+            <h1 data-i18n-key="brand.name">Sharelife</h1>
+            <p data-i18n-key="console.admin.hero.subtitle">Admin workspace for governance review, rollout, and rollback.</p>
+            <div class="hero-badge-row">
+              <span class="pill is-success" data-i18n-key="hero.badge.signed_verified">Signed verified</span>
+              <span class="pill is-success" data-i18n-key="hero.badge.rollback_safe">Rollback safe</span>
+              <span class="pill is-success" data-i18n-key="hero.badge.audit_trace">Audit trace</span>
+            </div>
+          </div>
+          <div class="status-box">
+            <div id="developerModeLine" data-i18n-key="developer_mode.status.off">Developer mode: off</div>
+            <div id="healthLine">health: loading...</div>
+            <div id="authLine">auth: unknown</div>
+            <div id="authRoleLine">role: not logged in</div>
+            <div id="consoleScopeLine">view: admin</div>
+          </div>
+        </header>
+
+        <section class="card console-switch" id="section-console-surface" data-console-scope="all">
+      <h2 data-i18n-key="console.switch.heading">Console Surface</h2>
+      <small id="consoleScopeHint" data-i18n-key="console.switch.hint.admin">Admin console focuses on review/apply/governance operations.</small>
+        </section>
+
+        <section id="authPanel" class="card hidden" data-console-scope="all">
+      <h2 data-i18n-key="console.section.login">Login</h2>
+      <div class="inline-form">
+        <select id="authRole">
+          <option value="admin" data-i18n-key="option.admin">admin</option>
+        </select>
+        <input id="authPassword" type="password" data-i18n-placeholder-key="placeholder.auth_password" placeholder="WebUI password" />
+        <button id="loginBtn" type="button" data-i18n-key="button.login">Login</button>
+      </div>
+      <div id="reviewerAuthFields" class="inline-form wrap hidden">
+        <input id="authReviewerId" type="text" data-i18n-placeholder-key="placeholder.reviewer_id" placeholder="reviewer_id" />
+        <input id="authReviewerDeviceKey" type="password" data-i18n-placeholder-key="placeholder.reviewer_device_key" placeholder="reviewer device key" />
+      </div>
+      <small id="authHelp" data-i18n-key="auth.help.disabled">If auth is disabled in plugin config, this panel stays hidden.</small>
+        </section>
+
+        <section class="card developer-only-card" id="section-actor-context" data-console-scope="all">
+      <h2 data-i18n-key="console.section.actor">Actor Context</h2>
+      <div class="grid actor-grid">
+        <label>
+          <span data-i18n-key="actor.user_id">User ID</span>
+          <input id="userId" type="text" value="webui-user" />
+        </label>
+        <label>
+          <span data-i18n-key="actor.role">Role</span>
+          <select id="role">
+            <option value="member" data-i18n-key="option.member">member</option>
+            <option value="reviewer" data-i18n-key="option.reviewer">reviewer</option>
+            <option value="admin" data-i18n-key="option.admin">admin</option>
+          </select>
+        </label>
+      </div>
+      <details class="advanced-block">
+        <summary data-i18n-key="console.session.advanced">Advanced session fields</summary>
+        <div class="grid">
+          <label>
+            <span data-i18n-key="actor.session_id">Session ID</span>
+            <input id="sessionId" type="text" value="webui-session" />
+          </label>
+          <label>
+            <span data-i18n-key="actor.admin_id">Admin ID</span>
+            <input id="adminId" type="text" value="webui-admin" />
+          </label>
+        </div>
+      </details>
+      <p class="note" data-i18n-key="console.note.auth_binding">When WebUI auth is enabled, admin capability is bound to the login token. The manual role field is only advisory for no-auth local mode.</p>
+        </section>
+
+        <section class="card developer-only-card" id="section-preferences" data-console-scope="all">
+      <h2 data-i18n-key="console.section.preferences">Preferences</h2>
+      <div class="inline-form wrap">
+        <button id="btnPrefGet" type="button" data-i18n-key="button.load_preferences">Load Preferences</button>
+        <select id="modeValue">
+          <option value="subagent_driven" data-i18n-key="option.mode.subagent_driven">subagent_driven</option>
+          <option value="inline_execution" data-i18n-key="option.mode.inline_execution">inline_execution</option>
+        </select>
+        <button id="btnModeSet" type="button" data-i18n-key="button.set_mode">Set Mode</button>
+        <select id="observeValue">
+          <option value="true" data-i18n-key="preferences.observe.on">observe on</option>
+          <option value="false" data-i18n-key="preferences.observe.off">observe off</option>
+        </select>
+        <button id="btnObserveSet" type="button" data-i18n-key="button.set_observe">Set Observe</button>
+      </div>
+        </section>
+
+        <section class="card developer-only-card" data-console-scope="all">
+      <div class="workspace-shell-header">
+        <div>
+          <h2 data-i18n-key="workspace.context_heading">Workspace Context</h2>
+          <div id="workspaceRoute" class="scan-summary" data-i18n-key="workspace.route_idle">route: idle</div>
+          <p id="workspaceSummary" class="note" data-i18n-key="workspace.summary_idle">Select a template or submission row to create a persistent workspace route.</p>
+        </div>
+      </div>
+      <details class="advanced-block workspace-context-actions">
+        <summary data-i18n-key="workspace.context.actions">Workspace route actions</summary>
+        <div class="inline-form wrap">
+          <button id="btnReloadWorkspace" type="button" data-i18n-key="button.reload_workspace">Reload Workspace</button>
+          <button id="btnClearWorkspace" type="button" data-i18n-key="button.clear_workspace">Clear Workspace</button>
+        </div>
+      </details>
+        </section>
+
+        <section class="card market-hub-card" id="section-market" data-console-scope="member">
+      <div class="market-headline">
+        <div>
+          <h2 data-i18n-key="market.hub.heading">Market Hub</h2>
+          <p class="note" data-i18n-key="market.hub.note">Browse by cards first. Use advanced controls only when you need strict filtering and raw submit fields.</p>
+        </div>
+        <div class="inline-form wrap">
+          <button id="btnTemplates" class="btn-primary" type="button" data-i18n-key="button.list_templates">List Templates</button>
+          <button id="btnOpenSubmitWizard" class="btn-ghost" type="button" data-i18n-key="button.open_submit_wizard">Submit With Wizard</button>
+        </div>
+      </div>
+      <div class="inline-form wrap market-quick-filter">
+        <input id="templateFilterId" type="text" data-i18n-placeholder-key="placeholder.template_filter_id" placeholder="search template_id" />
+        <input id="templateCategoryFilter" type="text" data-i18n-placeholder-key="placeholder.template_category_filter" placeholder="category" />
+        <select id="templateSortBy">
+          <option value="template_id" data-i18n-key="option.template_sort.template_id">sort template_id</option>
+          <option value="recent_activity" data-i18n-key="option.template_sort.recent_activity">sort recent_activity</option>
+          <option value="trial_requests" data-i18n-key="option.template_sort.trial_requests">sort trial_requests</option>
+          <option value="installs" data-i18n-key="option.template_sort.installs">sort installs</option>
+        </select>
+        <select id="templateSortOrder">
+          <option value="asc" data-i18n-key="option.sort.asc">asc</option>
+          <option value="desc" data-i18n-key="option.sort.desc">desc</option>
+        </select>
+      </div>
+      <div class="market-chip-row">
+        <button type="button" class="chip-button" data-market-chip="" data-i18n-key="market.chip.all" aria-pressed="true">All</button>
+        <button type="button" class="chip-button" data-market-chip="coding" data-i18n-key="market.chip.coding">Coding</button>
+        <button type="button" class="chip-button" data-market-chip="research" data-i18n-key="market.chip.research">Research</button>
+        <button type="button" class="chip-button" data-market-chip="support" data-i18n-key="market.chip.support">Support</button>
+      </div>
+      <details id="templateAdvancedFilters" class="advanced-block">
+        <summary data-i18n-key="market.advanced_filters">Advanced filters and raw submit controls</summary>
+        <div class="inline-form wrap">
+          <input id="templateTagFilter" type="text" data-i18n-placeholder-key="placeholder.template_tag_filter" placeholder="filter tag" />
+          <input id="templateSourceChannelFilter" type="text" data-i18n-placeholder-key="placeholder.template_source_channel_filter" placeholder="filter source_channel" />
+          <select id="templateRiskFilter">
+            <option value="" data-i18n-key="option.risk.all">all risk</option>
+            <option value="high" data-i18n-key="option.risk.high">high</option>
+            <option value="medium" data-i18n-key="option.risk.medium">medium</option>
+            <option value="low" data-i18n-key="option.risk.low">low</option>
+          </select>
+          <input id="templateReviewLabelFilter" type="text" data-i18n-placeholder-key="placeholder.template_review_label_filter" placeholder="filter review_label" />
+          <input id="templateWarningFlagFilter" type="text" data-i18n-placeholder-key="placeholder.template_warning_flag_filter" placeholder="filter warning_flag" />
+          <input id="submitTemplateId" type="text" data-i18n-placeholder-key="placeholder.submit_template_id" placeholder="template_id" value="community/basic" />
+          <input id="submitVersion" type="text" data-i18n-placeholder-key="placeholder.submit_version" placeholder="version" value="1.0.0" />
+          <input id="submitPackageFile" type="file" accept=".zip,.json,.txt,.yaml,.yml" />
+          <button id="btnSubmitTemplate" type="button" data-i18n-key="button.submit_template">Submit Template</button>
+        </div>
+      </details>
+      <div class="inline-form wrap market-action-strip">
+        <input id="trialTemplateId" type="text" data-i18n-placeholder-key="placeholder.trial_template_id" placeholder="template_id" value="community/basic" />
+        <button id="btnTrial" type="button" data-i18n-key="button.request_trial">Request Trial</button>
+        <button id="btnInstall" class="btn-primary" type="button" data-i18n-key="button.install_template">Install Template</button>
+        <button id="btnPrompt" type="button" data-i18n-key="button.build_prompt">Build Prompt</button>
+        <button id="btnPackage" type="button" data-i18n-key="button.build_package">Build Package</button>
+        <button id="btnTemplateDetail" type="button" data-i18n-key="button.load_template_detail">Load Template Detail</button>
+        <button id="btnPackageDownload" type="button" data-i18n-key="button.download_package">Download Package</button>
+      </div>
+      <div id="templateListState" class="collection-state is-neutral" data-i18n-key="templates.idle">Load templates to browse published packages.</div>
+      <div class="market-insight-grid">
+        <section class="insight-panel">
+          <h3 data-i18n-key="market.featured.heading">Featured</h3>
+          <div id="featuredTemplateState" class="collection-state is-neutral" data-i18n-key="market.featured.idle">Load templates to compute featured candidate.</div>
+          <div id="featuredTemplateCard" class="featured-template-card"></div>
+        </section>
+        <section class="insight-panel">
+          <h3 data-i18n-key="market.trending.heading">Trending</h3>
+          <div id="trendingTemplateState" class="collection-state is-neutral" data-i18n-key="market.trending.idle">Load templates to compute trending ranking.</div>
+          <div id="trendingTemplateList" class="trending-template-list"></div>
+        </section>
+      </div>
+      <div id="templateCardGrid" class="template-grid"></div>
+      <div class="table-wrap">
+        <table id="templatesTable">
+          <thead>
+            <tr>
+              <th data-i18n-key="table.header.template">Template</th>
+              <th data-i18n-key="table.header.version">Version</th>
+              <th data-i18n-key="table.header.category">Category</th>
+              <th data-i18n-key="table.header.tags">Tags</th>
+              <th data-i18n-key="table.header.risk">Risk</th>
+              <th data-i18n-key="table.header.labels">Labels</th>
+              <th data-i18n-key="table.header.flags">Flags</th>
+              <th data-i18n-key="table.header.source">Source</th>
+              <th data-i18n-key="table.header.maintainer">Maintainer</th>
+              <th data-i18n-key="table.header.signals">Signals</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" data-console-scope="member">
+      <h2 data-i18n-key="console.section.trial_status">Trial Status</h2>
+      <div class="inline-form wrap">
+        <button id="btnTrialStatus" type="button" data-i18n-key="button.refresh_trial_status">Refresh Trial Status</button>
+      </div>
+      <div id="trialStatusSummary" class="scan-summary" data-i18n-key="trial.summary_idle">No trial status loaded yet.</div>
+      <pre id="trialStatusDetails" class="scan-details"></pre>
+    </section>
+
+    <section class="card" id="section-admin-apply" data-console-scope="admin">
+      <h2 data-i18n-key="console.section.admin_apply">Admin Apply Workflow</h2>
+      <p class="note" data-i18n-key="console.note.admin_apply">Admin-only dry-run, apply, and rollback controls for local governance verification.</p>
+      <div class="grid">
+        <label>
+          <span data-i18n-key="field.plan_id">Plan ID</span>
+          <input id="dryrunPlanId" type="text" value="plan-community-basic" />
+        </label>
+        <label>
+          <span data-i18n-key="field.template_id">Template ID</span>
+          <input id="dryrunTemplateId" type="text" value="community/basic" />
+        </label>
+        <label>
+          <span data-i18n-key="field.version">Version</span>
+          <input id="dryrunVersion" type="text" value="1.0.0" />
+        </label>
+      </div>
+      <div class="inline-form wrap">
+        <button id="btnDryrunPlan" type="button" data-i18n-key="button.prepare_dryrun">Prepare Dry-Run</button>
+        <button id="btnApplyPlan" type="button" data-i18n-key="button.apply_plan">Apply Plan</button>
+        <button id="btnRollbackPlan" type="button" data-i18n-key="button.rollback_plan">Rollback Plan</button>
+      </div>
+      <div id="dryrunSummary" class="scan-summary" data-i18n-key="dryrun.summary_idle">No apply plan prepared yet.</div>
+      <pre id="dryrunDetails" class="scan-details"></pre>
+    </section>
+
+    <section class="card" id="section-profile-pack" data-console-scope="admin">
+      <h2 data-i18n-key="console.section.bot_profile_pack">Bot Profile Pack</h2>
+      <p class="note" data-i18n-key="console.note.profile_pack">Export/import bot runtime profile with section-level dry-run and rollback.</p>
+      <div class="grid">
+        <label>
+          <span data-i18n-key="field.profile_pack_id">Profile Pack ID</span>
+          <input id="profilePackId" type="text" value="profile/basic" />
+        </label>
+        <label>
+          <span data-i18n-key="field.version">Version</span>
+          <input id="profilePackVersion" type="text" value="1.0.0" />
+        </label>
+        <label>
+          <span data-i18n-key="field.pack_type">Pack Type</span>
+          <select id="profilePackType">
+            <option value="bot_profile_pack" data-i18n-key="option.pack_type.bot_profile_pack">Bot Profile Pack (Full Bot Setup)</option>
+            <option value="extension_pack" data-i18n-key="option.pack_type.extension_pack">Extension Pack (Skills/Personas/MCP/Plugins)</option>
+          </select>
+        </label>
+        <label>
+          <span data-i18n-key="field.redaction_mode">Redaction Mode</span>
+          <select id="profilePackRedactionMode">
+            <option value="exclude_secrets" data-i18n-key="option.redaction.exclude_secrets">Exclude Secrets (Recommended)</option>
+            <option value="exclude_provider" data-i18n-key="option.redaction.exclude_provider">Exclude Provider Section</option>
+            <option value="include_provider_no_key" data-i18n-key="option.redaction.include_provider_no_key">Include Provider (No API Keys)</option>
+            <option value="include_encrypted_secrets" data-i18n-key="option.redaction.include_encrypted_secrets">Include Encrypted Secrets (Requires Key)</option>
+          </select>
+        </label>
+        <label>
+          <span data-i18n-key="field.sections_optional_csv">Sections (comma separated, optional)</span>
+          <input id="profilePackSections" type="text" data-i18n-placeholder-key="placeholder.profile_pack_sections" placeholder="astrbot_core,providers,memory_store" />
+        </label>
+        <label>
+          <span data-i18n-key="field.mask_paths_optional_csv">Mask Paths (comma separated, optional)</span>
+          <input id="profilePackMaskPaths" type="text" data-i18n-placeholder-key="placeholder.profile_pack_mask_paths" placeholder="providers.openai.organization" />
+          <small id="profilePackMaskPathError" class="error-note"></small>
+        </label>
+        <label>
+          <span data-i18n-key="field.drop_paths_optional_csv">Drop Paths (comma separated, optional)</span>
+          <input id="profilePackDropPaths" type="text" data-i18n-placeholder-key="placeholder.profile_pack_drop_paths" placeholder="sharelife_meta.owner" />
+          <small id="profilePackDropPathError" class="error-note"></small>
+        </label>
+      </div>
+      <div class="inline-form wrap">
+        <button id="btnProfilePackExport" type="button" data-i18n-key="button.profile_export">Export Profile Pack</button>
+        <button id="btnProfilePackDownloadExport" type="button" data-i18n-key="button.profile_download_export">Download Export</button>
+        <button id="btnProfilePackListExports" type="button" data-i18n-key="button.profile_list_exports">List Exports</button>
+      </div>
+      <div class="inline-form wrap">
+        <input id="profilePackFile" type="file" accept=".zip" />
+        <button id="btnProfilePackImport" type="button" data-i18n-key="button.profile_import">Import Profile Pack</button>
+        <button id="btnProfilePackListImports" type="button" data-i18n-key="button.profile_list_imports">List Imports</button>
+      </div>
+      <div class="inline-form wrap">
+        <input id="profilePackImportArtifactId" type="text" data-i18n-placeholder-key="placeholder.profile_pack_import_artifact_id" placeholder="artifact_id (optional)" />
+        <button id="btnProfilePackImportFromExport" type="button" data-i18n-key="button.profile_import_from_export">Import From Export Artifact</button>
+        <button id="btnProfilePackImportDryrun" type="button" data-i18n-key="button.profile_import_dryrun">Import + Dry-Run</button>
+      </div>
+      <div class="grid">
+        <label>
+          <span data-i18n-key="field.import_id">Import ID</span>
+          <input id="profilePackImportId" type="text" data-i18n-placeholder-key="placeholder.profile_pack_import_id" placeholder="import_id" />
+        </label>
+        <label>
+          <span data-i18n-key="field.plan_id">Plan ID</span>
+          <input id="profilePackPlanId" type="text" value="profile-plan-basic" />
+        </label>
+      </div>
+      <div class="profile-pack-section-shell">
+        <div class="detail-card-label" data-i18n-key="console.section.selected_sections">Selected Sections</div>
+        <div id="profilePackSectionList" class="profile-pack-sections"></div>
+      </div>
+      <div class="inline-form wrap">
+        <button id="btnProfilePackDryrun" type="button" data-i18n-key="button.profile_dryrun_selected">Dry-Run Selected Sections</button>
+        <button id="btnProfilePackApply" type="button" data-i18n-key="button.profile_apply_plan">Apply Profile Plan</button>
+        <button id="btnProfilePackRollback" type="button" data-i18n-key="button.profile_rollback_plan">Rollback Profile Plan</button>
+      </div>
+      <details id="profilePackPluginInstallAdvanced" class="advanced-block">
+        <summary data-i18n-key="profile_pack.advanced.plugin_install">Plugin install execution controls</summary>
+        <div class="inline-form wrap">
+          <button id="btnProfilePackPluginPlan" type="button" data-i18n-key="button.profile_plugin_plan">Plugin Install Plan</button>
+          <input id="profilePackPluginIds" type="text" data-i18n-placeholder-key="placeholder.profile_pack_plugin_ids" placeholder="plugin_ids for confirm (csv, optional)" />
+          <button id="btnProfilePackPluginConfirm" type="button" data-i18n-key="button.profile_plugin_confirm">Confirm Plugin Install</button>
+          <label class="inline-toggle">
+            <input id="profilePackPluginDryRun" type="checkbox" />
+            <span data-i18n-key="field.dryrun_execute">Dry-Run execute</span>
+          </label>
+          <button id="btnProfilePackPluginExecute" type="button" data-i18n-key="button.profile_plugin_execute">Execute Plugin Install</button>
+        </div>
+      </details>
+      <div id="profilePackSummary" class="scan-summary" data-i18n-key="profile_pack.summary_idle">No profile pack operation yet.</div>
+      <div class="profile-pack-compat-shell">
+        <div class="detail-card-label" data-i18n-key="profile_pack.compatibility.heading">Compatibility Guidance</div>
+        <div id="profilePackCompatibilitySummary" class="note" data-i18n-key="profile_pack.compatibility.idle">No compatibility guidance yet.</div>
+        <div id="profilePackCompatibilityIssues" class="warning-list hidden"></div>
+        <div class="detail-card-label" data-i18n-key="profile_pack.compatibility.actions_heading">Action Checklist</div>
+        <div id="profilePackCompatibilityActions" class="warning-list hidden"></div>
+        <div id="profilePackCompatibilityActionStatus" class="note hidden"></div>
+        <pre id="profilePackCompatibilityDeveloper" class="scan-details hidden"></pre>
+      </div>
+      <pre id="profilePackDetails" class="scan-details"></pre>
+      <div class="inline-form wrap profile-pack-record-filter-row">
+        <input id="profilePackRecordPackFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_record_pack_filter" placeholder="quick filter pack_id" />
+        <button id="btnProfilePackClearRecordFilter" type="button" data-i18n-key="button.profile_clear_record_filter">Clear Record Filter</button>
+      </div>
+      <div id="profilePackRecords" class="profile-pack-records" data-i18n-key="profile_pack.records_idle">No profile pack records loaded yet.</div>
+
+      <div class="detail-card-label" data-i18n-key="profile_pack.market.title">Profile Pack Market</div>
+      <div class="inline-form wrap">
+        <input id="profilePackSubmissionArtifactId" type="text" data-i18n-placeholder-key="profile_pack.market.submit_placeholder" placeholder="artifact_id for community submit" />
+        <button id="btnProfilePackSubmitCommunity" type="button" data-i18n-key="profile_pack.market.submit_btn">Submit To Community</button>
+      </div>
+      <div class="inline-form wrap">
+        <input id="profilePackSubmissionStatusFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_submission_status_filter" placeholder="status filter (pending/approved/rejected)" />
+        <input id="profilePackSubmissionPackFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_submission_pack_filter" placeholder="filter pack_id" />
+        <select id="profilePackSubmissionPackTypeFilter">
+          <option value="" data-i18n-key="option.pack_type.all">All Pack Types</option>
+          <option value="bot_profile_pack" data-i18n-key="option.pack_type.bot_profile_pack">Bot Profile Pack (Full Bot Setup)</option>
+          <option value="extension_pack" data-i18n-key="option.pack_type.extension_pack">Extension Pack (Skills/Personas/MCP/Plugins)</option>
+        </select>
+        <select id="profilePackSubmissionRiskFilter">
+          <option value="" data-i18n-key="option.risk.all">all risk</option>
+          <option value="high" data-i18n-key="option.risk.high">high</option>
+          <option value="medium" data-i18n-key="option.risk.medium">medium</option>
+          <option value="low" data-i18n-key="option.risk.low">low</option>
+        </select>
+        <input id="profilePackSubmissionReviewLabelFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_submission_review_label_filter" placeholder="filter review_label" />
+        <input id="profilePackSubmissionWarningFlagFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_submission_warning_flag_filter" placeholder="filter warning_flag" />
+        <button id="btnProfilePackListPackSubmissions" type="button" data-i18n-key="profile_pack.market.submissions_btn">List Pack Submissions</button>
+      </div>
+      <div id="profilePackSubmissionState" class="collection-state is-neutral" data-i18n-key="profile_pack.market.submissions_idle">Load profile-pack submissions to review pending community packs.</div>
+      <div class="table-wrap">
+        <table id="profilePackSubmissionTable">
+          <thead>
+            <tr>
+              <th data-i18n-key="table.header.submission">Submission</th>
+              <th data-i18n-key="table.header.pack">Pack</th>
+              <th data-i18n-key="table.header.status">Status</th>
+              <th data-i18n-key="table.header.risk">Risk</th>
+              <th data-i18n-key="table.header.labels">Labels</th>
+              <th data-i18n-key="table.header.flags">Flags</th>
+              <th data-i18n-key="table.header.review_note">Review Note</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="inline-form wrap">
+        <input id="profilePackDecisionSubmissionId" type="text" data-i18n-placeholder-key="placeholder.profile_pack_decision_submission_id" placeholder="submission_id" />
+        <select id="profilePackDecisionValue">
+          <option value="approve" data-i18n-key="option.decision.approve">approve</option>
+          <option value="reject" data-i18n-key="option.decision.reject">reject</option>
+        </select>
+        <input id="profilePackDecisionReviewLabels" type="text" data-i18n-placeholder-key="placeholder.profile_pack_decision_review_labels" placeholder="review_labels comma separated" />
+        <input id="profilePackDecisionReviewNote" type="text" data-i18n-placeholder-key="placeholder.profile_pack_decision_review_note" placeholder="review note" />
+        <button id="btnProfilePackDecideSubmission" type="button" data-i18n-key="profile_pack.market.decide_btn">Decide Pack Submission</button>
+      </div>
+      <div class="inline-form wrap">
+        <input id="profilePackCatalogPackFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_catalog_pack_filter" placeholder="filter catalog pack_id" />
+        <select id="profilePackCatalogPackTypeFilter">
+          <option value="" data-i18n-key="option.pack_type.all">All Pack Types</option>
+          <option value="bot_profile_pack" data-i18n-key="option.pack_type.bot_profile_pack">Bot Profile Pack (Full Bot Setup)</option>
+          <option value="extension_pack" data-i18n-key="option.pack_type.extension_pack">Extension Pack (Skills/Personas/MCP/Plugins)</option>
+        </select>
+        <select id="profilePackCatalogRiskFilter">
+          <option value="" data-i18n-key="option.risk.all">all risk</option>
+          <option value="high" data-i18n-key="option.risk.high">high</option>
+          <option value="medium" data-i18n-key="option.risk.medium">medium</option>
+          <option value="low" data-i18n-key="option.risk.low">low</option>
+        </select>
+        <select id="profilePackCatalogFeaturedFilter">
+          <option value="" data-i18n-key="option.featured_status.all">all featured status</option>
+          <option value="true" data-i18n-key="option.featured_status.true">featured only</option>
+          <option value="false" data-i18n-key="option.featured_status.false">non-featured only</option>
+        </select>
+        <input id="profilePackCatalogReviewLabelFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_catalog_review_label_filter" placeholder="filter catalog review_label" />
+        <input id="profilePackCatalogWarningFlagFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_catalog_warning_flag_filter" placeholder="filter catalog warning_flag" />
+        <button id="btnProfilePackListCatalog" type="button" data-i18n-key="profile_pack.market.catalog_btn">List Catalog</button>
+      </div>
+      <div id="profilePackCatalogState" class="collection-state is-neutral" data-i18n-key="profile_pack.market.catalog_idle">Load profile-pack catalog to browse published packs.</div>
+      <div class="inline-form wrap">
+        <input id="profilePackCatalogPackId" type="text" data-i18n-placeholder-key="placeholder.profile_pack_catalog_pack_id" placeholder="pack_id for catalog detail" />
+        <input id="profilePackCatalogCompareSections" type="text" data-i18n-placeholder-key="placeholder.profile_pack_catalog_compare_sections" placeholder="sections for compare (optional)" />
+        <button id="btnProfilePackCatalogDetail" type="button" data-i18n-key="profile_pack.market.catalog_detail_btn">Load Catalog Detail</button>
+        <button id="btnProfilePackCatalogCompare" type="button" data-i18n-key="button.profile_catalog_compare_runtime">Compare With Runtime</button>
+      </div>
+      <div class="inline-form wrap">
+        <input id="profilePackFeaturedPackId" type="text" data-i18n-placeholder-key="placeholder.profile_pack_featured_pack_id" placeholder="pack_id for featured toggle" />
+        <select id="profilePackFeaturedToggle">
+          <option value="true" data-i18n-key="option.featured_toggle.true">featured</option>
+          <option value="false" data-i18n-key="option.featured_toggle.false">normal</option>
+        </select>
+        <input id="profilePackFeaturedNote" type="text" data-i18n-placeholder-key="placeholder.profile_pack_featured_note" placeholder="featured curation note" />
+        <button id="btnProfilePackSetFeatured" type="button" data-i18n-key="button.profile_set_featured">Set Featured</button>
+      </div>
+      <div class="table-wrap">
+        <table id="profilePackCatalogTable">
+          <thead>
+            <tr>
+              <th data-i18n-key="table.header.pack">Pack</th>
+              <th data-i18n-key="table.header.version">Version</th>
+              <th data-i18n-key="table.header.source_submission">Source Submission</th>
+              <th data-i18n-key="table.header.featured">Featured</th>
+              <th data-i18n-key="table.header.risk">Risk</th>
+              <th data-i18n-key="table.header.labels">Labels</th>
+              <th data-i18n-key="table.header.flags">Flags</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="profilePackMarketSummary" class="scan-summary" data-i18n-key="profile_pack.market.summary_idle">No profile pack market operation yet.</div>
+      <div id="profilePackReviewEvidenceRows" class="detail-grid"></div>
+      <div id="profilePackMarketCompareShell" class="hidden">
+        <div id="profilePackMarketCompareHighlights" class="pill-row"></div>
+        <div id="profilePackMarketCompareWarnings" class="warning-list"></div>
+        <div id="profilePackMarketCompareCards" class="detail-grid"></div>
+        <div class="compare-table-layout">
+          <div class="table-wrap">
+            <table id="profilePackMarketCompareTable">
+              <thead>
+                <tr>
+                  <th data-i18n-key="table.header.section">Section</th>
+                  <th data-i18n-key="table.header.changed">Changed</th>
+                  <th data-i18n-key="table.header.change_overview">Change Overview</th>
+                  <th data-i18n-key="table.header.size_before_after_delta">Size (Before / After / Delta)</th>
+                  <th data-i18n-key="table.header.actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <aside id="profilePackMarketCompareDetailPane" class="compare-detail-pane hidden">
+            <div class="compare-detail-head">
+              <div class="compare-detail-title" data-i18n-key="market.compare.detail.title">Change Detail</div>
+              <div id="profilePackMarketCompareDetailMeta" class="compare-detail-meta" data-i18n-key="market.compare.detail.empty_meta">
+                Select one changed row and click "Expand Detail".
+              </div>
+            </div>
+            <div class="compare-detail-block">
+              <div class="compare-detail-block-title" data-i18n-key="market.compare.detail.diff">Unified Diff</div>
+              <pre id="profilePackMarketCompareDetailDiff" class="compare-code-block"></pre>
+            </div>
+            <div class="compare-detail-block">
+              <div class="compare-detail-block-title" data-i18n-key="market.compare.detail.before">Before</div>
+              <pre id="profilePackMarketCompareDetailBefore" class="compare-code-block"></pre>
+            </div>
+            <div class="compare-detail-block">
+              <div class="compare-detail-block-title" data-i18n-key="market.compare.detail.after">After</div>
+              <pre id="profilePackMarketCompareDetailAfter" class="compare-code-block"></pre>
+            </div>
+          </aside>
+        </div>
+      </div>
+      <details class="compare-raw">
+        <summary data-i18n-key="console.section.raw_profile_pack_payload">Raw profile-pack market payload</summary>
+        <pre id="profilePackMarketDetails" class="scan-details"></pre>
+      </details>
+    </section>
+
+    <section id="templateWorkspaceSection" class="card" data-console-scope="member">
+      <div class="workspace-shell-header">
+        <div>
+          <h2 data-i18n-key="workspace.template_heading">Template Workspace</h2>
+          <div id="templateWorkspaceRoute" class="scan-summary" data-i18n-key="workspace.template_route_idle">Template workspace idle. Select a template row or use Load Template Detail.</div>
+          <p class="note" data-i18n-key="workspace.template_note_sync">The active template route keeps `trialTemplateId` and `submitTemplateId` in sync for build, install, and download actions.</p>
+        </div>
+      </div>
+      <div id="templateDetailState" class="workspace-state is-neutral" data-i18n-key="panel.template_detail.empty">Select a template row to load detail.</div>
+      <div id="templateDetailSummary" class="scan-summary" data-i18n-key="detail.template.summary_idle">No template detail loaded yet.</div>
+      <div id="templateDetailBadges" class="pill-row"></div>
+      <div id="templateDetailRows" class="detail-grid"></div>
+    </section>
+
+    <section class="card" id="section-admin-submissions" data-console-scope="admin">
+      <h2 data-i18n-key="console.section.admin_submissions">Admin Submissions</h2>
+      <div class="inline-form wrap">
+        <input id="submissionStatus" type="text" data-i18n-placeholder-key="placeholder.submission_status" placeholder="status filter (optional)" />
+        <input id="submissionTemplateFilter" type="text" data-i18n-placeholder-key="placeholder.submission_template_filter" placeholder="filter template_id" />
+        <select id="submissionRiskFilter">
+          <option value="" data-i18n-key="option.risk.all">all risk</option>
+          <option value="high" data-i18n-key="option.risk.high">high</option>
+          <option value="medium" data-i18n-key="option.risk.medium">medium</option>
+          <option value="low" data-i18n-key="option.risk.low">low</option>
+        </select>
+        <input id="submissionReviewLabelFilter" type="text" data-i18n-placeholder-key="placeholder.submission_review_label_filter" placeholder="filter review_label" />
+        <input id="submissionWarningFlagFilter" type="text" data-i18n-placeholder-key="placeholder.submission_warning_flag_filter" placeholder="filter warning_flag" />
+        <button id="btnListSubmissions" type="button" data-i18n-key="button.list_submissions">List Submissions</button>
+      </div>
+      <div id="submissionListState" class="collection-state is-neutral" data-i18n-key="submissions.idle">Load submissions to review pending community packages.</div>
+      <div class="table-wrap">
+        <table id="submissionsTable">
+          <thead>
+            <tr>
+              <th data-i18n-key="table.header.submission">Submission</th>
+              <th data-i18n-key="table.header.template">Template</th>
+              <th data-i18n-key="table.header.status">Status</th>
+              <th data-i18n-key="table.header.risk">Risk</th>
+              <th data-i18n-key="table.header.labels">Labels</th>
+              <th data-i18n-key="table.header.flags">Flags</th>
+              <th data-i18n-key="table.header.review_note">Review Note</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="submissionWorkspaceSection" class="card" data-console-scope="admin">
+      <div class="workspace-shell-header">
+        <div>
+          <h2 data-i18n-key="workspace.submission_heading">Submission Workspace</h2>
+          <div id="submissionWorkspaceRoute" class="scan-summary" data-i18n-key="workspace.submission_route_idle">Submission workspace idle. Select a submission row or use Load Submission Detail.</div>
+          <p id="submissionWorkspaceSummary" class="note" data-i18n-key="workspace.submission_summary_idle">Review context, compare output, and risk scan stay together in this workspace.</p>
+        </div>
+        <div class="inline-form wrap">
+          <button id="btnSubmissionDetail" type="button" data-i18n-key="button.load_submission_detail">Load Submission Detail</button>
+          <button id="btnCompareSubmission" type="button" data-i18n-key="button.compare_submission">Compare Submission</button>
+          <button id="btnDownloadSubmissionPackage" type="button" data-i18n-key="button.download_submission_package">Download Submission Package</button>
+        </div>
+      </div>
+      <div class="workspace-grid">
+        <div class="workspace-main">
+          <section class="workspace-panel">
+            <h3 data-i18n-key="panel.submission_detail.heading">Submission Detail</h3>
+            <div id="submissionDetailState" class="workspace-state is-neutral" data-i18n-key="panel.submission_detail.empty">Select a submission row to load detail.</div>
+            <div id="submissionDetailSummary" class="scan-summary" data-i18n-key="detail.submission.summary_idle">No submission detail loaded yet.</div>
+            <div id="submissionDetailBadges" class="pill-row"></div>
+            <div id="submissionDetailRows" class="detail-grid"></div>
+          </section>
+          <section class="workspace-panel">
+            <h3 data-i18n-key="panel.compare.heading">Submission Compare</h3>
+            <div id="compareState" class="workspace-state is-neutral" data-i18n-key="panel.compare.empty">Select a submission row to load compare output.</div>
+            <div id="compareSummary" class="scan-summary" data-i18n-key="compare.summary_idle">No comparison loaded yet.</div>
+            <div id="compareHighlights" class="pill-row"></div>
+            <div id="compareSections" class="compare-grid"></div>
+            <details class="compare-raw">
+              <summary data-i18n-key="console.section.raw_compare_payload">Raw compare payload</summary>
+              <pre id="compareDetails" class="scan-details"></pre>
+            </details>
+          </section>
+        </div>
+        <aside class="workspace-side">
+          <section class="workspace-panel">
+            <h3 data-i18n-key="panel.moderation.heading">Moderation</h3>
+            <div id="moderationSummary" class="scan-summary" data-i18n-key="moderation.no_selection">No submission selected.</div>
+            <div id="moderationHighlights" class="pill-row"></div>
+            <div id="moderationWarnings" class="warning-list"></div>
+            <div class="grid">
+              <label>
+                <span data-i18n-key="field.submission_id">Submission ID</span>
+                <input id="decisionSubmissionId" type="text" data-i18n-placeholder-key="placeholder.decision_submission_id" placeholder="submission_id" />
+              </label>
+              <label>
+                <span data-i18n-key="field.decision">Decision</span>
+                <select id="submissionDecision">
+                  <option value="approve" data-i18n-key="option.decision.approve">approve</option>
+                  <option value="reject" data-i18n-key="option.decision.reject">reject</option>
+                </select>
+              </label>
+              <label>
+                <span data-i18n-key="field.review_labels">Review Labels</span>
+                <input id="reviewLabels" type="text" data-i18n-placeholder-key="placeholder.review_labels" placeholder="comma,separated,labels" />
+              </label>
+              <label>
+                <span data-i18n-key="field.review_note">Review Note</span>
+                <input id="reviewNote" type="text" data-i18n-placeholder-key="placeholder.review_note" placeholder="manual review note" />
+              </label>
+            </div>
+            <div class="inline-form wrap">
+              <button id="btnSaveSubmissionReview" type="button" data-i18n-key="button.save_review_metadata">Save Review Metadata</button>
+              <button id="btnApproveSubmission" type="button" data-i18n-key="button.approve">Approve</button>
+              <button id="btnRejectSubmission" type="button" data-i18n-key="button.reject">Reject</button>
+            </div>
+          </section>
+          <section class="workspace-panel">
+            <h3 data-i18n-key="panel.scan.heading">Risk Scan</h3>
+            <div id="scanSummary" class="scan-summary" data-i18n-key="scan.summary_idle">No package scan loaded yet.</div>
+            <div id="scanLabels" class="pill-row"></div>
+            <p id="scanEvidenceHint" class="note hidden" data-i18n-key="scan.evidence.jump_hint">Developer mode: click an evidence row to open compare view.</p>
+            <div id="scanEvidenceList" class="scan-evidence-list hidden"></div>
+            <pre id="scanDetails" class="scan-details"></pre>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section class="card developer-only-card" id="section-risk-glossary" data-console-scope="all">
+      <details class="advanced-block">
+        <summary data-i18n-key="console.section.risk_glossary">Risk Glossary</summary>
+        <div id="riskGlossary" class="detail-grid"></div>
+      </details>
+    </section>
+
+    <section class="card developer-only-card" id="section-retry-queue" data-console-scope="admin">
+      <details class="advanced-block">
+        <summary data-i18n-key="console.section.admin_retry_queue">Admin Retry Queue</summary>
+        <div class="inline-form wrap">
+          <button id="btnListRetry" type="button" data-i18n-key="button.list_retry_requests">List Retry Requests</button>
+        </div>
+        <div class="inline-form wrap">
+          <input id="lockRequestId" type="text" data-i18n-placeholder-key="placeholder.lock_request_id" placeholder="request_id" />
+          <label class="checkbox">
+            <input id="lockForce" type="checkbox" />
+            <span data-i18n-key="field.force_takeover">force takeover</span>
+          </label>
+          <input id="lockReason" type="text" data-i18n-placeholder-key="placeholder.lock_reason" placeholder="takeover reason (required when force)" />
+          <button id="btnLockRetry" type="button" data-i18n-key="button.acquire_lock">Acquire Lock</button>
+        </div>
+        <div class="inline-form wrap">
+          <input id="retryRequestId" type="text" data-i18n-placeholder-key="placeholder.retry_request_id" placeholder="request_id" />
+          <select id="retryDecision">
+            <option value="approve" data-i18n-key="option.decision.approve">approve</option>
+            <option value="reject" data-i18n-key="option.decision.reject">reject</option>
+          </select>
+          <input id="retryRequestVersion" type="number" min="0" data-i18n-placeholder-key="placeholder.retry_request_version" placeholder="request_version (optional)" />
+          <input id="retryLockVersion" type="number" min="0" data-i18n-placeholder-key="placeholder.retry_lock_version" placeholder="lock_version (optional)" />
+          <button id="btnRetryDecide" type="button" data-i18n-key="button.decide_retry_request">Decide Retry Request</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="card developer-only-card" id="section-reliability" data-console-scope="admin">
+      <details class="advanced-block">
+        <summary data-i18n-key="console.section.notifications_audit">Notifications and Audit</summary>
+        <div class="inline-form wrap">
+          <input id="auditLimit" type="number" min="1" max="200" value="20" />
+          <button id="btnAudit" type="button" data-i18n-key="button.list_audit">List Audit</button>
+          <input id="noticeLimit" type="number" min="1" value="50" />
+          <button id="btnNotice" type="button" data-i18n-key="button.list_notifications">List Notifications</button>
+        </div>
+        <div class="detail-grid">
+          <div class="detail-card">
+            <h4 class="glossary-title" data-i18n-key="audit.group.summary">Audit Summary</h4>
+            <pre id="auditSummaryOutput" data-i18n-key="audit.output.summary_idle">Load audit to review aggregated reviewer/device/action activity.</pre>
+          </div>
+          <div class="detail-card">
+            <h4 class="glossary-title" data-i18n-key="audit.group.events">Recent Events</h4>
+            <pre id="auditEventsOutput" data-i18n-key="audit.output.events_idle">Load audit to review recent raw events.</pre>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="card developer-only-card" id="section-storage-backup" data-console-scope="admin">
+      <details class="advanced-block">
+        <summary data-i18n-key="console.section.storage_backup">Storage Backup and Restore</summary>
+        <p class="note" data-i18n-key="storage.panel.note">Local archive + optional remote sync controls for cold backup and restore observability.</p>
+        <h4 data-i18n-key="storage.group.summary">Local Summary</h4>
+        <div class="inline-form wrap">
+          <button id="btnStorageSummary" type="button" data-i18n-key="button.storage_summary">Load Local Summary</button>
+        </div>
+        <pre id="storageSummaryOutput"></pre>
+
+        <h4 data-i18n-key="storage.group.policies">Backup Policies</h4>
+        <div class="inline-form wrap">
+          <label>
+            <span data-i18n-key="field.storage_rpo_hours">RPO Hours</span>
+            <input id="storagePolicyRpoHours" type="number" min="1" value="24" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_local_retention_snapshots">Local Retention Snapshots</span>
+            <input id="storagePolicyLocalRetentionSnapshots" type="number" min="1" value="3" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_remote_retention_days">Remote Retention Days</span>
+            <input id="storagePolicyRemoteRetentionDays" type="number" min="1" value="30" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_daily_upload_budget_gb">Daily Upload Budget (GB)</span>
+            <input id="storagePolicyDailyBudgetGb" type="number" min="1" value="700" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_upload_bandwidth_limit_mbps">Upload Limit (Mbps)</span>
+            <input id="storagePolicyBandwidthLimitMpbs" type="number" min="1" value="10" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_command_timeout_seconds">Command Timeout (seconds)</span>
+            <input id="storagePolicyCommandTimeoutSeconds" type="number" min="30" value="900" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_pack_format">Pack Format</span>
+            <select id="storagePolicyPackFormat">
+              <option value="tar.gz" data-i18n-key="option.storage_pack_format.tar_gz">tar.gz</option>
+              <option value="tar" data-i18n-key="option.storage_pack_format.tar">tar</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_rclone_binary">rclone Binary</span>
+            <input id="storagePolicyRcloneBinary" type="text" value="rclone" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_rclone_remote_path">rclone Remote Path</span>
+            <input id="storagePolicyRcloneRemotePath" type="text" />
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_rclone_bwlimit">rclone BWLimit</span>
+            <input id="storagePolicyRcloneBwlimit" type="text" value="10M" />
+          </label>
+        </div>
+        <div class="inline-form wrap">
+          <label class="checkbox">
+            <input id="storagePolicySyncRemoteEnabled" type="checkbox" />
+            <span data-i18n-key="field.storage_sync_remote_enabled">Sync Remote Enabled</span>
+          </label>
+          <label class="checkbox">
+            <input id="storagePolicyEncryptionRequired" type="checkbox" checked />
+            <span data-i18n-key="field.storage_encryption_required">Encryption Required</span>
+          </label>
+          <label class="checkbox">
+            <input id="storagePolicyBackupEnabled" type="checkbox" checked />
+            <span data-i18n-key="field.storage_backup_enabled">Backup Enabled</span>
+          </label>
+          <label class="checkbox">
+            <input id="storagePolicySingleActiveLock" type="checkbox" checked />
+            <span data-i18n-key="field.storage_single_active_backup_lock">Single Active Backup Lock</span>
+          </label>
+          <label class="checkbox">
+            <input id="storagePolicyIncludeProfilePacks" type="checkbox" checked />
+            <span data-i18n-key="field.storage_include_profile_packs">Include Profile Packs</span>
+          </label>
+          <label class="checkbox">
+            <input id="storagePolicyIncludePackages" type="checkbox" />
+            <span data-i18n-key="field.storage_include_packages">Include Packages</span>
+          </label>
+        </div>
+        <div class="inline-form wrap">
+          <button id="btnStoragePoliciesGet" type="button" data-i18n-key="button.storage_policies_get">Load Policies</button>
+          <button id="btnStoragePoliciesSet" type="button" data-i18n-key="button.storage_policies_set">Update Policies</button>
+        </div>
+        <pre id="storagePoliciesOutput"></pre>
+
+        <h4 data-i18n-key="storage.group.backup_jobs">Backup Jobs</h4>
+        <div class="inline-form wrap">
+          <input id="storageJobTrigger" type="text" data-i18n-placeholder-key="placeholder.storage_job_trigger" placeholder="manual" />
+          <input id="storageJobNote" type="text" data-i18n-placeholder-key="placeholder.storage_job_note" placeholder="job note (optional)" />
+          <button id="btnStorageRunBackup" type="button" data-i18n-key="button.storage_run_backup">Run Backup Job</button>
+        </div>
+        <div class="inline-form wrap">
+          <label>
+            <span data-i18n-key="field.storage_jobs_status">Job Status</span>
+            <select id="storageJobsStatus">
+              <option value="" data-i18n-key="option.storage_job_status.all">all</option>
+              <option value="running" data-i18n-key="option.storage_job_status.running">running</option>
+              <option value="succeeded" data-i18n-key="option.storage_job_status.succeeded">succeeded</option>
+              <option value="failed" data-i18n-key="option.storage_job_status.failed">failed</option>
+              <option value="cancelled" data-i18n-key="option.storage_job_status.cancelled">cancelled</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_jobs_limit">Limit</span>
+            <input id="storageJobsLimit" type="number" min="1" max="200" value="20" />
+          </label>
+          <button id="btnStorageJobsList" type="button" data-i18n-key="button.storage_jobs_list">List Backup Jobs</button>
+          <input id="storageJobId" type="text" data-i18n-placeholder-key="placeholder.storage_job_id" placeholder="job_id" />
+          <button id="btnStorageJobGet" type="button" data-i18n-key="button.storage_job_get">Load Backup Job</button>
+        </div>
+        <pre id="storageJobsOutput"></pre>
+
+        <h4 data-i18n-key="storage.group.restore">Restore Workflow</h4>
+        <div class="inline-form wrap">
+          <input id="storageRestoreArtifactRef" type="text" data-i18n-placeholder-key="placeholder.storage_restore_artifact_ref" placeholder="artifact_ref / artifact_id / job_id" />
+          <input id="storageRestoreNote" type="text" data-i18n-placeholder-key="placeholder.storage_restore_note" placeholder="restore note (optional)" />
+          <button id="btnStorageRestorePrepare" type="button" data-i18n-key="button.storage_restore_prepare">Prepare Restore</button>
+        </div>
+        <div class="inline-form wrap">
+          <input id="storageRestoreId" type="text" data-i18n-placeholder-key="placeholder.storage_restore_id" placeholder="restore_id" />
+          <button id="btnStorageRestoreCommit" type="button" data-i18n-key="button.storage_restore_commit">Commit Restore</button>
+          <button id="btnStorageRestoreCancel" type="button" data-i18n-key="button.storage_restore_cancel">Cancel Restore</button>
+        </div>
+        <pre id="storageRestoreOutput"></pre>
+
+        <h4 data-i18n-key="storage.group.restore_jobs">Restore Job Observability</h4>
+        <div class="inline-form wrap">
+          <label>
+            <span data-i18n-key="field.storage_restore_jobs_state">Restore State</span>
+            <select id="storageRestoreJobsState">
+              <option value="" data-i18n-key="option.storage_restore_state.all">all</option>
+              <option value="prepared" data-i18n-key="option.storage_restore_state.prepared">prepared</option>
+              <option value="committed" data-i18n-key="option.storage_restore_state.committed">committed</option>
+              <option value="cancelled" data-i18n-key="option.storage_restore_state.cancelled">cancelled</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n-key="field.storage_restore_jobs_limit">Limit</span>
+            <input id="storageRestoreJobsLimit" type="number" min="1" max="200" value="20" />
+          </label>
+          <button id="btnStorageRestoreJobsList" type="button" data-i18n-key="button.storage_restore_jobs_list">List Restore Jobs</button>
+          <input id="storageRestoreJobId" type="text" data-i18n-placeholder-key="placeholder.storage_restore_job_id" placeholder="restore_id" />
+          <button id="btnStorageRestoreJobGet" type="button" data-i18n-key="button.storage_restore_job_get">Load Restore Job</button>
+        </div>
+        <pre id="storageRestoreJobsOutput"></pre>
+      </details>
+    </section>
+
+    <section class="card" id="section-response" data-console-scope="all">
+      <details class="advanced-block">
+        <summary data-i18n-key="console.section.response">Response</summary>
+        <pre id="result"></pre>
+      </details>
+    </section>
+
+    <aside id="templateDrawer" class="template-drawer hidden" data-console-scope="member" data-scope-visibility="manual" aria-live="polite">
+      <div class="template-drawer-head">
+        <div>
+          <h3 id="templateDrawerTitle" data-i18n-key="market.drawer.empty_title">Select a template card</h3>
+          <p id="templateDrawerMeta" class="note" data-i18n-key="market.drawer.empty_meta">Template details and action shortcuts appear here.</p>
+        </div>
+        <button id="btnTemplateDrawerClose" class="btn-ghost" type="button" data-i18n-key="button.close">Close</button>
+      </div>
+      <div id="templateDrawerBadges" class="pill-row"></div>
+      <div id="templateDrawerSignals" class="detail-grid"></div>
+      <div class="inline-form wrap">
+        <button id="btnDrawerTrial" type="button" data-i18n-key="button.request_trial">Request Trial</button>
+        <button id="btnDrawerInstall" class="btn-primary" type="button" data-i18n-key="button.install_template">Install Template</button>
+        <button id="btnDrawerPrompt" type="button" data-i18n-key="button.build_prompt">Build Prompt</button>
+        <button id="btnDrawerPackage" type="button" data-i18n-key="button.build_package">Build Package</button>
+        <button id="btnDrawerDetail" type="button" data-i18n-key="button.load_template_detail">Load Template Detail</button>
+      </div>
+    </aside>
+
+    <section id="submitWizardModal" class="modal-shell hidden" data-console-scope="member" data-scope-visibility="manual" aria-hidden="true">
+      <div id="submitWizardBackdrop" class="modal-backdrop"></div>
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="submitWizardTitle">
+        <div class="modal-head">
+          <h3 id="submitWizardTitle" data-i18n-key="market.wizard.title">Submit Template Wizard</h3>
+          <button id="btnCloseSubmitWizard" class="btn-ghost" type="button" data-i18n-key="button.close">Close</button>
+        </div>
+        <div id="submitWizardStepState" class="wizard-progress" data-i18n-key="market.wizard.step">Step 1 / 3</div>
+        <div class="wizard-step" data-step="1">
+          <label>
+            <span data-i18n-key="market.wizard.template_id">Template ID</span>
+            <input id="wizardTemplateId" type="text" data-i18n-placeholder-key="placeholder.wizard_template_id" placeholder="community/custom-template" />
+          </label>
+          <label>
+            <span data-i18n-key="market.wizard.version">Version</span>
+            <input id="wizardTemplateVersion" type="text" data-i18n-placeholder-key="placeholder.wizard_template_version" placeholder="1.0.0" />
+          </label>
+        </div>
+        <div class="wizard-step hidden" data-step="2">
+          <label>
+            <span data-i18n-key="market.wizard.package_file">Package File</span>
+            <input id="wizardPackageFile" type="file" accept=".zip,.json,.txt,.yaml,.yml" />
+          </label>
+          <p class="note" data-i18n-key="market.wizard.package_note">Zip upload is optional, but strongly recommended for reproducible installs.</p>
+        </div>
+        <div class="wizard-step hidden" data-step="3">
+          <div class="detail-card">
+            <div class="detail-card-label" data-i18n-key="market.wizard.ready_label">Ready to submit</div>
+            <div id="submitWizardReview" class="detail-card-value" data-i18n-key="market.wizard.review_hint">Fill the previous steps to continue.</div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="btnSubmitWizardPrev" class="btn-ghost" type="button" data-i18n-key="button.back">Back</button>
+          <button id="btnSubmitWizardNext" type="button" data-i18n-key="button.next">Next</button>
+          <button id="btnSubmitWizardPublish" class="btn-primary hidden" type="button" data-i18n-key="button.publish">Publish</button>
+        </div>
+      </div>
+    </section>
+
+      </main>
+    </div>
+
+    <script src="/compare_panel.js"></script>
+    <script src="/detail_panel.js"></script>
+    <script src="/table_interactions.js"></script>
+    <script src="/market_cards.js"></script>
+    <script src="/workspace_state.js"></script>
+    <script src="/collection_state.js"></script>
+    <script src="/workspace_feedback.js"></script>
+    <script src="/collection_feedback.js"></script>
+    <script src="/workspace_payload.js"></script>
+    <script src="/profile_pack_panel.js"></script>
+    <script src="/profile_pack_guidance.js"></script>
+    <script src="/profile_pack_records.js"></script>
+    <script src="/profile_pack_market.js"></script>
+    <script src="/profile_pack_compare_view.js"></script>
+    <script src="/webui_i18n.js"></script>
+    <script src="/ui_event_bus.js"></script>
+    <script src="/console_scope.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

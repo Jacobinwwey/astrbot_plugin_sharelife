@@ -1,0 +1,16 @@
+{
+  "name": "sharelife-docs",
+  "private": true,
+  "version": "0.3.13",
+  "type": "module",
+  "scripts": {
+    "docs:prepare:market": "python3 ../scripts/build_market_snapshot.py",
+    "docs:dev": "npm run docs:prepare:market && vitepress dev .",
+    "docs:build": "npm run docs:prepare:market && vitepress build .",
+    "docs:preview": "vitepress preview ."
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "vitepress": "^1.6.3"
+  }
+}

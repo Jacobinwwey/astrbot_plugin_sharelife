@@ -1,0 +1,1 @@
+"""Sharelife interface adapters."""

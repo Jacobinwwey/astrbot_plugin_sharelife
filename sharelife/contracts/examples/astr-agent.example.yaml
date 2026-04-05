@@ -1,0 +1,38 @@
+schema_version: astr-agent.v1
+agent:
+  id: sharelife-agent-demo
+  name: Sharelife Agent Demo
+  persona: concise and safety-first automation assistant
+  objective: convert user text to uppercase and append deployment-safe suffix
+plugins:
+  - id: upper
+    manifest_ref: plugin.manifest.v2.example.json
+    declared_capabilities:
+      - file.read
+    config:
+      transform: uppercase
+  - id: suffix
+    manifest_ref: plugin.manifest.v2.example.json
+    declared_capabilities:
+      - file.read
+    config:
+      suffix: " ::verified"
+pipeline:
+  steps:
+    - step_id: step_upper
+      plugin_ref: upper
+      input_from: $input
+      output_key: upper_result
+      on_failure: abort
+      retry: 0
+    - step_id: step_suffix
+      plugin_ref: suffix
+      input_from: step_upper
+      output_key: final
+      on_failure: retry
+      retry: 1
+runtime:
+  requires_admin_confirmation: false
+  compatibility:
+    astrbot: ">=4.0.0"
+    sharelife: ">=0.2.0"

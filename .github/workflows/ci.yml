@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main, feature/**]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest pyyaml
+
+      - name: Check docs/superpowers privacy
+        run: python3 scripts/check_superpowers_privacy.py
+
+      - name: Run Python tests
+        run: pytest -q
+
+      - name: Validate protocol schemas and examples
+        run: python3 scripts/validate_protocol_examples.py
+
+      - name: Validate observability ops assets
+        run: python3 scripts/validate_ops_assets.py
+
+      - name: Validate compose observability overlay
+        run: docker compose -f docker-compose.yml -f docker-compose.observability.yml config > /tmp/sharelife-compose.rendered.yml
+
+      - name: Run WebUI node tests
+        run: node --test tests/webui/*.js
+
+      - name: Check Chrome availability
+        run: google-chrome --version
+
+      - name: Run WebUI E2E
+        run: bash scripts/run_webui_e2e.sh
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Build docs when package.json exists
+        run: |
+          if [ -f docs/package.json ]; then
+            if [ -f docs/package-lock.json ]; then
+              npm ci --prefix docs
+            else
+              npm install --prefix docs
+            fi
+            npm run docs:build --prefix docs
+          else
+            echo "docs/package.json not found, skip docs build for now"
+          fi

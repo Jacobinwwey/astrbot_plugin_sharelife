@@ -1,0 +1,97 @@
+# Integrated Execution Playbook (UI Refactor x Storage Persistence)
+
+> Date: `2026-04-04`  
+> Audience: maintainers and contributors  
+> Goal: one delivery track for user-panel refactor and storage/backup rollout
+
+## 1. Current Engineering Truth
+
+### 1.1 Strong baseline
+
+1. Role baseline exists (`member/reviewer/admin`) with route-level guards.
+2. WebUI is already modularized (state helpers, i18n, compare/detail modules).
+3. Interface + E2E tests already cover key workflows and role boundaries.
+4. Market page already has card-first catalog and compare/detail behaviors.
+
+### 1.2 Remaining debt
+
+1. `app.js` is still an orchestration-heavy monolith.
+2. User core flows exist but are spread across mixed surfaces.
+3. Install/upload options are partially implicit and not normalized cross-page.
+4. Long-retention persistence strategy is still thin under constrained local disk.
+
+## 2. Cross-Plan Decisions
+
+### 2.1 Unified state vocabulary
+
+Installation/task and backup/restore jobs must share deterministic statuses:
+
+`queued | running | succeeded | failed | cancelled | stale`
+
+### 2.2 Contract-first sequence
+
+To avoid drift from parallel rewrites:
+
+1. Freeze contracts and payloads.
+2. Implement backend compatibility layer.
+3. Bind UI to contracts.
+4. Replace layout shell last.
+
+### 2.3 Audit as hard requirement
+
+All storage actions and install option mutations must write audit events with request-id + actor-role.
+
+## 3. Execution Phases
+
+### Phase A - Contract freeze
+
+1. Member installation endpoints + payload option extensions.
+2. Storage job and restore endpoint contracts.
+3. Docs-first spec updates and meta tests.
+
+### Phase B - Backend first
+
+1. Installation list/refresh services.
+2. Payload option validation/defaulting.
+3. Storage policy/job/restore state model.
+4. Restic+rclone adapter behind a service boundary.
+
+### Phase C - Frontend integration
+
+1. Apply Stitch-generated shell with runtime ID preservation.
+2. Keep top search + locale + `刷新本地已有配置` as first-class actions.
+3. Unify upload/install option panel behavior in `/member` and `/market`.
+4. Hydrate task and installation states from new endpoints.
+
+### Phase D - Hardening
+
+1. Full interface/unit/E2E matrix.
+2. Failure injection:
+   - API `429/403/500`
+   - backup budget reached
+   - restore checksum mismatch
+3. Audit and i18n completeness check.
+
+## 4. Tradeoffs
+
+1. Vanilla enhancement now vs full framework migration  
+   - Chosen: vanilla enhancement now to preserve compatibility and test anchors.
+2. Google Drive as cold backup vs object storage replacement  
+   - Chosen: cold backup only, never hot serving.
+3. Big-bang delivery vs layered rollout  
+   - Chosen: layered rollout for lower blast radius and easier rollback.
+
+## 5. Pitfalls to Avoid
+
+1. Directly replacing runtime IDs with generated markup.
+2. Adding new controls without capability mapping.
+3. Uploading fragmented raw directories to Drive.
+4. Marking backup success without restore-prepare verification.
+5. Running backup jobs without disk watermark guard.
+
+## 6. Completion Gates
+
+1. Full test suite green, including WebUI E2E.
+2. No RBAC regression on restricted routes.
+3. Member and market option behavior is equivalent.
+4. Backup/restore actions leave deterministic state transitions and audit trails.

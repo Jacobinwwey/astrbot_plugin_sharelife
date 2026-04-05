@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "path": "./data/conversations",
+  "max_messages": 2000
+}

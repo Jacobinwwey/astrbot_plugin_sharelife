@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "index_path": "./data/knowledge/index",
+  "documents_path": "./data/knowledge/docs"
+}

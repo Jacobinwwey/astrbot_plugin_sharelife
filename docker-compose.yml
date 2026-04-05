@@ -1,0 +1,28 @@
+services:
+  sharelife-webui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sharelife-webui:local
+    restart: unless-stopped
+    ports:
+      - "${SHARELIFE_WEBUI_HOST_PORT:-8106}:8106"
+    environment:
+      SHARELIFE_HOST: "0.0.0.0"
+      SHARELIFE_PORT: "8106"
+      SHARELIFE_DATA_ROOT: "/data"
+      SHARELIFE_SEED_DEMO: "1"
+      SHARELIFE_STATE_BACKEND: "sqlite"
+      SHARELIFE_STATE_SQLITE_FILE: "/data/sharelife_state.sqlite3"
+      SHARELIFE_STATE_MIGRATE_FROM_JSON: "1"
+      # Optional auth:
+      # SHARELIFE_MEMBER_PASSWORD: "member-secret"
+      # SHARELIFE_ADMIN_PASSWORD: "admin-secret"
+    volumes:
+      - ${SHARELIFE_DOCKER_DATA_DIR:-./output/docker-data}:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8106/api/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sharelife Market</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body class="console-page console-page-market">
+    <div class="console-layout market-layout market-layout-hf market-layout-no-sidebar">
+      <main class="console-main">
+        <section class="top-utility-bar market-top-utility-bar">
+          <div class="locale-cluster">
+            <div class="detail-card-label" data-i18n-key="ui.locale.label">UI Locale</div>
+            <div class="locale-quick-row" role="group" aria-label="UI locale quick switch">
+              <button type="button" class="locale-pill" data-market-locale-option="en-US" aria-pressed="false">
+                <span data-i18n-key="option.locale.en_us">English</span>
+              </button>
+              <button type="button" class="locale-pill" data-market-locale-option="zh-CN" aria-pressed="false">
+                <span data-i18n-key="option.locale.zh_cn">中文</span>
+              </button>
+              <button type="button" class="locale-pill" data-market-locale-option="ja-JP" aria-pressed="false">
+                <span data-i18n-key="option.locale.ja_jp">日本語</span>
+              </button>
+            </div>
+            <select id="marketUiLocale">
+              <option value="en-US" data-i18n-key="option.locale.en_us">English</option>
+              <option value="zh-CN" data-i18n-key="option.locale.zh_cn">中文</option>
+              <option value="ja-JP" data-i18n-key="option.locale.ja_jp">日本語</option>
+            </select>
+          </div>
+          <div class="inline-form wrap top-quick-links">
+            <button
+              id="btnMarketOpenFilterDrawer"
+              class="btn-ghost market-mobile-filter-button"
+              type="button"
+              aria-controls="marketFilterSidebar"
+              aria-expanded="false"
+              data-i18n-key="market.filter.open"
+            >
+              Filters
+            </button>
+            <button
+              id="btnMarketRefreshInstallations"
+              class="btn-primary"
+              type="button"
+              data-i18n-key="button.refresh_local_installations"
+            >
+              Refresh Local Installations
+            </button>
+            <a id="marketMemberConsoleLink" href="/member" class="market-link" data-i18n-key="console.switch.member">Member Console</a>
+            <a id="marketReviewerConsoleLink" href="/reviewer" class="market-link" data-i18n-key="console.switch.reviewer">Reviewer Console</a>
+            <a id="marketAdminConsoleLink" href="/admin" class="market-link" data-i18n-key="console.switch.admin">Admin Console</a>
+            <a id="marketFullConsoleLink" href="/" class="market-link" data-i18n-key="console.switch.full">Unified Console</a>
+          </div>
+        </section>
+
+        <header class="hero market-hero market-context-header" id="marketHero">
+          <div>
+            <h1 data-i18n-key="market.header.title">Sharelife Market</h1>
+            <p data-i18n-key="market.header.subtitle">Standalone profile-pack market explorer with runtime compare</p>
+            <div class="hero-badge-row">
+              <span class="pill is-success" data-i18n-key="hero.badge.signed_verified">Signed verified</span>
+              <span class="pill is-success" data-i18n-key="hero.badge.risk_labeled">Risk labeled</span>
+              <span class="pill is-success" data-i18n-key="hero.badge.audit_trace">Audit trace</span>
+            </div>
+          </div>
+          <div class="status-box">
+            <div id="marketHealthLine">health: loading...</div>
+            <div id="marketAuthLine">auth: unknown</div>
+            <div id="marketRoleLine">role: not logged in</div>
+          </div>
+        </header>
+
+        <section id="marketAuthPanel" class="card hidden">
+          <h2 data-i18n-key="market.login.heading">Login</h2>
+          <form id="marketAuthForm" class="grid compact-grid" onsubmit="return false;">
+            <div class="inline-form wrap">
+              <select id="marketAuthRole">
+                <option value="member" data-i18n-key="option.member">member</option>
+              </select>
+              <input
+                id="marketAuthPassword"
+                type="password"
+                data-i18n-placeholder-key="market.placeholder.auth_password"
+                placeholder="WebUI password"
+              />
+              <button id="btnMarketLogin" class="btn-primary" type="button" data-i18n-key="button.login">Login</button>
+            </div>
+            <div id="marketReviewerAuthFields" class="inline-form wrap hidden">
+              <input
+                id="marketAuthReviewerId"
+                type="text"
+                data-i18n-placeholder-key="placeholder.reviewer_id"
+                placeholder="reviewer_id"
+              />
+              <input
+                id="marketAuthReviewerDeviceKey"
+                type="password"
+                data-i18n-placeholder-key="placeholder.reviewer_device_key"
+                placeholder="reviewer device key"
+              />
+            </div>
+          </form>
+          <small data-i18n-key="market.login.hint">When auth is disabled, this panel remains hidden.</small>
+        </section>
+
+        <div id="marketFilterOverlay" class="market-filter-overlay hidden"></div>
+        <div class="market-shell-grid">
+          <aside id="marketFilterSidebar" class="market-filter-sidebar" aria-label="Market filters" aria-hidden="true">
+            <div class="market-filter-sidebar-head">
+              <h2 data-i18n-key="market.filter.heading">Filters</h2>
+              <button
+                id="btnMarketCloseFilterDrawer"
+                type="button"
+                class="btn-ghost market-mobile-filter-close"
+                aria-controls="marketFilterSidebar"
+                data-i18n-key="market.filter.close"
+              >
+                Close
+              </button>
+            </div>
+            <p class="note market-filter-note" data-i18n-key="market.filter.note">
+              Narrow results with compact facets. Use advanced filters for strict server-side query.
+            </p>
+            <div class="market-filter-result">
+              <span data-i18n-key="market.filter.result_count">Results</span>
+              <strong id="marketResultCount">0</strong>
+            </div>
+            <div id="marketFacetFilters" class="market-facet-accordion"></div>
+            <details class="advanced-block">
+              <summary data-i18n-key="market.advanced_catalog_filters">Advanced catalog filters</summary>
+              <div class="inline-form wrap market-server-filter-grid">
+                <input
+                  id="marketPackFilter"
+                  type="text"
+                  data-i18n-placeholder-key="market.placeholder.pack_filter"
+                  placeholder="filter pack_id"
+                />
+                <select id="marketPackTypeFilter">
+                  <option value="" data-i18n-key="option.pack_type.all">All Pack Types</option>
+                  <option value="bot_profile_pack" data-i18n-key="option.pack_type.bot_profile_pack">Bot Profile Pack (Full Bot Setup)</option>
+                  <option value="extension_pack" data-i18n-key="option.pack_type.extension_pack">Extension Pack (Skills/Personas/MCP/Plugins)</option>
+                </select>
+                <select id="marketRiskFilter">
+                  <option value="" data-i18n-key="option.risk.all">all risk</option>
+                  <option value="high" data-i18n-key="option.risk.high">high</option>
+                  <option value="medium" data-i18n-key="option.risk.medium">medium</option>
+                  <option value="low" data-i18n-key="option.risk.low">low</option>
+                </select>
+                <select id="marketFeaturedFilter">
+                  <option value="" data-i18n-key="option.featured_status.all">all featured status</option>
+                  <option value="true" data-i18n-key="option.featured_status.true">featured only</option>
+                  <option value="false" data-i18n-key="option.featured_status.false">non-featured only</option>
+                </select>
+              </div>
+              <div class="inline-form wrap market-server-filter-grid">
+                <input
+                  id="marketReviewLabelFilter"
+                  type="text"
+                  data-i18n-placeholder-key="market.placeholder.review_label_filter"
+                  placeholder="filter review_label"
+                />
+                <input
+                  id="marketWarningFlagFilter"
+                  type="text"
+                  data-i18n-placeholder-key="market.placeholder.warning_flag_filter"
+                  placeholder="filter warning_flag"
+                />
+              </div>
+            </details>
+          </aside>
+
+          <section class="card market-hub-card market-catalog-card market-primary-canvas" id="marketCatalogArea">
+            <div class="market-top-control-bar">
+              <input
+                id="marketGlobalSearch"
+                type="text"
+                data-i18n-placeholder-key="market.placeholder.global_search"
+                placeholder="Search pack name, labels, risk or source..."
+              />
+              <div class="inline-form">
+                <span class="market-sort-label" data-i18n-key="market.sort.label">Sort by</span>
+                <select id="marketSortBy">
+                  <option value="trending" data-i18n-key="market.sort.trending">Trending</option>
+                  <option value="downloads" data-i18n-key="market.sort.downloads">Most Downloads</option>
+                  <option value="recent" data-i18n-key="market.sort.recent">Recently Updated</option>
+                </select>
+              </div>
+              <div class="market-total-count">
+                <span data-i18n-key="market.topbar.total">Total</span>
+                <strong id="marketTotalCount">0</strong>
+                <span data-i18n-key="market.topbar.models">packs</span>
+              </div>
+              <button id="btnMarketListCatalog" class="btn-primary" type="button" data-i18n-key="profile_pack.market.catalog_btn">List Catalog</button>
+            </div>
+            <details class="advanced-block" open>
+              <summary data-i18n-key="market.operations.heading">Template Install / Upload Operations</summary>
+              <p class="note" data-i18n-key="market.operations.note">Market-side install and upload keep the same option model as the member console.</p>
+              <div class="inline-form wrap market-server-filter-grid">
+                <input
+                  id="marketTemplateId"
+                  type="text"
+                  data-i18n-placeholder-key="placeholder.trial_template_id"
+                  placeholder="template_id"
+                />
+                <input
+                  id="marketSubmitVersion"
+                  type="text"
+                  data-i18n-placeholder-key="placeholder.submit_version"
+                  placeholder="version"
+                  value="1.0.0"
+                />
+                <button id="btnMarketTemplateTrial" class="btn-ghost" type="button" data-i18n-key="button.request_trial">Request Trial</button>
+                <button id="btnMarketTemplateInstall" class="btn-primary" type="button" data-i18n-key="button.install_template">Install Template</button>
+                <button id="btnMarketTemplateSubmit" class="btn-ghost" type="button" data-i18n-key="button.submit_template">Submit Template</button>
+              </div>
+              <label id="marketUploadDropzone" class="upload-dropzone" for="marketSubmitPackageFile">
+                <input id="marketSubmitPackageFile" class="upload-dropzone-input" type="file" accept=".zip,.json,.txt,.yaml,.yml" />
+                <span class="upload-dropzone-title" data-i18n-key="market.upload.dropzone">Drag package here or click to upload</span>
+                <span id="marketUploadFileName" class="upload-dropzone-file" data-i18n-key="market.upload.file_idle">No file selected. Template submit can still use generated output.</span>
+              </label>
+              <div class="grid">
+                <label>
+                  <span data-i18n-key="field.install_source_preference">Install Source</span>
+                  <select id="marketInstallSourcePreference">
+                    <option value="auto" data-i18n-key="option.install_source.auto">auto</option>
+                    <option value="uploaded_submission" data-i18n-key="option.install_source.uploaded_submission">uploaded submission</option>
+                    <option value="generated" data-i18n-key="option.install_source.generated">generated package</option>
+                  </select>
+                </label>
+                <label class="checkbox">
+                  <input id="marketInstallPreflight" type="checkbox" />
+                  <span data-i18n-key="field.install_preflight">Preflight only</span>
+                </label>
+                <label class="checkbox">
+                  <input id="marketInstallForceReinstall" type="checkbox" />
+                  <span data-i18n-key="field.install_force_reinstall">Force reinstall</span>
+                </label>
+                <label>
+                  <span data-i18n-key="field.upload_scan_mode">Upload Scan Mode</span>
+                  <select id="marketUploadScanMode">
+                    <option value="balanced" data-i18n-key="option.upload_scan_mode.balanced">balanced</option>
+                    <option value="strict" data-i18n-key="option.upload_scan_mode.strict">strict</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n-key="field.upload_visibility">Upload Visibility</span>
+                  <select id="marketUploadVisibility">
+                    <option value="community" data-i18n-key="option.upload_visibility.community">community</option>
+                    <option value="private" data-i18n-key="option.upload_visibility.private">private</option>
+                  </select>
+                </label>
+                <label class="checkbox">
+                  <input id="marketUploadReplaceExisting" type="checkbox" />
+                  <span data-i18n-key="field.upload_replace_existing">Replace existing submission</span>
+                </label>
+              </div>
+              <div class="inline-form wrap market-server-filter-grid">
+                <input
+                  id="marketSubmitArtifactId"
+                  type="text"
+                  data-i18n-placeholder-key="profile_pack.market.submit_placeholder"
+                  placeholder="artifact_id for community submit"
+                />
+                <select id="marketSubmitPackType">
+                  <option value="bot_profile_pack" data-i18n-key="option.pack_type.bot_profile_pack">Bot Profile Pack (Full Bot Setup)</option>
+                  <option value="extension_pack" data-i18n-key="option.pack_type.extension_pack">Extension Pack (Skills/Personas/MCP/Plugins)</option>
+                </select>
+                <input
+                  id="marketSubmitSelectedSections"
+                  type="text"
+                  data-i18n-placeholder-key="placeholder.submit_selected_sections"
+                  placeholder="astrbot_core,providers,memory_store"
+                />
+                <select id="marketSubmitRedactionMode">
+                  <option value="exclude_secrets" data-i18n-key="option.redaction.exclude_secrets">Exclude Secrets (Recommended)</option>
+                  <option value="exclude_provider" data-i18n-key="option.redaction.exclude_provider">Exclude Provider Section</option>
+                  <option value="include_provider_no_key" data-i18n-key="option.redaction.include_provider_no_key">Include Provider (No API Keys)</option>
+                  <option value="include_encrypted_secrets" data-i18n-key="option.redaction.include_encrypted_secrets">Include Encrypted Secrets (Requires Key)</option>
+                </select>
+                <button id="btnMarketProfilePackSubmit" class="btn-primary" type="button" data-i18n-key="profile_pack.market.submit_btn">Submit To Community</button>
+              </div>
+            </details>
+            <div id="marketInstallationsState" class="collection-state is-neutral" data-i18n-key="member.installations.idle">
+              Load local installations to manage existing configs.
+            </div>
+            <div id="marketInstallationsList" class="member-install-list"></div>
+            <div
+              id="marketCatalogState"
+              class="collection-state is-neutral"
+              data-i18n-key="profile_pack.market.catalog_idle"
+            >
+              Load profile-pack catalog to browse published packs.
+            </div>
+            <div id="marketCatalogMetrics" class="market-metric-grid"></div>
+            <div class="market-insight-grid market-pack-insight-grid">
+              <section class="insight-panel">
+                <h3 data-i18n-key="market.featured.heading">Featured</h3>
+                <div
+                  id="marketFeaturedState"
+                  class="collection-state is-neutral"
+                  data-i18n-key="market.featured.idle_profile_pack"
+                >
+                  Load catalog to compute featured spotlight.
+                </div>
+                <div id="marketFeaturedSpotlight" class="featured-template-card"></div>
+              </section>
+              <section class="insight-panel">
+                <h3 data-i18n-key="market.trending.heading">Trending</h3>
+                <div
+                  id="marketTrendingState"
+                  class="collection-state is-neutral"
+                  data-i18n-key="market.trending.idle_profile_pack"
+                >
+                  Load catalog to compute trending ranking.
+                </div>
+                <div id="marketTrendingRack" class="trending-template-list"></div>
+              </section>
+            </div>
+            <div id="marketCatalogGrid" class="template-grid"></div>
+            <details id="marketCatalogTablePanel" class="advanced-block" open>
+              <summary data-i18n-key="market.catalog.table_fallback">Catalog Table</summary>
+              <div class="table-wrap">
+                <table id="marketCatalogTable">
+                  <thead>
+                    <tr>
+                      <th data-i18n-key="table.header.pack">Pack</th>
+                      <th data-i18n-key="table.header.version">Version</th>
+                      <th data-i18n-key="table.header.featured">Featured</th>
+                      <th data-i18n-key="table.header.risk">Risk</th>
+                      <th data-i18n-key="table.header.labels">Labels</th>
+                      <th data-i18n-key="table.header.flags">Flags</th>
+                      <th data-i18n-key="table.header.source_submission">Source Submission</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </details>
+            <div class="market-log-toggle-row">
+              <button
+                id="btnMarketToggleLog"
+                class="btn-ghost"
+                type="button"
+                aria-expanded="false"
+                data-i18n-key="market.log.toggle_show"
+              >
+                Show Operation Log
+              </button>
+            </div>
+            <section id="marketLogArea" class="market-log-panel hidden">
+              <details class="advanced-block" open>
+                <summary data-i18n-key="market.operation_log">Operation Log</summary>
+                <pre id="marketResult" class="scan-details"></pre>
+              </details>
+            </section>
+          </section>
+
+          <section class="card market-hub-card market-detail-card-standalone market-detail-canvas hidden" id="marketDetailArea">
+            <details id="marketDetailPanel" class="market-detail-panel">
+              <summary data-i18n-key="market.detail_compare.heading">Detail & Compare</summary>
+              <div class="market-detail-panel-body">
+                <div class="inline-form wrap">
+                  <input
+                    id="marketPackId"
+                    type="text"
+                    data-i18n-placeholder-key="market.placeholder.pack_id"
+                    placeholder="pack_id"
+                  />
+                  <input
+                    id="marketCompareSections"
+                    type="text"
+                    data-i18n-placeholder-key="market.placeholder.compare_sections"
+                    placeholder="sections for compare (optional)"
+                  />
+                  <button id="btnMarketCatalogDetail" class="btn-ghost" type="button" data-i18n-key="market.button.load_detail">Load Detail</button>
+                  <button id="btnMarketCatalogCompare" class="btn-primary" type="button" data-i18n-key="button.profile_catalog_compare_runtime">Compare With Runtime</button>
+                  <button id="btnMarketCatalogDownload" class="btn-ghost hidden" type="button" data-i18n-key="button.download_package">Download Package</button>
+                </div>
+                <div id="marketSummary" class="scan-summary" data-i18n-key="market.summary.idle">No operation yet.</div>
+                <div id="marketEvidenceRows" class="detail-grid"></div>
+                <div id="marketCompareShell" class="hidden">
+                  <div id="marketCompareHighlights" class="pill-row"></div>
+                  <div id="marketCompareWarnings" class="warning-list"></div>
+                  <div id="marketCompareCards" class="detail-grid"></div>
+                  <div class="compare-table-layout">
+                    <div class="table-wrap">
+                      <table id="marketCompareTable">
+                        <thead>
+                          <tr>
+                            <th data-i18n-key="table.header.section">Section</th>
+                            <th data-i18n-key="table.header.changed">Changed</th>
+                            <th data-i18n-key="table.header.change_overview">Change Overview</th>
+                            <th data-i18n-key="table.header.size">Size</th>
+                          </tr>
+                        </thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                    <aside id="marketCompareDetailPane" class="compare-detail-pane hidden">
+                      <div class="compare-detail-head">
+                        <div class="compare-detail-title" data-i18n-key="market.compare.detail.title">Change Detail</div>
+                        <div id="marketCompareDetailMeta" class="compare-detail-meta" data-i18n-key="market.compare.detail.empty_meta">
+                          Select one changed row and click "Expand Detail".
+                        </div>
+                      </div>
+                      <div class="compare-detail-block">
+                        <div class="compare-detail-block-title" data-i18n-key="market.compare.detail.diff">Unified Diff</div>
+                        <pre id="marketCompareDetailDiff" class="compare-code-block"></pre>
+                      </div>
+                      <div class="compare-detail-block">
+                        <div class="compare-detail-block-title" data-i18n-key="market.compare.detail.before">Before</div>
+                        <pre id="marketCompareDetailBefore" class="compare-code-block"></pre>
+                      </div>
+                      <div class="compare-detail-block">
+                        <div class="compare-detail-block-title" data-i18n-key="market.compare.detail.after">After</div>
+                        <pre id="marketCompareDetailAfter" class="compare-code-block"></pre>
+                      </div>
+                    </aside>
+                  </div>
+                </div>
+                <details class="compare-raw">
+                  <summary data-i18n-key="market.raw_payload">Raw compare/detail payload</summary>
+                  <pre id="marketDetails" class="scan-details"></pre>
+                </details>
+              </div>
+            </details>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script src="/market_cards.js"></script>
+    <script src="/profile_pack_compare_view.js"></script>
+    <script src="/webui_i18n.js"></script>
+    <script src="/ui_event_bus.js"></script>
+    <script src="/market_page.js"></script>
+  </body>
+</html>

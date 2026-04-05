@@ -1,0 +1,82 @@
+name: ops-smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 2 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "docker-compose.yml"
+      - "docker-compose.observability.yml"
+      - "Dockerfile"
+      - "ops/**"
+      - "scripts/build_ops_smoke_triage.py"
+      - "scripts/redact_ops_artifacts.py"
+      - "scripts/smoke_observability_stack.sh"
+      - ".github/workflows/ops-smoke.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SHARELIFE_SMOKE_ARTIFACTS_DIR: output/ops-smoke
+      SHARELIFE_SMOKE_ARTIFACTS_PATH_FILE: .ops-smoke-last-artifacts-path
+      SHARELIFE_SMOKE_DOCKER_DATA_DIR: output/docker-data
+      SHARELIFE_SMOKE_PRIVACY_MODE: strict
+      SHARELIFE_SMOKE_AUTO_PORTS: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run observability stack smoke
+        run: bash scripts/smoke_observability_stack.sh --artifacts-dir "${SHARELIFE_SMOKE_ARTIFACTS_DIR}"
+
+      - name: Resolve diagnostics directory
+        if: always()
+        shell: bash
+        run: |
+          EFFECTIVE_DIR="${SHARELIFE_SMOKE_ARTIFACTS_DIR}"
+          if [[ -f "${SHARELIFE_SMOKE_ARTIFACTS_PATH_FILE}" ]]; then
+            CANDIDATE="$(tail -n 1 "${SHARELIFE_SMOKE_ARTIFACTS_PATH_FILE}" | tr -d '\r')"
+            if [[ -n "${CANDIDATE}" ]]; then
+              EFFECTIVE_DIR="${CANDIDATE}"
+            fi
+          fi
+          echo "SHARELIFE_SMOKE_ARTIFACTS_EFFECTIVE_DIR=${EFFECTIVE_DIR}" >> "${GITHUB_ENV}"
+          echo "resolved diagnostics dir: ${EFFECTIVE_DIR}"
+
+      - name: Publish triage summary
+        if: always()
+        shell: bash
+        run: |
+          TRIAGE_PATH="${SHARELIFE_SMOKE_ARTIFACTS_EFFECTIVE_DIR}/triage.md"
+          if [[ -f "${TRIAGE_PATH}" ]]; then
+            cat "${TRIAGE_PATH}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            {
+              echo "## Ops Smoke Triage"
+              echo ""
+              echo "- Result: **FAIL**"
+              echo "- Triage file missing: \`${TRIAGE_PATH}\`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Publish triage annotations
+        if: always()
+        run: |
+          python3 scripts/publish_ops_smoke_annotations.py \
+            --triage-json "${SHARELIFE_SMOKE_ARTIFACTS_EFFECTIVE_DIR}/triage.json"
+
+      - name: Upload ops smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ env.SHARELIFE_SMOKE_ARTIFACTS_EFFECTIVE_DIR }}
+          if-no-files-found: warn
+          retention-days: 14

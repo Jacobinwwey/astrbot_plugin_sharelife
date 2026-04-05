@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sharelife.astrbot/schemas/astr-agent.v1.schema.json",
+  "title": "astr-agent pipeline contract",
+  "description": "Typed contract for composing Sharelife-compatible agent/plugin pipelines.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "agent", "plugins", "pipeline"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "astr-agent.v1"
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "persona"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._/-]{2,120}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "persona": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "objective": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "plugins": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "manifest_ref", "declared_capabilities"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_\\-]{1,64}$"
+          },
+          "manifest_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "declared_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "network.outbound",
+                "file.read",
+                "file.write",
+                "command.exec",
+                "provider.access",
+                "mcp.invoke"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step_id", "plugin_ref"],
+            "properties": {
+              "step_id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_\\-]{1,64}$"
+              },
+              "plugin_ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_\\-]{1,64}$"
+              },
+              "input_from": {
+                "type": "string",
+                "maxLength": 64,
+                "default": "$input"
+              },
+              "output_key": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "on_failure": {
+                "type": "string",
+                "enum": ["abort", "skip", "retry"],
+                "default": "abort"
+              },
+              "retry": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5,
+                "default": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requires_admin_confirmation": {
+          "type": "boolean",
+          "default": false
+        },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "astrbot": {
+              "type": "string"
+            },
+            "sharelife": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

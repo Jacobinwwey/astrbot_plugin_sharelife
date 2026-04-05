@@ -1,0 +1,268 @@
+{
+  "official_registry_url": {
+    "description": "Optional override URL/path for the official template index. Empty uses the bundled templates/index.json baseline.",
+    "type": "string",
+    "default": ""
+  },
+  "state_store": {
+    "description": "Service state persistence backend configuration",
+    "type": "object",
+    "items": {
+      "backend": {
+        "description": "State backend: json (default) or sqlite",
+        "type": "string",
+        "default": "json"
+      },
+      "sqlite_file": {
+        "description": "SQLite file path when backend=sqlite. Empty uses plugin data dir/sharelife_state.sqlite3",
+        "type": "string",
+        "default": ""
+      },
+      "migrate_from_json": {
+        "description": "When backend=sqlite, import legacy json state files into sqlite if key is missing",
+        "type": "bool",
+        "default": true
+      }
+    }
+  },
+  "feature_flags": {
+    "description": "Feature flags for future enterprise capability",
+    "type": "object",
+    "items": {
+      "enable_enterprise_features": {
+        "description": "Enable enterprise features (v2)",
+        "type": "bool",
+        "default": false
+      }
+    }
+  },
+  "profile_pack": {
+    "description": "bot_profile_pack security and compatibility settings",
+    "type": "object",
+    "items": {
+      "signing_key_id": {
+        "description": "Default signing key id used when exporting signed profile packs",
+        "type": "string",
+        "default": "default"
+      },
+      "signing_secret": {
+        "description": "HMAC signing secret used to sign exported profile-pack manifests",
+        "type": "string",
+        "default": ""
+      },
+      "trusted_signing_keys": {
+        "description": "Trusted signing key map for import verification, format: {\"key_id\": \"secret\"}",
+        "type": "object",
+        "items": {},
+        "default": {}
+      },
+      "secrets_encryption_key": {
+        "description": "Encryption key used by include_encrypted_secrets mode for export/import",
+        "type": "string",
+        "default": ""
+      },
+      "plugin_install": {
+        "description": "Controlled plugin-install execution settings for imported extension/profile packs",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "Allow admin to execute plugin install commands from profile-pack metadata",
+            "type": "bool",
+            "default": false
+          },
+          "command_timeout_seconds": {
+            "description": "Command timeout for each plugin install execution attempt",
+            "type": "int",
+            "default": 180
+          },
+          "allowed_command_prefixes": {
+            "description": "Comma-separated command prefix allowlist for plugin install execution",
+            "type": "string",
+            "default": "astrbot,pip,uv,npm,pnpm"
+          },
+          "allow_http_source": {
+            "description": "Allow plugin sources using plain http:// (not recommended)",
+            "type": "bool",
+            "default": false
+          },
+          "require_success_before_apply": {
+            "description": "When true, plugin section apply requires successful install execution evidence",
+            "type": "bool",
+            "default": false
+          }
+        }
+      }
+    }
+  },
+  "webui": {
+    "description": "Standalone Sharelife WebUI server settings",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "Enable standalone Sharelife WebUI server",
+        "type": "bool",
+        "default": true
+      },
+      "host": {
+        "description": "Standalone WebUI bind host",
+        "type": "string",
+        "default": "127.0.0.1"
+      },
+      "port": {
+        "description": "Standalone WebUI bind port",
+        "type": "int",
+        "default": 8106
+      },
+      "cors": {
+        "description": "Standalone WebUI CORS settings",
+        "type": "object",
+        "items": {
+          "allow_origins": {
+            "description": "Comma-separated allowed origins for CORS. Empty uses secure defaults.",
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
+      "security_headers": {
+        "description": "Standalone WebUI HTTP security response headers",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "Enable default security headers on all WebUI responses",
+            "type": "bool",
+            "default": true
+          },
+          "X-Content-Type-Options": {
+            "description": "Value for X-Content-Type-Options response header",
+            "type": "string",
+            "default": "nosniff"
+          },
+          "X-Frame-Options": {
+            "description": "Value for X-Frame-Options response header",
+            "type": "string",
+            "default": "DENY"
+          },
+          "Referrer-Policy": {
+            "description": "Value for Referrer-Policy response header",
+            "type": "string",
+            "default": "no-referrer"
+          },
+          "Permissions-Policy": {
+            "description": "Value for Permissions-Policy response header",
+            "type": "string",
+            "default": "camera=(), microphone=(), geolocation=()"
+          },
+          "Content-Security-Policy": {
+            "description": "Value for Content-Security-Policy response header",
+            "type": "string",
+            "default": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'"
+          }
+        }
+      },
+      "auth": {
+        "description": "Optional role-scoped password auth for standalone WebUI",
+        "type": "object",
+        "items": {
+          "password": {
+            "description": "Legacy shared password fallback for member only. It does not enable admin access. Prefer member_password/admin_password.",
+            "type": "string",
+            "default": ""
+          },
+          "member_password": {
+            "description": "When non-empty, member WebUI login is enabled",
+            "type": "string",
+            "default": ""
+          },
+          "admin_password": {
+            "description": "When non-empty, admin WebUI login is enabled. Must be at least 12 characters and contain no whitespace, otherwise auth stays fail-closed and admin login remains unavailable.",
+            "type": "string",
+            "default": ""
+          },
+          "reviewer_password": {
+            "description": "When non-empty, reviewer WebUI login is enabled",
+            "type": "string",
+            "default": ""
+          },
+          "token_ttl_seconds": {
+            "description": "Token TTL in seconds for role login sessions",
+            "type": "int",
+            "default": 7200
+          },
+          "reviewer_token_ttl_seconds": {
+            "description": "Reviewer login session TTL in seconds (default 7 days)",
+            "type": "int",
+            "default": 604800
+          },
+          "allow_query_token": {
+            "description": "Allow token in query string for legacy clients (not recommended)",
+            "type": "bool",
+            "default": false
+          },
+          "login_rate_limit_window_seconds": {
+            "description": "Rate-limit window for login attempts",
+            "type": "int",
+            "default": 60
+          },
+          "login_rate_limit_max_attempts": {
+            "description": "Maximum failed login attempts within window",
+            "type": "int",
+            "default": 10
+          },
+          "api_rate_limit_window_seconds": {
+            "description": "Rate-limit window for API requests",
+            "type": "int",
+            "default": 60
+          },
+          "api_rate_limit_max_requests": {
+            "description": "Maximum API requests allowed per client/role/path within the window",
+            "type": "int",
+            "default": 600
+          }
+        }
+      },
+      "observability": {
+        "description": "Standalone WebUI metrics and observability guardrails",
+        "type": "object",
+        "items": {
+          "metrics_max_paths": {
+            "description": "Maximum number of unique path labels tracked in Prometheus metrics before overflow collapse",
+            "type": "int",
+            "default": 128
+          },
+          "metrics_overflow_path_label": {
+            "description": "Fallback path label used when unique path tracking exceeds metrics_max_paths",
+            "type": "string",
+            "default": "/__other__"
+          },
+          "security_alert_window_seconds": {
+            "description": "Observation window in seconds for sensitive-route anomaly aggregation",
+            "type": "int",
+            "default": 300
+          },
+          "security_alert_threshold": {
+            "description": "Default occurrence threshold before invalid credential anomalies notify admin",
+            "type": "int",
+            "default": 3
+          },
+          "security_alert_cooldown_seconds": {
+            "description": "Cooldown in seconds before repeating the same sensitive-route anomaly notification",
+            "type": "int",
+            "default": 300
+          }
+        }
+      },
+      "device_keys": {
+        "description": "Reviewer device key limits and verification settings",
+        "type": "object",
+        "items": {
+          "max_reviewer_devices": {
+            "description": "Maximum number of allowed device keys per reviewer account",
+            "type": "int",
+            "default": 3
+          }
+        }
+      }
+    }
+  }
+}

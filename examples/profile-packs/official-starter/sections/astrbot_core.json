@@ -1,0 +1,6 @@
+{
+  "name": "sharelife-official-starter",
+  "language": "zh-CN",
+  "execution_mode": "subagent_driven",
+  "default_persona": "default"
+}

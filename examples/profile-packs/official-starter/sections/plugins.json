@@ -1,0 +1,9 @@
+{
+  "sharelife": {
+    "enabled": true,
+    "observe_task_details": true
+  },
+  "astrbot_plugin_reminder": {
+    "enabled": true
+  }
+}

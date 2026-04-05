@@ -1,0 +1,6 @@
+{
+  "default": {
+    "tone": "helpful",
+    "style": "concise"
+  }
+}

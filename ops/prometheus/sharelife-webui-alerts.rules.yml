@@ -1,0 +1,61 @@
+groups:
+  - name: sharelife-webui
+    rules:
+      - alert: SharelifeWebUIHighErrorRatio
+        expr: |
+          (
+            sum(rate(sharelife_webui_http_error_total{error_code!~"unauthorized|permission_denied"}[5m]))
+            /
+            clamp_min(sum(rate(sharelife_webui_http_requests_total[5m])), 1)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: sharelife-webui
+        annotations:
+          summary: "Sharelife WebUI error ratio is high"
+          description: "Non-auth errors exceed 5% for more than 5 minutes."
+
+      - alert: SharelifeWebUIInternalErrorsDetected
+        expr: |
+          sum(rate(sharelife_webui_http_error_total{error_code="internal_server_error"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: sharelife-webui
+        annotations:
+          summary: "Sharelife WebUI internal errors detected"
+          description: "At least one internal server error appears in the last 5 minutes."
+
+      - alert: SharelifeWebUIRateLimitSpike
+        expr: |
+          sum(rate(sharelife_webui_rate_limit_total{scope="api"}[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: sharelife-webui
+        annotations:
+          summary: "Sharelife WebUI API rate-limit spike"
+          description: "API rate-limit events exceed baseline and may indicate abuse or client loops."
+
+      - alert: SharelifeWebUILoginBruteforce
+        expr: |
+          sum(rate(sharelife_webui_auth_events_total{event="login_invalid_credentials"}[5m])) > 10
+        for: 3m
+        labels:
+          severity: warning
+          service: sharelife-webui
+        annotations:
+          summary: "Sharelife WebUI login brute-force signal"
+          description: "Login failures exceed baseline in a short window."
+
+      - alert: SharelifeWebUISecurityAnomalyAlerts
+        expr: |
+          sum(rate(sharelife_webui_security_alert_total[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: sharelife-webui
+        annotations:
+          summary: "Sharelife WebUI security anomaly alert emitted"
+          description: "Sensitive-route anomaly notifications were emitted to the admin channel."
