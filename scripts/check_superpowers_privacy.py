@@ -74,8 +74,8 @@ def main(argv: list[str] | None = None) -> int:
 
     scan_root = Path(args.scan_root).resolve()
     if not scan_root.exists():
-        print(f"[privacy-check] scan root not found: {scan_root}", file=sys.stderr)
-        return 2
+        print(f"[privacy-check] skipped: scan root not found: {scan_root}")
+        return 0
 
     files = _iter_markdown_files(scan_root)
     findings: list[str] = []

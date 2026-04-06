@@ -61,6 +61,14 @@
             <div class="member-spotlight-meta" data-i18n-key="member.search.spotlight_meta">
               Search the store, jump to an installed config, or lock the next trial target from one field.
             </div>
+            <button
+              id="memberSpotlightMarketJump"
+              class="btn-ghost member-spotlight-action hidden"
+              type="button"
+              data-i18n-key="member.search.open_market"
+            >
+              Open Matching Profile Pack In Market
+            </button>
           </div>
           <div class="inline-form">
             <button
@@ -248,7 +256,7 @@
             <option value="member" data-i18n-key="option.member">member</option>
           </select>
           <input id="authPassword" type="password" data-i18n-placeholder-key="placeholder.auth_password" placeholder="WebUI password" />
-          <button id="loginBtn" type="button" data-i18n-key="button.login">Login</button>
+          <button id="loginBtn" class="btn-primary" type="button" data-i18n-key="button.login">Login</button>
         </div>
         <div id="reviewerAuthFields" class="inline-form wrap hidden">
           <input id="authReviewerId" type="text" data-i18n-placeholder-key="placeholder.reviewer_id" placeholder="reviewer_id" />
@@ -404,7 +412,7 @@
     <section class="card" id="section-trial-status" data-console-scope="member">
       <h2 data-i18n-key="console.section.trial_status">Trial Status</h2>
       <div class="inline-form wrap">
-        <button id="btnTrialStatus" type="button" data-i18n-key="button.refresh_trial_status">Refresh Trial Status</button>
+        <button id="btnTrialStatus" class="btn-ghost" type="button" data-i18n-key="button.refresh_trial_status">Refresh Trial Status</button>
       </div>
       <div id="trialStatusSummary" class="scan-summary" data-i18n-key="trial.summary_idle">No trial status loaded yet.</div>
       <pre id="trialStatusDetails" class="scan-details"></pre>

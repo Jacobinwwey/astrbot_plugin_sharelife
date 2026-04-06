@@ -3472,3 +3472,73 @@ body #section-profile-pack .pill.is-danger {
   color: #b42318;
   border-color: rgba(180, 35, 24, 0.16);
 }
+
+body.console-page-member .member-spotlight-action {
+  justify-self: start;
+  margin-top: 0.15rem;
+  min-height: 36px;
+  padding: 0.42rem 0.72rem;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+body.console-page-member .member-spotlight-action:hover {
+  background: #f5f7fb;
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+body.console-page-market {
+  --market-muted: #344054;
+  --market-muted-strong: #1f2937;
+}
+
+body.console-page-market .market-filter-sidebar-head h2,
+body.console-page-market .market-facet-title,
+body.console-page-market .market-facet-option,
+body.console-page-market .market-facet-option-label,
+body.console-page-market .market-facet-option-count,
+body.console-page-market .market-metric-label,
+body.console-page-market .market-total-count,
+body.console-page-market .market-sort-label,
+body.console-page-market .market-filter-result,
+body.console-page-market .template-card-owner,
+body.console-page-market .template-card-subtitle,
+body.console-page-market .template-card-description,
+body.console-page-market .template-card-meta-item,
+body.console-page-market .featured-template-subtitle,
+body.console-page-market .featured-template-description,
+body.console-page-market .featured-template-metrics,
+body.console-page-market .featured-template-score,
+body.console-page-market .trending-template-score {
+  color: #344054;
+}
+
+body.console-page-market .market-facet-option-count,
+body.console-page-market .market-filter-result strong,
+body.console-page-market .market-metric-value,
+body.console-page-market .template-card-title,
+body.console-page-market .trending-template-name,
+body.console-page-market .featured-template-title,
+body.console-page-market .template-card-signal strong {
+  color: #111827;
+}
+
+body.console-page-market .market-facet-group,
+body.console-page-market .market-metric-card,
+body.console-page-market .featured-template-entry,
+body.console-page-market .trending-template-item,
+body.console-page-market .template-card-meta-item,
+body.console-page-market .template-card-signal {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+body.console-page-market .trending-template-rank {
+  color: #0f766e;
+}
+
+body.console-page-market .market-filter-note,
+body.console-page-market .note {
+  color: #475467;
+}

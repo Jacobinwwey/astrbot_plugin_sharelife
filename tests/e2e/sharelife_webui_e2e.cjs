@@ -68,6 +68,34 @@ async function main() {
       const node = document.querySelector("#memberInstallationsState")
       return node && /Local installations:/i.test(String(node.textContent || ""))
     })
+    await page.fill("#memberGlobalSearch", "community/basic")
+    await page.waitForFunction(() => {
+      const section = document.querySelector("#section-market")
+      const filter = document.querySelector("#templateFilterId")
+      const cards = document.querySelectorAll("#templateCardGrid .template-card")
+      return (
+        section &&
+        !section.classList.contains("hidden") &&
+        filter &&
+        String(filter.value || "") === "community/basic" &&
+        cards.length >= 1
+      )
+    })
+    await page.fill("#memberGlobalSearch", "profile/official-starter")
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#memberSpotlightMarketJump")
+      return (
+        button &&
+        !button.classList.contains("hidden") &&
+        /profile\/official-starter/i.test(String(button.getAttribute("data-market-query") || ""))
+      )
+    })
+    await page.click("#memberSpotlightMarketJump")
+    await page.waitForURL(/\/market\?q=profile%2Fofficial-starter/)
+    await page.waitForFunction(() => {
+      const input = document.querySelector("#marketGlobalSearch")
+      return input && String(input.value || "").trim() === "profile/official-starter"
+    })
 
     await page.goto(`${baseUrl}/market`, { waitUntil: "networkidle" })
     await page.waitForFunction(() => {

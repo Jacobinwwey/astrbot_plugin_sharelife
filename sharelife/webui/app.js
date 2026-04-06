@@ -5781,6 +5781,37 @@ function isInlineMemberMarketVisible() {
   return !section.classList.contains("hidden")
 }
 
+function revealInlineMemberMarket() {
+  const section = byId("section-market")
+  if (!section) return null
+  section.classList.remove("hidden")
+  return section
+}
+
+function memberSpotlightProfilePackQuery(value) {
+  const raw = String(value || "").trim()
+  const normalized = raw.toLowerCase()
+  if (!raw) return ""
+  if (normalized.startsWith("profile/")) return raw
+  if (normalized.includes("official-starter")) return "profile/official-starter"
+  if (normalized.includes("official-safe-reference")) return "profile/official-safe-reference"
+  return ""
+}
+
+function syncMemberSpotlightMarketJump(query) {
+  const button = byId("memberSpotlightMarketJump")
+  if (!button) return
+  const nextQuery = String(query || "").trim()
+  button.dataset.marketQuery = nextQuery
+  button.classList.toggle("hidden", !nextQuery)
+}
+
+function openMemberSpotlightMarketQuery(query) {
+  const nextQuery = String(query || "").trim()
+  if (!nextQuery || !window.location) return
+  window.location.assign(`/market?q=${encodeURIComponent(nextQuery)}`)
+}
+
 function setActiveMarketChip(chipValue = "") {
   const value = String(chipValue || "").trim()
   marketChipButtons().forEach((node) => {
@@ -6303,12 +6334,13 @@ function bindButtons() {
   if (memberSearchNode) {
     memberSearchNode.addEventListener("input", () => {
       const value = String(memberSearchNode.value || "").trim()
+      const packQuery = memberSpotlightProfilePackQuery(value)
       state.memberPanel.searchQuery = value
       renderMemberInstallations(state.memberPanel.installations)
       const templateFilter = byId("templateFilterId")
       const categoryFilter = byId("templateCategoryFilter")
       if (templateFilter) {
-        templateFilter.value = value
+        templateFilter.value = packQuery ? "" : value
       }
       if (value && byId("trialTemplateId")) {
         byId("trialTemplateId").value = value
@@ -6317,9 +6349,34 @@ function bindButtons() {
         categoryFilter.value = ""
         setActiveMarketChip("")
       }
-      if (isInlineMemberMarketVisible() && templateFilter && categoryFilter) {
+      syncMemberSpotlightMarketJump(packQuery)
+      if (packQuery) return
+      revealInlineMemberMarket()
+      if (templateFilter && categoryFilter) {
         void listTemplates()
       }
+    })
+    memberSearchNode.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return
+      event.preventDefault()
+      const value = String(memberSearchNode.value || "").trim()
+      const packQuery = memberSpotlightProfilePackQuery(value)
+      if (packQuery) {
+        openMemberSpotlightMarketQuery(packQuery)
+        return
+      }
+      revealInlineMemberMarket()
+      if (byId("templateFilterId") && byId("templateCategoryFilter")) {
+        void listTemplates()
+      }
+    })
+  }
+  const memberSpotlightMarketJump = byId("memberSpotlightMarketJump")
+  if (memberSpotlightMarketJump) {
+    memberSpotlightMarketJump.addEventListener("click", () => {
+      openMemberSpotlightMarketQuery(
+        String(memberSpotlightMarketJump.dataset.marketQuery || "").trim(),
+      )
     })
   }
   const refreshInstallationsButton = byId("btnRefreshMemberInstallations")
@@ -6337,7 +6394,7 @@ function bindButtons() {
   })
   marketChipButtons().forEach((node) => {
     node.addEventListener("click", () => {
-      if (!isInlineMemberMarketVisible()) return
+      revealInlineMemberMarket()
       const value = String(node.getAttribute("data-market-chip") || "").trim()
       const categoryFilter = byId("templateCategoryFilter")
       if (categoryFilter) {
