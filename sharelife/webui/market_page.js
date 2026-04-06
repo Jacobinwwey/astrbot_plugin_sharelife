@@ -137,6 +137,10 @@
     return globalScope.SharelifeMarketFacetView || null
   }
 
+  function marketEventBindingHelpers() {
+    return globalScope.SharelifeMarketEventBindings || null
+  }
+
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
   }
@@ -3441,138 +3445,43 @@
   }
 
   function bindEvents() {
-    const localeNode = byId("marketUiLocale")
-    if (localeNode) {
-      localeNode.addEventListener("change", () => {
-        applyUiLocale(localeNode.value, { persist: true })
+    const helper = marketEventBindingHelpers()
+    if (helper && typeof helper.bindMarketEvents === "function") {
+      helper.bindMarketEvents({
+        byId,
+        state,
+        localeQuickButtons,
+        applyUiLocale,
+        login,
+        syncReviewerAuthFields,
+        listCatalog,
+        loadCatalogDetail,
+        compareCatalogPack,
+        triggerCatalogDownload,
+        applyLocalCatalogView,
+        setFilterDrawerOpen,
+        setMarketLogExpanded,
+        loadMarketInstallations,
+        listMarketTemplateSubmissions,
+        listMarketProfilePackSubmissions,
+        downloadMarketProfilePackSubmissionExport,
+        runMarketTemplateTrial,
+        runMarketTemplateInstall,
+        runMarketTemplateSubmit,
+        runMarketProfilePackSubmit,
+        bindUploadDropZone,
+        sortFallback: LOCAL_SORT_OPTIONS.TRENDING,
+        document,
       })
+      return
     }
-    localeQuickButtons().forEach((node) => {
-      node.addEventListener("click", () => {
-        const locale = String(node.getAttribute("data-market-locale-option") || "").trim()
-        if (!locale) return
-        applyUiLocale(locale, { persist: true })
-      })
-    })
-    byId("btnMarketLogin").addEventListener("click", () => {
-      void login()
-    })
-    const authRoleNode = byId("marketAuthRole")
-    if (authRoleNode) {
-      authRoleNode.addEventListener("change", syncReviewerAuthFields)
-    }
-    byId("btnMarketListCatalog").addEventListener("click", () => {
-      void listCatalog()
-    })
-    byId("btnMarketCatalogDetail").addEventListener("click", () => {
-      void loadCatalogDetail()
-    })
-    byId("btnMarketCatalogCompare").addEventListener("click", () => {
-      void compareCatalogPack()
-    })
-    const downloadButton = byId("btnMarketCatalogDownload")
-    if (downloadButton) {
-      downloadButton.addEventListener("click", () => {
-        triggerCatalogDownload()
-      })
-    }
-    const searchNode = byId("marketGlobalSearch")
-    if (searchNode) {
-      searchNode.addEventListener("input", () => {
-        state.localSearch = String(searchNode.value || "").trim()
-        applyLocalCatalogView()
-      })
-    }
-    const sortNode = byId("marketSortBy")
-    if (sortNode) {
-      sortNode.addEventListener("change", () => {
-        state.localSort = String(sortNode.value || LOCAL_SORT_OPTIONS.TRENDING)
-        applyLocalCatalogView()
-      })
-    }
-    const openDrawerButton = byId("btnMarketOpenFilterDrawer")
-    if (openDrawerButton) {
-      openDrawerButton.addEventListener("click", () => {
-        setFilterDrawerOpen(true)
-      })
-    }
-    const closeDrawerButton = byId("btnMarketCloseFilterDrawer")
-    if (closeDrawerButton) {
-      closeDrawerButton.addEventListener("click", () => {
-        setFilterDrawerOpen(false)
-      })
-    }
-    const overlay = byId("marketFilterOverlay")
-    if (overlay) {
-      overlay.addEventListener("click", () => {
-        setFilterDrawerOpen(false)
-      })
-    }
-    const logToggleButton = byId("btnMarketToggleLog")
-    if (logToggleButton) {
-      logToggleButton.addEventListener("click", () => {
-        setMarketLogExpanded(!state.logExpanded)
-      })
-    }
-    const refreshInstallationsBtn = byId("btnMarketRefreshInstallations")
-    if (refreshInstallationsBtn) {
-      refreshInstallationsBtn.addEventListener("click", () => {
-        void loadMarketInstallations({ refresh: true })
-      })
-    }
-    const listSubmissionsBtn = byId("btnMarketListSubmissions")
-    if (listSubmissionsBtn) {
-      listSubmissionsBtn.addEventListener("click", () => {
-        void listMarketTemplateSubmissions()
-      })
-    }
-    const listProfilePackSubmissionsBtn = byId("btnMarketListProfilePackSubmissions")
-    if (listProfilePackSubmissionsBtn) {
-      listProfilePackSubmissionsBtn.addEventListener("click", () => {
-        void listMarketProfilePackSubmissions()
-      })
-    }
-    const downloadProfilePackSubmissionBtn = byId("btnMarketDownloadProfilePackSubmission")
-    if (downloadProfilePackSubmissionBtn) {
-      downloadProfilePackSubmissionBtn.addEventListener("click", () => {
-        void downloadMarketProfilePackSubmissionExport()
-      })
-    }
-    const templateTrialBtn = byId("btnMarketTemplateTrial")
-    if (templateTrialBtn) {
-      templateTrialBtn.addEventListener("click", () => {
-        void runMarketTemplateTrial()
-      })
-    }
-    const templateInstallBtn = byId("btnMarketTemplateInstall")
-    if (templateInstallBtn) {
-      templateInstallBtn.addEventListener("click", () => {
-        void runMarketTemplateInstall()
-      })
-    }
-    const templateSubmitBtn = byId("btnMarketTemplateSubmit")
-    if (templateSubmitBtn) {
-      templateSubmitBtn.addEventListener("click", () => {
-        void runMarketTemplateSubmit()
-      })
-    }
-    const profilePackSubmitBtn = byId("btnMarketProfilePackSubmit")
-    if (profilePackSubmitBtn) {
-      profilePackSubmitBtn.addEventListener("click", () => {
-        void runMarketProfilePackSubmit()
-      })
-    }
+
     bindUploadDropZone({
       zoneId: "marketUploadDropzone",
       inputId: "marketSubmitPackageFile",
       outputId: "marketUploadFileName",
       emptyKey: "market.upload.file_idle",
       emptyFallback: "No file selected. Template submit can still use generated output.",
-    })
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && state.filterDrawerOpen) {
-        setFilterDrawerOpen(false)
-      }
     })
   }
 
