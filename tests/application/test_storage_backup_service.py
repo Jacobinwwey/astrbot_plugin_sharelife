@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import subprocess
 
 from sharelife.application.services_storage_backup import StorageBackupService
 
@@ -112,6 +113,7 @@ def test_storage_service_remote_sync_reports_missing_rclone_binary(tmp_path):
         {
             "sync_remote_enabled": True,
             "remote_required": True,
+            "encryption_required": False,
             "rclone_binary": "definitely-not-existing-rclone-binary",
             "rclone_remote_path": "gdrive:/sharelife-backup",
         },
@@ -121,3 +123,90 @@ def test_storage_service_remote_sync_reports_missing_rclone_binary(tmp_path):
     assert "job" in started
     assert started["job"]["status"] == "failed"
     assert started["job"]["reason"] == "remote_sync_command_not_found"
+
+
+def test_storage_service_remote_sync_enforces_encrypted_remote_when_required(tmp_path):
+    service = StorageBackupService(
+        state_store=InMemoryStateStore(),
+        data_root=tmp_path,
+        clock=FrozenClock(datetime(2026, 4, 4, 12, 0, tzinfo=UTC)),
+    )
+    service.set_policies(
+        {
+            "sync_remote_enabled": True,
+            "remote_required": True,
+            "encryption_required": True,
+            "rclone_remote_path": "gdrive:/sharelife-backup",
+        },
+        actor_id="admin-1",
+    )
+    started = service.run_backup_job(actor_id="admin-1")
+    assert "job" in started
+    assert started["job"]["status"] == "failed"
+    assert started["job"]["reason"] == "remote_encryption_required"
+
+
+def test_storage_service_remote_retention_executes_rclone_delete_after_sync(tmp_path, monkeypatch):
+    calls: list[list[str]] = []
+
+    def _fake_run(command, **kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    service = StorageBackupService(
+        state_store=InMemoryStateStore(),
+        data_root=tmp_path,
+        clock=FrozenClock(datetime(2026, 4, 4, 12, 0, tzinfo=UTC)),
+    )
+    service.set_policies(
+        {
+            "sync_remote_enabled": True,
+            "remote_required": True,
+            "encryption_required": False,
+            "remote_retention_days": 7,
+            "rclone_binary": "rclone",
+            "rclone_remote_path": "gdrive:/sharelife-backup",
+        },
+        actor_id="admin-1",
+    )
+    started = service.run_backup_job(actor_id="admin-1")
+    assert started["job"]["status"] == "succeeded"
+    assert started["job"]["remote_retention"]["status"] == "succeeded"
+    assert len(calls) >= 2
+    assert calls[0][0:2] == ["rclone", "copyto"]
+    assert calls[1][0:2] == ["rclone", "delete"]
+    assert "--min-age" in calls[1]
+    assert "7d" in calls[1]
+
+
+def test_storage_service_remote_retention_failure_does_not_fail_backup_job(tmp_path, monkeypatch):
+    call_index = {"value": 0}
+
+    def _fake_run(command, **kwargs):
+        call_index["value"] += 1
+        if call_index["value"] == 1:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="copy ok", stderr="")
+        return subprocess.CompletedProcess(args=command, returncode=11, stdout="", stderr="retention failed")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    service = StorageBackupService(
+        state_store=InMemoryStateStore(),
+        data_root=tmp_path,
+        clock=FrozenClock(datetime(2026, 4, 4, 12, 0, tzinfo=UTC)),
+    )
+    service.set_policies(
+        {
+            "sync_remote_enabled": True,
+            "remote_required": True,
+            "encryption_required": False,
+            "remote_retention_days": 7,
+            "rclone_binary": "rclone",
+            "rclone_remote_path": "gdrive:/sharelife-backup",
+        },
+        actor_id="admin-1",
+    )
+    started = service.run_backup_job(actor_id="admin-1")
+    assert started["job"]["status"] == "succeeded"
+    assert started["job"]["remote_retention"]["status"] == "failed"
+    assert started["job"]["remote_retention"]["error"] == "remote_retention_failed"

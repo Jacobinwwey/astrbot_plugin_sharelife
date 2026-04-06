@@ -89,6 +89,12 @@ def test_sharelife_init_wizard_supports_non_interactive_generation(tmp_path):
             "member-pass",
             "--admin-password",
             "admin-pass",
+            "--allow-anonymous-member",
+            "true",
+            "--anonymous-member-user-id",
+            "anon-wizard",
+            "--anonymous-member-allowlist",
+            "POST /api/trial,GET /api/preferences",
             "--enable-plugin-install-exec",
             "false",
             "--output",
@@ -106,4 +112,7 @@ def test_sharelife_init_wizard_supports_non_interactive_generation(tmp_path):
     assert 'startup_template_id: "community/support-care"' in text
     assert 'member_password: "member-pass"' in text
     assert 'admin_password: "admin-pass"' in text
+    assert "allow_anonymous_member: true" in text
+    assert 'anonymous_member_user_id: "anon-wizard"' in text
+    assert 'anonymous_member_allowlist: "POST /api/trial,GET /api/preferences"' in text
     assert "enabled: false" in text

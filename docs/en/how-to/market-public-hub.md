@@ -70,6 +70,15 @@ python3 scripts/publish_public_market_pack.py \
 
 3. The script writes `docs/public/market/entries/*.json` and rebuilds `catalog.snapshot.json`.
 
+## Optional auto-publish on approval
+
+1. To publish automatically right after reviewer/admin approval, enable:
+   - `sharelife.webui.public_market.auto_publish_profile_pack_approve=true`
+   - `sharelife.webui.public_market.root=/abs/path/to/docs/public` (optional override)
+   - `sharelife.webui.public_market.rebuild_snapshot_on_publish=true`
+2. API decision payload includes `public_market_publish` when this automation runs.
+3. Auto-publish remains fail-safe: approval result is preserved even if public publish fails.
+
 ## Cold backup
 
 1. Public market cold backup covers only `docs/public/market/`.

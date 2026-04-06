@@ -13,6 +13,16 @@ PRESET_CHOICES = (
     ("sharelife_companion", "community/support-care"),
     ("research_safe", "community/research-safe"),
 )
+DEFAULT_ANONYMOUS_MEMBER_ALLOWLIST = (
+    "POST /api/trial",
+    "GET /api/trial/status",
+    "POST /api/templates/install",
+    "GET /api/member/installations",
+    "POST /api/member/installations/refresh",
+    "GET /api/preferences",
+    "POST /api/preferences/mode",
+    "POST /api/preferences/observe",
+)
 
 
 def _to_bool(value: str | bool | None, default: bool = False) -> bool:
@@ -57,6 +67,21 @@ def _ask_choice(prompt: str, choices: tuple[str, ...], default: str) -> str:
     return default
 
 
+def _normalize_allowlist(raw: str, default: tuple[str, ...] = DEFAULT_ANONYMOUS_MEMBER_ALLOWLIST) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ",".join(default)
+    items = [item.strip() for item in text.split(",")]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return ",".join(deduped) or ",".join(default)
+
+
 def _ask_preset(default: str = "standard_qa") -> str:
     names = tuple(item[0] for item in PRESET_CHOICES)
     print("Choose a starter preset:")
@@ -90,6 +115,9 @@ def build_yaml(
     webui_auth_enabled: bool,
     member_password: str,
     admin_password: str,
+    allow_anonymous_member: bool,
+    anonymous_member_user_id: str,
+    anonymous_member_allowlist: str,
     enable_plugin_install_exec: bool,
 ) -> str:
     selected_provider = provider if provider in PROVIDER_CHOICES else "openai"
@@ -122,6 +150,9 @@ def build_yaml(
         "    auth:\n"
         f"      member_password: \"{auth_member}\"\n"
         f"      admin_password: \"{auth_admin}\"\n"
+        f"      allow_anonymous_member: {'true' if allow_anonymous_member else 'false'}\n"
+        f"      anonymous_member_user_id: \"{anonymous_member_user_id}\"\n"
+        f"      anonymous_member_allowlist: \"{anonymous_member_allowlist}\"\n"
         "      token_ttl_seconds: 7200\n"
         "      allow_query_token: false\n"
         "      login_rate_limit_window_seconds: 60\n"
@@ -149,6 +180,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--webui-auth", default="", help="true/false")
     parser.add_argument("--member-password", default="")
     parser.add_argument("--admin-password", default="")
+    parser.add_argument("--allow-anonymous-member", default="", help="true/false")
+    parser.add_argument("--anonymous-member-user-id", default="webui-user")
+    parser.add_argument(
+        "--anonymous-member-allowlist",
+        default="",
+        help="Comma-separated allowlist, e.g. 'POST /api/trial,GET /api/trial/status'",
+    )
     parser.add_argument("--enable-plugin-install-exec", default="", help="true/false")
     parser.add_argument("--yes", action="store_true", help="non-interactive mode with defaults")
     parser.add_argument("--print-only", action="store_true", help="print generated yaml to stdout only")
@@ -166,6 +204,11 @@ def run() -> int:
         webui_auth_enabled = _to_bool(args.webui_auth, default=False)
         member_password = str(args.member_password or "")
         admin_password = str(args.admin_password or "")
+        allow_anonymous_member = _to_bool(args.allow_anonymous_member, default=False)
+        anonymous_member_user_id = str(args.anonymous_member_user_id or "webui-user").strip() or "webui-user"
+        anonymous_member_allowlist = _normalize_allowlist(
+            str(args.anonymous_member_allowlist or ""),
+        )
         enable_plugin_install_exec = _to_bool(args.enable_plugin_install_exec, default=False)
     else:
         print("Sharelife Init Wizard")
@@ -183,9 +226,27 @@ def run() -> int:
         )
         member_password = ""
         admin_password = ""
+        allow_anonymous_member = False
+        anonymous_member_user_id = "webui-user"
+        anonymous_member_allowlist = _normalize_allowlist("")
         if webui_auth_enabled:
             member_password = _ask_text("Member password", default=str(args.member_password or ""))
             admin_password = _ask_text("Admin password", default=str(args.admin_password or ""))
+            allow_anonymous_member = _ask_bool(
+                "Allow anonymous member mode for limited endpoints?",
+                default=_to_bool(args.allow_anonymous_member, default=False),
+            )
+            if allow_anonymous_member:
+                anonymous_member_user_id = _ask_text(
+                    "Anonymous member user_id",
+                    default=str(args.anonymous_member_user_id or "webui-user"),
+                )
+                anonymous_member_allowlist = _normalize_allowlist(
+                    _ask_text(
+                        "Anonymous member endpoint allowlist (comma-separated METHOD /api/path)",
+                        default=str(args.anonymous_member_allowlist or _normalize_allowlist("")),
+                    )
+                )
         enable_plugin_install_exec = _ask_bool(
             "Enable plugin install command execution? (recommended: no for first run)",
             default=_to_bool(args.enable_plugin_install_exec, default=False),
@@ -198,6 +259,9 @@ def run() -> int:
         webui_auth_enabled=webui_auth_enabled,
         member_password=member_password,
         admin_password=admin_password,
+        allow_anonymous_member=allow_anonymous_member,
+        anonymous_member_user_id=anonymous_member_user_id,
+        anonymous_member_allowlist=anonymous_member_allowlist,
         enable_plugin_install_exec=enable_plugin_install_exec,
     )
 

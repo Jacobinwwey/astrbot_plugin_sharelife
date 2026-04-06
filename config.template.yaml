@@ -82,6 +82,12 @@ sharelife:
       # Reviewer session defaults to 7 days to reduce audit shift re-login churn.
       reviewer_token_ttl_seconds: 604800
       allow_query_token: false
+      # Optional anonymous mode for limited member endpoints (trial/install/preferences/installations).
+      allow_anonymous_member: false
+      # Anonymous traffic is pinned to this user_id and cannot cross-access other user_ids.
+      anonymous_member_user_id: "webui-user"
+      # Comma-separated METHOD /api/path entries. Empty => runtime secure defaults.
+      anonymous_member_allowlist: ""
       login_rate_limit_window_seconds: 60
       login_rate_limit_max_attempts: 10
       api_rate_limit_window_seconds: 60
@@ -97,6 +103,14 @@ sharelife:
       security_alert_window_seconds: 300
       security_alert_threshold: 3
       security_alert_cooldown_seconds: 300
+    public_market:
+      # Optional automation: when reviewer/admin approves a profile-pack submission,
+      # publish sanitized artifact to docs/public/market automatically.
+      auto_publish_profile_pack_approve: false
+      # Override public market root. Empty => <repo>/docs/public
+      root: ""
+      # Rebuild market snapshot after each successful auto-publish.
+      rebuild_snapshot_on_publish: true
 
   # Bot/profile-pack replication and security
   profile_pack:

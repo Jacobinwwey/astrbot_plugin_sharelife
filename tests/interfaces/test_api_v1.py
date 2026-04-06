@@ -232,6 +232,30 @@ def test_api_audit_summary_groups_reviewer_and_device_activity(tmp_path):
     assert any(item["action"] == "reviewer.device_registered" for item in device_row["actions"])
 
 
+def test_api_reviewer_invite_revoke_blocks_redeem_and_requires_admin(tmp_path):
+    api = build_api(tmp_path)
+    invite = api.admin_create_reviewer_invite(role="admin", admin_id="admin-1")
+    invite_code = invite["invite_code"]
+
+    denied = api.admin_revoke_reviewer_invite(
+        role="member",
+        invite_code=invite_code,
+        admin_id="member-1",
+    )
+    assert denied["error"] == "permission_denied"
+
+    revoked = api.admin_revoke_reviewer_invite(
+        role="admin",
+        invite_code=invite_code,
+        admin_id="admin-1",
+    )
+    assert revoked["status"] == "revoked"
+    assert revoked["invite_code"] == invite_code
+
+    redeemed = api.reviewer_redeem_invite(invite_code=invite_code, reviewer_id="reviewer-1")
+    assert redeemed["error"] == "invite_revoked"
+
+
 def test_api_retry_lock_and_version_guards(tmp_path):
     api = build_api(tmp_path)
 
@@ -491,6 +515,82 @@ def test_api_can_filter_templates_and_submissions(tmp_path):
     assert filtered_submissions["submissions"][0]["template_id"] == "community/basic-pending"
 
 
+def test_api_member_submission_views_are_owner_scoped(tmp_path):
+    api = build_api(tmp_path)
+    own = api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+    )
+    other = api.submit_template(
+        user_id="u2",
+        template_id="community/other",
+        version="1.0.0",
+    )
+
+    listed = api.member_list_submissions(user_id="u1")
+    assert listed["user_id"] == "u1"
+    assert len(listed["submissions"]) == 1
+    assert listed["submissions"][0]["submission_id"] == own["submission_id"]
+
+    own_detail = api.member_get_submission_detail(
+        user_id="u1",
+        submission_id=own["submission_id"],
+    )
+    assert own_detail["submission_id"] == own["submission_id"]
+    assert own_detail["template_id"] == "community/basic"
+
+    denied = api.member_get_submission_detail(
+        user_id="u1",
+        submission_id=other["submission_id"],
+    )
+    assert denied["error"] == "permission_denied"
+
+
+def test_api_member_submission_package_download_is_owner_scoped(tmp_path):
+    api = build_api(tmp_path)
+    own = api.submit_template_package(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+        filename="community-basic.zip",
+        content_base64=base64.b64encode(
+            build_bundle_zip(
+                {
+                    "template_id": "community/basic",
+                    "version": "1.0.0",
+                    "prompt": "Baseline prompt.",
+                }
+            )
+        ).decode("ascii"),
+    )
+    other = api.submit_template_package(
+        user_id="u2",
+        template_id="community/other",
+        version="1.0.0",
+        filename="community-other.zip",
+        content_base64=base64.b64encode(
+            build_bundle_zip(
+                {
+                    "template_id": "community/other",
+                    "version": "1.0.0",
+                    "prompt": "Other prompt.",
+                }
+            )
+        ).decode("ascii"),
+    )
+
+    own_package = api.member_get_submission_package(user_id="u1", submission_id=own["submission_id"])
+    assert own_package["submission_id"] == own["submission_id"]
+    assert own_package["filename"] == "community-basic.zip"
+
+    denied = api.member_get_submission_package(user_id="u1", submission_id=other["submission_id"])
+    assert denied["error"] == "permission_denied"
+
+    missing = api.member_get_submission_package(user_id="u1", submission_id="")
+    assert missing["error"] == "submission_id_required"
+
+
 def test_api_admin_storage_surface_supports_policy_backup_and_restore_cycle(tmp_path):
     api = build_api(tmp_path)
 
@@ -560,6 +660,31 @@ def test_api_admin_storage_surface_supports_policy_backup_and_restore_cycle(tmp_
         admin_id="admin-1",
     )
     assert cancelled["error"] == "restore_state_invalid"
+
+
+def test_api_admin_storage_run_job_requires_encrypted_remote_when_policy_enabled(tmp_path):
+    api = build_api(tmp_path)
+    updated = api.admin_storage_set_policies(
+        role="admin",
+        patch={
+            "sync_remote_enabled": True,
+            "remote_required": True,
+            "encryption_required": True,
+            "rclone_remote_path": "gdrive:/sharelife-backup",
+        },
+        admin_id="admin-1",
+    )
+    assert "error" not in updated
+
+    started = api.admin_storage_run_job(
+        role="admin",
+        admin_id="admin-1",
+        trigger="manual",
+        note="encrypted-remote-check",
+    )
+    assert "error" not in started
+    assert started["job"]["status"] == "failed"
+    assert started["job"]["reason"] == "remote_encryption_required"
 
 
 def test_api_can_filter_official_catalog_by_metadata(tmp_path):

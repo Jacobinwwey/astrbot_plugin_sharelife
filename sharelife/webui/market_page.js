@@ -103,6 +103,10 @@
     detailExpanded: false,
     compareDetailKey: "",
     memberInstallations: [],
+    memberTemplateSubmissions: [],
+    memberProfilePackSubmissions: [],
+    selectedProfilePackSubmissionId: "",
+    memberUserId: "webui-user",
     publicCatalogRows: [],
     publicCatalogAvailable: false,
     catalogSourceMode: "runtime",
@@ -117,6 +121,9 @@
     btnMarketTemplateInstall: "templates.install",
     btnMarketTemplateSubmit: "templates.submit",
     btnMarketProfilePackSubmit: "profile_pack.community.submit",
+    btnMarketListSubmissions: "member.submissions.read",
+    btnMarketListProfilePackSubmissions: "member.profile_pack.submissions.read",
+    btnMarketDownloadProfilePackSubmission: "member.profile_pack.submissions.export.download",
   })
   let storageSyncBound = false
   let uiEventBusBound = false
@@ -785,6 +792,11 @@
     const member = [
       "member.installations.read",
       "member.installations.refresh",
+      "member.submissions.read",
+      "member.submissions.detail.read",
+      "member.profile_pack.submissions.read",
+      "member.profile_pack.submissions.detail.read",
+      "member.profile_pack.submissions.export.download",
       "templates.trial.request",
       "templates.install",
       "templates.submit",
@@ -833,6 +845,7 @@
     Object.keys(CONTROL_CAPABILITY_MAP).forEach((controlId) => {
       applyCapabilityGuardToControl(controlId)
     })
+    syncMarketProfilePackSubmissionActions()
   }
 
   function setCapabilities(payload) {
@@ -1278,6 +1291,16 @@
         value: localizedPackLabel(data.pack_id),
       }))
     }
+    if (data.template_id) {
+      parts.push(i18nFormat("market.summary.part.template", "template={value}", {
+        value: String(data.template_id || ""),
+      }))
+    }
+    if (data.submission_id) {
+      parts.push(i18nFormat("market.summary.part.submission", "submission={value}", {
+        value: String(data.submission_id || ""),
+      }))
+    }
     if (data.version) {
       parts.push(i18nFormat("market.summary.part.version", "version={value}", { value: data.version }))
     }
@@ -1566,6 +1589,10 @@
       },
     )
     byId("marketAuthPanel").classList.toggle("hidden", !state.authRequired)
+    const authUserIdNode = byId("marketAuthUserId")
+    if (authUserIdNode) {
+      authUserIdNode.value = String(state.memberUserId || "webui-user").trim() || "webui-user"
+    }
     syncReviewerAuthFields()
     updateConsoleLinkVisibility()
     applyCapabilityGuards()
@@ -1625,6 +1652,7 @@
     if (!state.authRequired) {
       state.token = "no-auth"
       state.authRole = "member"
+      state.memberUserId = String(byId("marketAuthUserId")?.value || "webui-user").trim() || "webui-user"
     }
     updateAuthUi()
     await refreshCapabilities()
@@ -1634,6 +1662,9 @@
     const role = fixedAuthRole()
     const password = byId("marketAuthPassword").value
     const body = { role, password }
+    if (role === "member") {
+      body.user_id = String(byId("marketAuthUserId")?.value || "webui-user").trim() || "webui-user"
+    }
     if (role === "reviewer") {
       body.reviewer_id = String(byId("marketAuthReviewerId")?.value || "").trim()
       body.reviewer_device_key = String(byId("marketAuthReviewerDeviceKey")?.value || "").trim()
@@ -1652,6 +1683,9 @@
     }
     state.token = String(response.data.token || "")
     state.authRole = String(response.data.role || role)
+    if (state.authRole === "member") {
+      state.memberUserId = String(response.data.user_id || body.user_id || state.memberUserId || "webui-user").trim() || "webui-user"
+    }
     state.availableRoles = Array.isArray(response.data.available_roles)
       ? response.data.available_roles
       : state.availableRoles
@@ -1672,7 +1706,7 @@
 
   function marketActor() {
     return {
-      user_id: "webui-user",
+      user_id: String(state.memberUserId || "webui-user").trim() || "webui-user",
       session_id: "market-session",
     }
   }
@@ -1736,7 +1770,11 @@
   }
 
   function setMarketInstallationsState(status, message) {
-    const node = byId("marketInstallationsState")
+    setCollectionState("marketInstallationsState", status, message)
+  }
+
+  function setCollectionState(nodeId, status, message) {
+    const node = byId(nodeId)
     if (!node) return
     node.classList.remove("is-neutral", "is-warning", "is-danger", "is-success")
     if (status === "loading" || status === "warning") node.classList.add("is-warning")
@@ -1744,6 +1782,45 @@
     else if (status === "success") node.classList.add("is-success")
     else node.classList.add("is-neutral")
     node.textContent = message
+  }
+
+  function setMarketTemplateSubmissionsState(status, message) {
+    setCollectionState("marketSubmissionsState", status, message)
+  }
+
+  function setMarketProfilePackSubmissionsState(status, message) {
+    setCollectionState("marketProfilePackSubmissionsState", status, message)
+  }
+
+  function selectedProfilePackSubmissionId() {
+    const selected = String(state.selectedProfilePackSubmissionId || "").trim()
+    if (selected) return selected
+    const first = Array.isArray(state.memberProfilePackSubmissions) ? state.memberProfilePackSubmissions[0] : null
+    return String((first && (first.submission_id || first.id)) || "").trim()
+  }
+
+  function syncMarketProfilePackSubmissionActions() {
+    const button = byId("btnMarketDownloadProfilePackSubmission")
+    if (!button) return
+    const required = "member.profile_pack.submissions.export.download"
+    const allowed = hasCapability(required)
+    const submissionId = selectedProfilePackSubmissionId()
+    const enabled = allowed && Boolean(submissionId)
+    button.disabled = !enabled
+    button.setAttribute("aria-disabled", enabled ? "false" : "true")
+    if (!allowed) {
+      button.title = i18nFormat(
+        "capability.locked_hint",
+        "Requires capability: {capability}",
+        { capability: required },
+      )
+      return
+    }
+    if (!submissionId) {
+      button.title = i18nMessage("moderation.no_selection", "No submission selected.")
+      return
+    }
+    button.removeAttribute("title")
   }
 
   function updateSelectedFileName(inputId, outputId, emptyKey, emptyFallback) {
@@ -1876,6 +1953,296 @@
         count: rows.length,
       }),
     )
+  }
+
+  function renderMemberSubmissionList({
+    rootId,
+    rows,
+    emptyKey,
+    emptyFallback,
+    titleBuilder,
+    metaBuilder,
+    onSelect,
+  }) {
+    const root = byId(rootId)
+    if (!root) return
+    root.innerHTML = ""
+    const items = Array.isArray(rows) ? rows : []
+    if (!items.length) {
+      root.textContent = i18nMessage(emptyKey, emptyFallback)
+      return
+    }
+    items.forEach((item) => {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.className = "member-task-item"
+      const title = document.createElement("strong")
+      title.textContent = titleBuilder(item)
+      button.appendChild(title)
+      const meta = document.createElement("span")
+      meta.textContent = metaBuilder(item)
+      button.appendChild(meta)
+      button.addEventListener("click", () => {
+        onSelect(item)
+      })
+      root.appendChild(button)
+    })
+  }
+
+  function renderMarketTemplateSubmissions(rows) {
+    renderMemberSubmissionList({
+      rootId: "marketSubmissionsList",
+      rows,
+      emptyKey: "submissions.empty_unfiltered",
+      emptyFallback: "No submissions are available yet.",
+      titleBuilder: (item) => {
+        const templateId = String(item.template_id || "-").trim() || "-"
+        const version = String(item.version || "").trim()
+        return version ? `${templateId}@${version}` : templateId
+      },
+      metaBuilder: (item) => {
+        const submissionId = String(item.submission_id || item.id || "-").trim() || "-"
+        const status = enumLabel("status", String(item.status || "unknown"))
+        const risk = enumLabel("risk", String(item.risk_level || "unknown"))
+        return `${submissionId} · ${status} · ${risk}`
+      },
+      onSelect: (item) => {
+        const templateId = String(item.template_id || "").trim()
+        const submissionId = String(item.submission_id || item.id || "").trim()
+        if (templateId) {
+          const node = byId("marketTemplateId")
+          if (node) node.value = templateId
+        }
+        if (submissionId) {
+          void loadMarketTemplateSubmissionDetail(submissionId)
+        }
+      },
+    })
+  }
+
+  function renderMarketProfilePackSubmissions(rows) {
+    renderMemberSubmissionList({
+      rootId: "marketProfilePackSubmissionsList",
+      rows,
+      emptyKey: "profile_pack.market.submissions_empty_unfiltered",
+      emptyFallback: "No profile-pack submissions are available yet.",
+      titleBuilder: (item) => {
+        const packId = String(item.pack_id || "-").trim() || "-"
+        const packType = String(item.pack_type || "").trim()
+        return packType ? `${packId} (${enumLabel("pack_type", packType)})` : packId
+      },
+      metaBuilder: (item) => {
+        const submissionId = String(item.submission_id || item.id || "-").trim() || "-"
+        const status = enumLabel("status", String(item.status || "unknown"))
+        const risk = enumLabel("risk", String(item.risk_level || "unknown"))
+        return `${submissionId} · ${status} · ${risk}`
+      },
+      onSelect: (item) => {
+        const submissionId = String(item.submission_id || item.id || "").trim()
+        state.selectedProfilePackSubmissionId = submissionId
+        syncMarketProfilePackSubmissionActions()
+        if (submissionId) {
+          void loadMarketProfilePackSubmissionDetail(submissionId)
+        }
+      },
+    })
+  }
+
+  async function loadMarketTemplateSubmissionDetail(submissionId) {
+    const actor = marketActor()
+    const sid = String(submissionId || "").trim()
+    if (!sid) return
+    const response = await api(`/api/member/submissions/detail${queryString({ user_id: actor.user_id, submission_id: sid })}`)
+    renderLog("member_submission_detail_market", response)
+    if (!response.data.ok) {
+      updateSummary({ status: "error", message: response.data.message || "request_failed" })
+      return response
+    }
+    const payload = apiData(response)
+    const templateId = String(payload.template_id || "").trim()
+    if (templateId) {
+      const node = byId("marketTemplateId")
+      if (node) node.value = templateId
+    }
+    updateSummary(payload)
+    return response
+  }
+
+  async function loadMarketProfilePackSubmissionDetail(submissionId) {
+    const actor = marketActor()
+    const sid = String(submissionId || "").trim()
+    if (!sid) return
+    const response = await api(
+      `/api/member/profile-pack/submissions/detail${queryString({ user_id: actor.user_id, submission_id: sid })}`,
+    )
+    renderLog("member_profile_pack_submission_detail_market", response)
+    if (!response.data.ok) {
+      updateSummary({ status: "error", message: response.data.message || "request_failed" })
+      return response
+    }
+    const payload = apiData(response)
+    const packId = String(payload.pack_id || "").trim()
+    const artifactId = String(payload.artifact_id || "").trim()
+    if (packId) {
+      const packNode = byId("marketPackId")
+      if (packNode) packNode.value = packId
+    }
+    if (artifactId) {
+      const artifactNode = byId("marketSubmitArtifactId")
+      if (artifactNode) artifactNode.value = artifactId
+    }
+    updateSummary(payload)
+    return response
+  }
+
+  async function listMarketTemplateSubmissions() {
+    if (!hasCapability("member.submissions.read")) {
+      setMarketTemplateSubmissionsState(
+        "warning",
+        i18nFormat(
+          "capability.locked_hint",
+          "Requires capability: {capability}",
+          { capability: "member.submissions.read" },
+        ),
+      )
+      return
+    }
+    const actor = marketActor()
+    setMarketTemplateSubmissionsState(
+      "loading",
+      i18nMessage("submissions.loading", "Loading submissions..."),
+    )
+    const response = await api(`/api/member/submissions${queryString({ user_id: actor.user_id })}`)
+    renderLog("member_list_submissions_market", response)
+    if (!response.data.ok) {
+      setMarketTemplateSubmissionsState(
+        "error",
+        i18nFormat("submissions.error", "Failed to load submissions: {message}", {
+          message: String(response.data.message || "request_failed"),
+        }),
+      )
+      return response
+    }
+    const rows = Array.isArray(apiData(response).submissions) ? apiData(response).submissions : []
+    state.memberTemplateSubmissions = rows
+    renderMarketTemplateSubmissions(rows)
+    setMarketTemplateSubmissionsState(
+      rows.length ? "success" : "neutral",
+      rows.length
+        ? i18nFormat("market.submissions.ready", "Submissions: {count}", { count: rows.length })
+        : i18nMessage("submissions.empty_unfiltered", "No submissions are available yet."),
+    )
+    return response
+  }
+
+  async function listMarketProfilePackSubmissions() {
+    if (!hasCapability("member.profile_pack.submissions.read")) {
+      setMarketProfilePackSubmissionsState(
+        "warning",
+        i18nFormat(
+          "capability.locked_hint",
+          "Requires capability: {capability}",
+          { capability: "member.profile_pack.submissions.read" },
+        ),
+      )
+      return
+    }
+    const actor = marketActor()
+    setMarketProfilePackSubmissionsState(
+      "loading",
+      i18nMessage("profile_pack.market.submissions_loading", "Loading profile-pack submissions..."),
+    )
+    const response = await api(`/api/member/profile-pack/submissions${queryString({ user_id: actor.user_id })}`)
+    renderLog("member_list_profile_pack_submissions_market", response)
+    if (!response.data.ok) {
+      setMarketProfilePackSubmissionsState(
+        "error",
+        i18nFormat("profile_pack.market.submissions_error", "Failed to load profile-pack submissions: {message}", {
+          message: String(response.data.message || "request_failed"),
+        }),
+      )
+      return response
+    }
+    const rows = Array.isArray(apiData(response).submissions) ? apiData(response).submissions : []
+    state.memberProfilePackSubmissions = rows
+    const selectedId = selectedProfilePackSubmissionId()
+    const selectedExists = rows.some((item) => String(item.submission_id || item.id || "").trim() === selectedId)
+    state.selectedProfilePackSubmissionId = selectedExists
+      ? selectedId
+      : String((rows[0] && (rows[0].submission_id || rows[0].id)) || "").trim()
+    renderMarketProfilePackSubmissions(rows)
+    syncMarketProfilePackSubmissionActions()
+    setMarketProfilePackSubmissionsState(
+      rows.length ? "success" : "neutral",
+      rows.length
+        ? i18nFormat("market.profile_pack_submissions.ready", "Profile-pack submissions: {count}", { count: rows.length })
+        : i18nMessage("profile_pack.market.submissions_empty_unfiltered", "No profile-pack submissions are available yet."),
+    )
+    return response
+  }
+
+  async function downloadMarketProfilePackSubmissionExport() {
+    if (!hasCapability("member.profile_pack.submissions.export.download")) {
+      updateSummary({
+        status: "permission_denied",
+        message: i18nFormat(
+          "capability.locked_hint",
+          "Requires capability: {capability}",
+          { capability: "member.profile_pack.submissions.export.download" },
+        ),
+      })
+      syncMarketProfilePackSubmissionActions()
+      return
+    }
+    const submissionId = selectedProfilePackSubmissionId()
+    if (!submissionId) {
+      updateSummary({
+        status: "error",
+        message: i18nMessage("moderation.no_selection", "No submission selected."),
+      })
+      syncMarketProfilePackSubmissionActions()
+      return
+    }
+    const actor = marketActor()
+    const response = await fetch(
+      `/api/member/profile-pack/submissions/export/download${queryString({
+        user_id: actor.user_id,
+        submission_id: submissionId,
+      })}`,
+      {
+        method: "GET",
+        headers: state.token && state.token !== "no-auth" ? { Authorization: `Bearer ${state.token}` } : {},
+      },
+    )
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ ok: false, message: "download_failed" }))
+      renderLog("member_profile_pack_submission_download_market", { status: response.status, data })
+      updateSummary({
+        status: "download_failed",
+        message: String((data && data.message) || "download_failed"),
+      })
+      return
+    }
+    const blob = await response.blob()
+    const disposition = response.headers.get("Content-Disposition") || ""
+    const match = disposition.match(/filename=\"?([^"]+)\"?$/i)
+    const filename = match ? match[1] : `${submissionId}.zip`
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    const payload = {
+      status: "downloaded",
+      submission_id: submissionId,
+      filename,
+      size_bytes: blob.size,
+    }
+    renderLog("member_profile_pack_submission_download_market", { status: response.status, data: payload })
+    updateSummary(payload)
   }
 
   function catalogFilters() {
@@ -3001,6 +3368,7 @@
     renderLog("market_template_submit", response)
     updateSummary(response.data.ok ? apiData(response) : { status: "error", message: response.data.message || "request_failed" })
     if (response.data.ok) {
+      void listMarketTemplateSubmissions()
       void listCatalog()
     }
   }
@@ -3026,6 +3394,7 @@
     renderLog("market_profile_pack_submit", response)
     updateSummary(response.data.ok ? apiData(response) : { status: "error", message: response.data.message || "request_failed" })
     if (response.data.ok) {
+      void listMarketProfilePackSubmissions()
       void listCatalog()
     }
   }
@@ -3110,6 +3479,24 @@
         void loadMarketInstallations({ refresh: true })
       })
     }
+    const listSubmissionsBtn = byId("btnMarketListSubmissions")
+    if (listSubmissionsBtn) {
+      listSubmissionsBtn.addEventListener("click", () => {
+        void listMarketTemplateSubmissions()
+      })
+    }
+    const listProfilePackSubmissionsBtn = byId("btnMarketListProfilePackSubmissions")
+    if (listProfilePackSubmissionsBtn) {
+      listProfilePackSubmissionsBtn.addEventListener("click", () => {
+        void listMarketProfilePackSubmissions()
+      })
+    }
+    const downloadProfilePackSubmissionBtn = byId("btnMarketDownloadProfilePackSubmission")
+    if (downloadProfilePackSubmissionBtn) {
+      downloadProfilePackSubmissionBtn.addEventListener("click", () => {
+        void downloadMarketProfilePackSubmissionExport()
+      })
+    }
     const templateTrialBtn = byId("btnMarketTemplateTrial")
     if (templateTrialBtn) {
       templateTrialBtn.addEventListener("click", () => {
@@ -3168,6 +3555,8 @@
     await refreshHealth()
     await initAuth()
     await loadMarketInstallations()
+    await listMarketTemplateSubmissions()
+    await listMarketProfilePackSubmissions()
     if (!state.authRequired && hasCapability("profile_pack.catalog.read")) {
       await listCatalog()
     }

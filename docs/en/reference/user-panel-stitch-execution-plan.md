@@ -14,14 +14,21 @@ Implemented in the current codebase:
    - upload center with drag/drop
    - task queue/history
 2. `/market` now exposes equivalent install/upload controls, local installation refresh, and drag/drop upload affordance.
-3. Backward-compatible API extensions are live for:
+3. `/market` now includes member-scoped upload management surfaces:
+   - my template submissions list + detail jump
+   - my profile-pack submissions list + detail jump
+4. Backward-compatible API extensions are live for:
    - `GET /api/member/installations`
    - `POST /api/member/installations/refresh`
+   - `GET /api/member/submissions`
+   - `GET /api/member/submissions/detail`
+   - `GET /api/member/profile-pack/submissions`
+   - `GET /api/member/profile-pack/submissions/detail`
    - `install_options`
    - `upload_options`
    - `submit_options`
-4. Verification landed in interface tests, WebUI unit tests, and browser E2E.
-5. `/member` is now spotlight-first: locale switch, primary local-refresh action, and a single global search field lead the page; duplicated member-side `Market Hub` framing was removed from the result surface.
+5. Verification landed in interface tests, WebUI unit tests, and browser E2E.
+6. `/member` is now spotlight-first: locale switch, primary local-refresh action, and a single global search field lead the page; duplicated member-side `Market Hub` framing was removed from the result surface.
 
 Current tradeoff:
 
@@ -70,6 +77,10 @@ Restructure the user-facing WebUI into four explicit workflows while preserving 
 
 1. `GET /api/member/installations`  
 2. `POST /api/member/installations/refresh`
+3. `GET /api/member/submissions`
+4. `GET /api/member/submissions/detail`
+5. `GET /api/member/profile-pack/submissions`
+6. `GET /api/member/profile-pack/submissions/detail`
 
 Response envelope stays unchanged:
 `{ ok, message, data, error? }`

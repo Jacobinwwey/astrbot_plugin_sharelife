@@ -74,6 +74,15 @@ python3 scripts/publish_public_market_pack.py \
 
 3. このスクリプトは `docs/public/market/entries/*.json` を書き込み、`catalog.snapshot.json` を再生成します。
 
+## 任意: 承認直後の自動公開
+
+1. reviewer/admin の承認後に自動公開する場合は以下を有効化します。
+   - `sharelife.webui.public_market.auto_publish_profile_pack_approve=true`
+   - `sharelife.webui.public_market.root=/abs/path/to/docs/public`（任意上書き）
+   - `sharelife.webui.public_market.rebuild_snapshot_on_publish=true`
+2. 自動公開が実行されると、決定 API のレスポンスに `public_market_publish` が含まれます。
+3. 自動公開は fail-safe 設計で、公開失敗時も承認結果自体は維持されます。
+
 ## コールドバックアップ
 
 1. バックアップ対象は `docs/public/market/` のみです。

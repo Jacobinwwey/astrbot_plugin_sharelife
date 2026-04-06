@@ -29,6 +29,18 @@ Core panels include Trial Status and Admin Apply Workflow.
       "member_password": "",
       "token_ttl_seconds": 7200,
       "allow_query_token": false,
+      "allow_anonymous_member": false,
+      "anonymous_member_user_id": "webui-user",
+      "anonymous_member_allowlist": [
+        "POST /api/trial",
+        "GET /api/trial/status",
+        "POST /api/templates/install",
+        "GET /api/member/installations",
+        "POST /api/member/installations/refresh",
+        "GET /api/preferences",
+        "POST /api/preferences/mode",
+        "POST /api/preferences/observe"
+      ],
       "login_rate_limit_window_seconds": 60,
       "login_rate_limit_max_attempts": 10,
       "api_rate_limit_window_seconds": 60,
@@ -56,6 +68,8 @@ Auth behavior:
 10. `GET /api/ui/capabilities` stays readable before login and returns the effective role + operation list used by UI-level capability gating.
 11. Default WebUI responses include security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Content-Security-Policy`), configurable under `webui.security_headers`.
 12. Reviewer/admin auth procedures and secret-backup instructions are intentionally kept out of the public docs surface.
+13. If `allow_anonymous_member=true`, selected member endpoints (`trial/install/preferences/installations`) can run without login, but are still pinned to `anonymous_member_user_id` and cannot cross-access other `user_id`s.
+14. `anonymous_member_allowlist` lets operators override the anonymous endpoint set explicitly (`"METHOD /api/path"` entries). Missing field falls back to the secure default set above.
 
 ## Start and routes
 

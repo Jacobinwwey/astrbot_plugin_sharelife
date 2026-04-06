@@ -146,6 +146,14 @@ class SharelifePlugin(Star):
         self.profile_pack_bootstrap_service = ProfilePackBootstrapService(
             profile_pack_service=self.profile_pack_service,
         )
+        public_market_cfg = self._public_market_config()
+        public_market_root = str(
+            public_market_cfg.get(
+                "root",
+                str(Path(__file__).resolve().parent / "docs" / "public"),
+            )
+            or str(Path(__file__).resolve().parent / "docs" / "public")
+        ).strip()
         self.trial_request_service = TrialRequestService(
             trial_service=self.trial_service,
             retry_queue_service=self.retry_queue_service,
@@ -166,6 +174,15 @@ class SharelifePlugin(Star):
             pipeline_orchestrator=self.pipeline_orchestrator,
             reviewer_auth_service=self.reviewer_auth_service,
             storage_backup_service=self.storage_backup_service,
+            public_market_auto_publish_profile_pack_approve=self._to_bool(
+                public_market_cfg.get("auto_publish_profile_pack_approve"),
+                default=False,
+            ),
+            public_market_root=public_market_root,
+            public_market_rebuild_snapshot_on_publish=self._to_bool(
+                public_market_cfg.get("rebuild_snapshot_on_publish"),
+                default=True,
+            ),
         )
         self.web_api = SharelifeWebApiV1(
             api=self.api,
@@ -268,6 +285,19 @@ class SharelifePlugin(Star):
         raw = self.config.get("profile_pack", {}) if isinstance(self.config, dict) else {}
         if isinstance(raw, dict):
             return raw
+        return {}
+
+    def _public_market_config(self) -> dict:
+        if not isinstance(self.config, dict):
+            return {}
+        webui_cfg = self.config.get("webui", {})
+        if isinstance(webui_cfg, dict):
+            public_market_cfg = webui_cfg.get("public_market", {})
+            if isinstance(public_market_cfg, dict):
+                return public_market_cfg
+        fallback = self.config.get("public_market", {})
+        if isinstance(fallback, dict):
+            return fallback
         return {}
 
     @staticmethod

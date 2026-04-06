@@ -36,16 +36,18 @@
 - reviewer/device/action 集計監査。
 - 公開 docs と私有 docs の分離。operator/auth レベルの runbook は公開サイトから外した。
 
-### 3.2 まだ閉じていないもの
-- `admin -> reviewer` キー管理は frontend から backend までまだ閉ループになっていません。
-  - backend には invite/device/session の土台がある。
-  - admin WebUI には reviewer ライフサイクル管理コンソールがまだ不足している。
-- owner-aware 判定は全書き込み経路をまだ覆っていません。
-  - 投稿や profile-pack リソースには owner 情報がある。
-  - ただし、全ユーザー向け mutation に統一強制されてはいない。
+### 3.2 残るギャップ
+- owner-aware は「アップロード + アップロード済みリソース管理」経路で適用済みです。
+  - template/profile-pack の submit と、member 向け submission 一覧/詳細参照で owner 境界を強制。
+  - preferences や一般的なマーケット参照など、非アップロード経路は owner-bound 対象にしません。
 - reviewer セッションモデルは今後の整理対象です。
   - ロードマップ上で reviewer 全体の single active session は目標状態としません。
   - 今後は device 単位の無効化へ寄せます。
+- 現行のローカル認証モデルでは `admin -> reviewer` ライフサイクル閉ループは完了しています。
+  - 招待コードの発行・一覧・失効、失効コードの引き換え拒否
+  - reviewer アカウント/デバイス可視化
+  - デバイス失効/リセットと監査トレース
+  - 公開 docs はインターフェース情報に限定し、運用 SOP は私有文書で管理
 
 ## 4. 公開向け実行方針
 
@@ -69,18 +71,13 @@
 以下を満たした時だけ、この段階を完了とする：
 1. reviewer 招待/端末/セッション経路を含む API / WebUI テストが通る。  
 2. 未認証で特権ルートに入ると `401`、認証済みだが越権なら `403` を返す。  
-3. ユーザーの書き込み操作が owner-aware となり、他人の非公開リソースを操作できない。  
+3. アップロードとアップロード済みリソース管理が owner-aware となり、他人リソースを操作できない。  
 4. 公開 docs が reviewer/admin の運用手順、secret 処理、復旧手順を露出しない。  
-5. `admin -> reviewer` キー管理閉ループが「進行中の作業」として明記され、完了済みとは扱われない。  
+5. `admin -> reviewer` ライフサイクル閉ループがコード・テスト・公開インターフェース文書に反映され、機微な運用 SOP は私有文書に維持される。  
 
 ## 6. 次段階の重点
 
-1. `admin -> reviewer` ライフサイクルを閉じる：
-   - invite 発行
-   - device 可視化とリセット
-   - session revoke
-   - audit trace
-2. `Creator` ロールを増やさず、owner-aware backend enforcement を追加する。
-3. reviewer セッション無効化を device 単位に整理する。
-4. コード優先の権限宣言と docs 同期へ寄せる。
-5. ローカルモデルが安定した後にのみ、外部 IdP 連携を評価する。  
+1. `Creator` ロールを増やさず、owner-aware をアップロード管理経路で維持する。
+2. reviewer セッション無効化を device 単位に整理する。
+3. コード優先の権限宣言と docs 同期へ寄せる。
+4. ローカルモデルが安定した後にのみ、外部 IdP 連携を評価する。  

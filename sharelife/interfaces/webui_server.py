@@ -125,6 +125,12 @@ class SharelifeWebUIServer:
     _MEMBER_UI_OPERATIONS: set[str] = {
         "member.installations.read",
         "member.installations.refresh",
+        "member.submissions.read",
+        "member.submissions.detail.read",
+        "member.submissions.package.download",
+        "member.profile_pack.submissions.read",
+        "member.profile_pack.submissions.detail.read",
+        "member.profile_pack.submissions.export.download",
         "notifications.read",
         "preferences.read",
         "preferences.write",
@@ -151,6 +157,7 @@ class SharelifeWebUIServer:
     _ADMIN_UI_OPERATIONS: set[str] = {
         "admin.apply.workflow",
         "admin.audit.read",
+        "admin.reviewer.lifecycle.manage",
         "admin.storage.jobs.read",
         "admin.storage.jobs.run",
         "admin.storage.local_summary.read",
@@ -197,6 +204,9 @@ class SharelifeWebUIServer:
         self._auth_token_ttl_seconds = 7200
         self._reviewer_token_ttl_seconds = 7 * 24 * 3600
         self._auth_allow_query_token = False
+        self._auth_allow_anonymous_member = False
+        self._auth_anonymous_member_user_id = "webui-user"
+        self._auth_anonymous_member_allowlist = self._anonymous_member_default_api_paths()
         self._login_rate_limit_window_seconds = 60
         self._login_rate_limit_max_attempts = 10
         self._login_attempts: dict[str, list[float]] = {}
@@ -332,6 +342,21 @@ class SharelifeWebUIServer:
             _to_int(auth.get("reviewer_token_ttl_seconds"), 7 * 24 * 3600),
         )
         self._auth_allow_query_token = _to_bool(auth.get("allow_query_token"), default=False)
+        self._auth_allow_anonymous_member = _to_bool(
+            auth.get("allow_anonymous_member"),
+            default=False,
+        )
+        self._auth_anonymous_member_user_id = (
+            str(auth.get("anonymous_member_user_id", "webui-user") or "webui-user").strip()
+            or "webui-user"
+        )
+        raw_anonymous_member_allowlist = auth.get("anonymous_member_allowlist")
+        if raw_anonymous_member_allowlist is None:
+            self._auth_anonymous_member_allowlist = self._anonymous_member_default_api_paths()
+        else:
+            self._auth_anonymous_member_allowlist = self._parse_anonymous_member_allowlist(
+                raw_anonymous_member_allowlist,
+            )
         self._login_rate_limit_window_seconds = max(
             1,
             _to_int(auth.get("login_rate_limit_window_seconds"), 60),
@@ -474,10 +499,16 @@ class SharelifeWebUIServer:
         return getattr(inner_api, "reviewer_auth_service", None)
 
     @staticmethod
-    def _session_key(role: str, *, subject: str = "") -> str:
+    def _session_key(role: str, *, subject: str = "", device_id: str = "") -> str:
         normalized_role = SharelifeWebUIServer._normalize_role(role)
         if normalized_role == "reviewer":
-            return f"reviewer:{str(subject or '').strip()}"
+            reviewer_id = str(subject or "").strip()
+            reviewer_device_id = str(device_id or "").strip()
+            return f"reviewer:{reviewer_id}:{reviewer_device_id or 'default-device'}"
+        if normalized_role == "member":
+            member_id = str(subject or "").strip()
+            if member_id:
+                return f"member:{member_id}"
         return normalized_role
 
     def _session_from_token(self, token: str) -> dict[str, Any] | None:
@@ -521,12 +552,22 @@ class SharelifeWebUIServer:
         if normalized_role not in self._auth_passwords:
             raise ValueError("PROFILE_WEBUI_AUTH_ROLE_UNAVAILABLE")
         normalized_subject = str(subject or "").strip()
+        normalized_device_id = str(device_id or "").strip()
         if normalized_role == "reviewer" and not normalized_subject:
             raise ValueError("PROFILE_WEBUI_REVIEWER_ID_REQUIRED")
-        session_key = self._session_key(normalized_role, subject=normalized_subject)
+        session_key = self._session_key(
+            normalized_role,
+            subject=normalized_subject,
+            device_id=normalized_device_id,
+        )
         previous = self._auth_session_tokens.get(session_key)
         if previous:
-            self._revoke_token(previous, role=normalized_role, subject=normalized_subject)
+            self._revoke_token(
+                previous,
+                role=normalized_role,
+                subject=normalized_subject,
+                device_id=normalized_device_id,
+            )
         ttl_seconds = self._auth_token_ttl_seconds
         if normalized_role == "reviewer":
             ttl_seconds = self._reviewer_token_ttl_seconds
@@ -535,13 +576,20 @@ class SharelifeWebUIServer:
         self._auth_tokens[token] = {
             "role": normalized_role,
             "subject": normalized_subject,
-            "device_id": str(device_id or "").strip(),
+            "device_id": normalized_device_id,
             "issued_at": float(time.time()),
             "expires_at": time.time() + float(ttl_seconds),
         }
         return token
 
-    def _revoke_token(self, token: str, *, role: str = "", subject: str = "") -> None:
+    def _revoke_token(
+        self,
+        token: str,
+        *,
+        role: str = "",
+        subject: str = "",
+        device_id: str = "",
+    ) -> None:
         text = str(token or "").strip()
         if not text:
             return
@@ -550,17 +598,24 @@ class SharelifeWebUIServer:
         if normalized_role == "user":
             normalized_role = "member"
         normalized_subject = str(subject or "").strip()
+        normalized_device_id = str(device_id or "").strip()
         if isinstance(session, dict):
             if not normalized_role:
                 normalized_role = self._normalize_role(str(session.get("role", "") or ""))
             if not normalized_subject:
                 normalized_subject = str(session.get("subject", "") or "").strip()
+            if not normalized_device_id:
+                normalized_device_id = str(session.get("device_id", "") or "").strip()
         if not normalized_role:
             for session_key, current in list(self._auth_session_tokens.items()):
                 if current == text:
                     self._auth_session_tokens.pop(session_key, None)
             return
-        key = self._session_key(normalized_role, subject=normalized_subject)
+        key = self._session_key(
+            normalized_role,
+            subject=normalized_subject,
+            device_id=normalized_device_id,
+        )
         if self._auth_session_tokens.get(key) == text:
             self._auth_session_tokens.pop(key, None)
 
@@ -955,6 +1010,7 @@ class SharelifeWebUIServer:
             started = time.perf_counter()
             path = request.url.path
             method = request.method
+            normalized_path = self._normalize_api_path(path)
 
             def finalize(response, *, error_code: str = "", role: str = ""):
                 out = self._apply_security_headers(response)
@@ -1005,7 +1061,7 @@ class SharelifeWebUIServer:
                         role=role or "public",
                     )
 
-            if path.startswith("/api") and path != "/api/health":
+            if normalized_path.startswith("/api") and normalized_path != "/api/health":
                 rate_limit_role = "public"
                 if self._auth_enabled:
                     auth_header = request.headers.get("Authorization", "")
@@ -1017,18 +1073,22 @@ class SharelifeWebUIServer:
                     role = self._role_from_token(token)
                     if role in {"member", "reviewer", "admin"}:
                         rate_limit_role = role
-                allowed, retry_after = self._api_rate_limit_status(request, rate_limit_role, path)
+                allowed, retry_after = self._api_rate_limit_status(
+                    request,
+                    rate_limit_role,
+                    normalized_path,
+                )
                 if not allowed:
                     self._record_rate_limit_event(
                         scope="api",
                         role=rate_limit_role,
-                        path=path,
+                        path=normalized_path,
                     )
                     self._maybe_emit_security_alert(
                         request=request,
                         event="api_rate_limited",
                         role=rate_limit_role,
-                        path=path,
+                        path=normalized_path,
                         reason="sensitive_api_rate_limit",
                         threshold=1,
                     )
@@ -1043,21 +1103,28 @@ class SharelifeWebUIServer:
             if not self._auth_enabled:
                 return await invoke_next(role="public")
 
-            if path in self._public_api_paths():
+            if self._is_public_api_request(path=normalized_path, method=method):
                 return await invoke_next(role="public")
-            if not path.startswith("/api"):
+            if not normalized_path.startswith("/api"):
                 return await invoke_next(role="public")
 
             token = self._token_from_request(request)
             session = self._session_from_token(token)
             role = self._normalize_role(str(session.get("role", "") or "")) if isinstance(session, dict) else None
             if role is None:
+                if self._is_anonymous_member_api_request(path=normalized_path, method=method):
+                    request.state.sharelife_auth_role = "member"
+                    request.state.sharelife_auth_subject = self._auth_anonymous_member_user_id
+                    request.state.sharelife_auth_device_id = ""
+                    request.state.sharelife_auth_anonymous = True
+                    self._record_auth_event(event="anonymous_member_session", role="member")
+                    return await invoke_next(role="member")
                 self._record_auth_event(event="unauthorized", role="public")
                 self._maybe_emit_security_alert(
                     request=request,
                     event="unauthorized_privileged_route",
                     role="public",
-                    path=path,
+                    path=normalized_path,
                     reason="missing_or_expired_token",
                     threshold=1,
                 )
@@ -1073,15 +1140,15 @@ class SharelifeWebUIServer:
             request.state.sharelife_auth_role = role
             request.state.sharelife_auth_subject = str(session.get("subject", "") or "") if isinstance(session, dict) else ""
             request.state.sharelife_auth_device_id = str(session.get("device_id", "") or "") if isinstance(session, dict) else ""
-            if path.startswith("/api/admin") and role != "admin":
-                if role == "reviewer" and self._reviewer_admin_path_allowed(path):
+            if normalized_path.startswith("/api/admin") and role != "admin":
+                if role == "reviewer" and self._reviewer_admin_path_allowed(normalized_path):
                     return await invoke_next(role=role)
                 self._record_auth_event(event="forbidden", role=role)
                 self._maybe_emit_security_alert(
                     request=request,
                     event="forbidden_admin_route",
                     role=role,
-                    path=path,
+                    path=normalized_path,
                     reason="admin_route_denied",
                     threshold=1,
                 )
@@ -1095,13 +1162,13 @@ class SharelifeWebUIServer:
                     error_code="permission_denied",
                     role=role,
                 )
-            if path.startswith("/api/reviewer") and role not in {"reviewer", "admin"}:
+            if normalized_path.startswith("/api/reviewer") and role not in {"reviewer", "admin"}:
                 self._record_auth_event(event="forbidden", role=role)
                 self._maybe_emit_security_alert(
                     request=request,
                     event="forbidden_reviewer_route",
                     role=role,
-                    path=path,
+                    path=normalized_path,
                     reason="reviewer_route_denied",
                     threshold=1,
                 )
@@ -1208,6 +1275,81 @@ class SharelifeWebUIServer:
         }
 
     @staticmethod
+    def _public_read_api_paths() -> set[str]:
+        return {
+            "/api/templates",
+            "/api/templates/detail",
+            "/api/profile-pack/catalog",
+            "/api/profile-pack/catalog/insights",
+            "/api/profile-pack/catalog/detail",
+            "/api/profile-pack/catalog/compare",
+        }
+
+    @staticmethod
+    def _anonymous_member_default_api_paths() -> set[tuple[str, str]]:
+        return {
+            ("POST", "/api/trial"),
+            ("GET", "/api/trial/status"),
+            ("POST", "/api/templates/install"),
+            ("GET", "/api/member/installations"),
+            ("POST", "/api/member/installations/refresh"),
+            ("GET", "/api/preferences"),
+            ("POST", "/api/preferences/mode"),
+            ("POST", "/api/preferences/observe"),
+        }
+
+    @classmethod
+    def _parse_anonymous_member_allowlist(cls, value: Any) -> set[tuple[str, str]]:
+        out: set[tuple[str, str]] = set()
+        allowed_methods = {
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+        }
+        for item in _to_string_list(value):
+            parts = str(item or "").strip().split(None, 1)
+            if len(parts) != 2:
+                continue
+            method = str(parts[0] or "").strip().upper()
+            path = cls._normalize_api_path(parts[1])
+            if method not in allowed_methods:
+                continue
+            if not path.startswith("/api/"):
+                continue
+            out.add((method, path))
+        return out
+
+    @staticmethod
+    def _normalize_api_path(path: str) -> str:
+        text = str(path or "").strip() or "/"
+        if not text.startswith("/"):
+            text = f"/{text}"
+        if len(text) > 1 and text.endswith("/"):
+            text = text[:-1]
+        return text
+
+    @classmethod
+    def _is_public_api_request(cls, *, path: str, method: str) -> bool:
+        normalized_path = cls._normalize_api_path(path)
+        if normalized_path in cls._public_api_paths():
+            return True
+        normalized_method = str(method or "GET").strip().upper() or "GET"
+        if normalized_method in {"GET", "HEAD"} and normalized_path in cls._public_read_api_paths():
+            return True
+        return False
+
+    def _is_anonymous_member_api_request(self, *, path: str, method: str) -> bool:
+        if not self._auth_allow_anonymous_member:
+            return False
+        normalized_path = self._normalize_api_path(path)
+        normalized_method = str(method or "GET").strip().upper() or "GET"
+        return (normalized_method, normalized_path) in self._auth_anonymous_member_allowlist
+
+    @staticmethod
     def _reviewer_admin_path_allowed(path: str) -> bool:
         normalized = str(path or "").strip().lower()
         if not normalized.startswith("/api/admin"):
@@ -1231,7 +1373,12 @@ class SharelifeWebUIServer:
             role = self._normalize_role(str(session.get("role", "") or ""))
             subject = str(session.get("subject", "") or "").strip()
             if role == "reviewer" and subject == uid:
-                self._revoke_token(token, role=role, subject=subject)
+                self._revoke_token(
+                    token,
+                    role=role,
+                    subject=subject,
+                    device_id=str(session.get("device_id", "") or "").strip(),
+                )
 
     def _request_role(self, request: Request, payload: dict[str, Any] | None = None) -> str:
         if self._auth_enabled:
@@ -1256,6 +1403,51 @@ class SharelifeWebUIServer:
         if payload is not None:
             return self._reviewer_id(payload)
         return str(request.query_params.get("reviewer_id", "webui-reviewer") or "webui-reviewer").strip() or "webui-reviewer"
+
+    def _request_member_user_id(
+        self,
+        request: Request,
+        *,
+        payload: dict[str, Any] | None = None,
+        query_user_id: str = "",
+        enforce_owner_binding: bool = True,
+    ) -> tuple[str | None, JSONResponse | None]:
+        requested_user_id = ""
+        if isinstance(payload, dict):
+            requested_user_id = str(payload.get("user_id", "") or "").strip()
+        elif query_user_id:
+            requested_user_id = str(query_user_id or "").strip()
+        fallback_user_id = requested_user_id or "webui-user"
+        if not self._auth_enabled:
+            return fallback_user_id, None
+        role = self._request_role(request, payload)
+        if role != "member":
+            return fallback_user_id, None
+        member_subject = str(getattr(request.state, "sharelife_auth_subject", "") or "").strip()
+        is_anonymous_member = False
+        if self._auth_allow_anonymous_member and _to_bool(
+            getattr(request.state, "sharelife_auth_anonymous", False),
+            default=False,
+        ):
+            is_anonymous_member = True
+            if not member_subject:
+                member_subject = self._auth_anonymous_member_user_id
+        if not member_subject:
+            return None, self._error_response(
+                code="unauthorized",
+                message="Unauthorized. Please login first.",
+                status_code=401,
+            )
+        if (enforce_owner_binding or is_anonymous_member) and requested_user_id and requested_user_id != member_subject:
+            return None, self._error_response(
+                code="permission_denied",
+                message="permission denied",
+                status_code=403,
+                data={"error": "permission_denied"},
+            )
+        if enforce_owner_binding or is_anonymous_member:
+            return member_subject, None
+        return (requested_user_id or member_subject), None
 
     def _register_routes(self) -> None:
         @self.app.get("/")
@@ -1365,6 +1557,12 @@ class SharelifeWebUIServer:
                 "token_ttl_seconds": self._auth_token_ttl_seconds,
                 "reviewer_token_ttl_seconds": self._reviewer_token_ttl_seconds,
                 "allow_query_token": self._auth_allow_query_token,
+                "allow_anonymous_member": self._auth_allow_anonymous_member,
+                "anonymous_member_user_id": self._auth_anonymous_member_user_id,
+                "anonymous_member_allowlist": sorted(
+                    f"{method} {path}"
+                    for method, path in self._auth_anonymous_member_allowlist
+                ),
             }
 
         @self.app.get("/api/ui/capabilities")
@@ -1412,8 +1610,11 @@ class SharelifeWebUIServer:
                 )
             provided = str(payload.get("password", "") or "")
             expected = self._auth_passwords.get(role, "")
+            member_user_id = ""
             reviewer_id = ""
             reviewer_device_id = ""
+            if role == "member":
+                member_user_id = self._user_id(payload)
             if role == "reviewer":
                 reviewer_id = self._reviewer_id(payload)
                 reviewer_device_key = str(payload.get("reviewer_device_key", "") or "").strip()
@@ -1462,10 +1663,15 @@ class SharelifeWebUIServer:
                     "auth_required": True,
                     "token": self._issue_token(
                         role,
-                        subject=reviewer_id if role == "reviewer" else "",
+                        subject=(
+                            reviewer_id
+                            if role == "reviewer"
+                            else member_user_id if role == "member" else ""
+                        ),
                         device_id=reviewer_device_id if role == "reviewer" else "",
                     ),
                     "role": role,
+                    "user_id": member_user_id if role == "member" else "",
                     "reviewer_id": reviewer_id if role == "reviewer" else "",
                     "reviewer_device_id": reviewer_device_id if role == "reviewer" else "",
                     "available_roles": self._available_auth_roles(),
@@ -1556,6 +1762,16 @@ class SharelifeWebUIServer:
                 )
             )
 
+        @self.app.post("/api/reviewer/invites/revoke")
+        async def reviewer_invites_revoke(request: Request, payload: dict[str, Any]):
+            return self._response(
+                self.api.admin_revoke_reviewer_invite(
+                    role=self._request_role(request, payload),
+                    invite_code=str(payload.get("invite_code", "") or ""),
+                    admin_id=self._admin_id(payload),
+                )
+            )
+
         @self.app.post("/api/reviewer/redeem")
         async def reviewer_redeem(payload: dict[str, Any]):
             return self._response(
@@ -1621,6 +1837,7 @@ class SharelifeWebUIServer:
                         token,
                         role="reviewer",
                         subject=resolved_reviewer_id,
+                        device_id=session_device_id,
                     )
             return self._response(result)
 
@@ -1681,23 +1898,44 @@ class SharelifeWebUIServer:
             )
 
         @self.app.get("/api/preferences")
-        async def get_preferences(user_id: str = "webui-user"):
-            return self._response(self.api.get_preferences(user_id=user_id))
+        async def get_preferences(request: Request, user_id: str = ""):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(self.api.get_preferences(user_id=normalized_user_id))
 
         @self.app.post("/api/preferences/mode")
-        async def set_preference_mode(payload: dict[str, Any]):
+        async def set_preference_mode(request: Request, payload: dict[str, Any]):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
             return self._response(
                 self.api.set_preference_mode(
-                    user_id=self._user_id(payload),
+                    user_id=normalized_user_id,
                     mode=str(payload.get("mode", "") or ""),
                 )
             )
 
         @self.app.post("/api/preferences/observe")
-        async def set_preference_observe(payload: dict[str, Any]):
+        async def set_preference_observe(request: Request, payload: dict[str, Any]):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
             return self._response(
                 self.api.set_preference_observe(
-                    user_id=self._user_id(payload),
+                    user_id=normalized_user_id,
                     enabled=_to_bool(payload.get("enabled"), default=False),
                 )
             )
@@ -1767,10 +2005,13 @@ class SharelifeWebUIServer:
                 if isinstance(payload.get("upload_options"), dict)
                 else None
             )
+            user_id, denied = self._request_member_user_id(request, payload=payload)
+            if denied is not None or user_id is None:
+                return denied
             if package_name and package_base64:
                 return self._response(
                     self.api.submit_template_package(
-                        user_id=self._user_id(payload),
+                        user_id=user_id,
                         template_id=str(payload.get("template_id", "") or ""),
                         version=str(payload.get("version", "1.0.0") or "1.0.0"),
                         filename=package_name,
@@ -1780,7 +2021,7 @@ class SharelifeWebUIServer:
                 )
             return self._response(
                 self.api.submit_template(
-                    user_id=self._user_id(payload),
+                    user_id=user_id,
                     template_id=str(payload.get("template_id", "") or ""),
                     version=str(payload.get("version", "1.0.0") or "1.0.0"),
                     upload_options=upload_options,
@@ -1788,10 +2029,17 @@ class SharelifeWebUIServer:
             )
 
         @self.app.post("/api/trial")
-        async def request_trial(payload: dict[str, Any]):
+        async def request_trial(request: Request, payload: dict[str, Any]):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
             return self._response(
                 self.api.request_trial(
-                    user_id=self._user_id(payload),
+                    user_id=normalized_user_id,
                     session_id=self._session_id(payload),
                     template_id=str(payload.get("template_id", "") or ""),
                 )
@@ -1799,13 +2047,21 @@ class SharelifeWebUIServer:
 
         @self.app.get("/api/trial/status")
         async def trial_status(
-            user_id: str = "webui-user",
+            request: Request,
+            user_id: str = "",
             session_id: str = "webui-session",
             template_id: str = "",
         ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
             return self._response(
                 self.api.get_trial_status(
-                    user_id=user_id,
+                    user_id=normalized_user_id,
                     session_id=session_id,
                     template_id=template_id,
                 )
@@ -1813,35 +2069,141 @@ class SharelifeWebUIServer:
 
         @self.app.get("/api/member/installations")
         async def member_installations(
-            user_id: str = "webui-user",
+            request: Request,
+            user_id: str = "",
             limit: int = 50,
         ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
             return self._response(
                 self.api.list_member_installations(
-                    user_id=user_id,
+                    user_id=normalized_user_id,
                     limit=limit,
                 )
             )
 
         @self.app.post("/api/member/installations/refresh")
-        async def member_installations_refresh(payload: dict[str, Any]):
+        async def member_installations_refresh(request: Request, payload: dict[str, Any]):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
             return self._response(
                 self.api.refresh_member_installations(
-                    user_id=self._user_id(payload),
+                    user_id=normalized_user_id,
                     limit=_to_int(payload.get("limit"), 50),
                 )
             )
 
+        @self.app.get("/api/member/submissions")
+        async def member_submissions(
+            request: Request,
+            user_id: str = "",
+            status: str = "",
+            template_id: str = "",
+            risk_level: str = "",
+            review_label: str = "",
+            warning_flag: str = "",
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.member_list_submissions(
+                    user_id=normalized_user_id,
+                    status=status,
+                    template_query=template_id,
+                    risk_level=risk_level,
+                    review_label=review_label,
+                    warning_flag=warning_flag,
+                )
+            )
+
+        @self.app.get("/api/member/submissions/detail")
+        async def member_submission_detail(
+            request: Request,
+            submission_id: str = "",
+            user_id: str = "",
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.member_get_submission_detail(
+                    user_id=normalized_user_id,
+                    submission_id=submission_id,
+                )
+            )
+
+        @self.app.get("/api/member/submissions/package/download")
+        async def member_download_submission_package(
+            request: Request,
+            submission_id: str = "",
+            user_id: str = "",
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            result = self.api.member_get_submission_package(
+                user_id=normalized_user_id,
+                submission_id=submission_id,
+            )
+            if not result.ok:
+                return self._response(result)
+            artifact = result.data
+            path = Path(str(artifact.get("path", "") or ""))
+            if not path.exists():
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "message": "submission package missing",
+                        "error": {
+                            "code": "submission_package_not_available",
+                            "message": "submission package missing",
+                        },
+                    },
+                    status_code=404,
+                )
+            return FileResponse(
+                path=path,
+                media_type="application/zip",
+                filename=str(artifact.get("filename", "") or path.name),
+            )
+
         @self.app.post("/api/templates/install")
-        async def install_template(payload: dict[str, Any]):
+        async def install_template(request: Request, payload: dict[str, Any]):
             install_options = (
                 payload.get("install_options")
                 if isinstance(payload.get("install_options"), dict)
                 else None
             )
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
             return self._response(
                 self.api.install_template(
-                    user_id=self._user_id(payload),
+                    user_id=normalized_user_id,
                     session_id=self._session_id(payload),
                     template_id=str(payload.get("template_id", "") or ""),
                     install_options=install_options,
@@ -1865,18 +2227,107 @@ class SharelifeWebUIServer:
             )
 
         @self.app.post("/api/profile-pack/submit")
-        async def submit_profile_pack(payload: dict[str, Any]):
+        async def submit_profile_pack(request: Request, payload: dict[str, Any]):
             submit_options = (
                 payload.get("submit_options")
                 if isinstance(payload.get("submit_options"), dict)
                 else None
             )
+            user_id, denied = self._request_member_user_id(request, payload=payload)
+            if denied is not None or user_id is None:
+                return denied
             return self._response(
                 self.api.submit_profile_pack(
-                    user_id=self._user_id(payload),
+                    user_id=user_id,
                     artifact_id=str(payload.get("artifact_id", "") or ""),
                     submit_options=submit_options,
                 )
+            )
+
+        @self.app.get("/api/member/profile-pack/submissions")
+        async def member_profile_pack_submissions(
+            request: Request,
+            user_id: str = "",
+            status: str = "",
+            pack_id: str = "",
+            pack_type: str = "",
+            risk_level: str = "",
+            review_label: str = "",
+            warning_flag: str = "",
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.member_list_profile_pack_submissions(
+                    user_id=normalized_user_id,
+                    status=status,
+                    pack_query=pack_id,
+                    pack_type=pack_type,
+                    risk_level=risk_level,
+                    review_label=review_label,
+                    warning_flag=warning_flag,
+                )
+            )
+
+        @self.app.get("/api/member/profile-pack/submissions/detail")
+        async def member_profile_pack_submission_detail(
+            request: Request,
+            submission_id: str = "",
+            user_id: str = "",
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.member_get_profile_pack_submission_detail(
+                    user_id=normalized_user_id,
+                    submission_id=submission_id,
+                )
+            )
+
+        @self.app.get("/api/member/profile-pack/submissions/export/download")
+        async def member_profile_pack_submission_export_download(
+            request: Request,
+            submission_id: str = "",
+            user_id: str = "",
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            result = self.api.member_get_profile_pack_submission_export(
+                user_id=normalized_user_id,
+                submission_id=submission_id,
+            )
+            if not result.ok:
+                return self._response(result)
+            artifact = result.data
+            path = Path(str(artifact.get("path", "") or ""))
+            if not path.exists():
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "message": "profile pack artifact missing",
+                        "error": {
+                            "code": "profile_pack_not_found",
+                            "message": "profile pack artifact missing",
+                        },
+                    },
+                    status_code=404,
+                )
+            return FileResponse(
+                path=path,
+                media_type="application/zip",
+                filename=str(artifact.get("filename", "") or path.name),
             )
 
         @self.app.get("/api/profile-pack/catalog")

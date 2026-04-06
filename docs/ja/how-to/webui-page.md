@@ -28,6 +28,18 @@
       "member_password": "",
       "token_ttl_seconds": 7200,
       "allow_query_token": false,
+      "allow_anonymous_member": false,
+      "anonymous_member_user_id": "webui-user",
+      "anonymous_member_allowlist": [
+        "POST /api/trial",
+        "GET /api/trial/status",
+        "POST /api/templates/install",
+        "GET /api/member/installations",
+        "POST /api/member/installations/refresh",
+        "GET /api/preferences",
+        "POST /api/preferences/mode",
+        "POST /api/preferences/observe"
+      ],
       "login_rate_limit_window_seconds": 60,
       "login_rate_limit_max_attempts": 10,
       "api_rate_limit_window_seconds": 60,
@@ -55,6 +67,8 @@
 10. `GET /api/ui/capabilities` はログイン前でも参照でき、現在の有効ロールと実行可能オペレーションを返します（UI の capability ゲート用）。
 11. WebUI レスポンスには既定でセキュリティヘッダー（`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、`Content-Security-Policy`）が付与され、`webui.security_headers` で調整できます。
 12. Reviewer / Admin 認証手順と秘密バックアップ手順は公開ドキュメントから除外しています。
+13. `allow_anonymous_member=true` を有効にすると、特定の member エンドポイント（trial/install/preferences/installations）は未ログインでも利用できますが、`anonymous_member_user_id` に固定され、他の `user_id` への越境アクセスはできません。
+14. `anonymous_member_allowlist` で匿名アクセス可能な API を `"METHOD /api/path"` 形式で明示的に上書きできます。未設定時は上記の安全な既定集合を使用します。
 
 ## できること
 

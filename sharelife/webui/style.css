@@ -2565,6 +2565,32 @@ body.console-page-market .market-pack-insight-grid {
   gap: 1rem;
 }
 
+body.console-page-market .market-member-submission-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin: 0.95rem 0 1.05rem;
+}
+
+body.console-page-market .market-member-submission-panel {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 0.78rem;
+}
+
+body.console-page-market .market-member-submission-head {
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.55rem;
+}
+
+body.console-page-market .market-member-submission-panel .member-task-list {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
 body.console-page-market .template-grid {
   gap: 0.9rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2573,6 +2599,12 @@ body.console-page-market .template-grid {
 @media (min-width: 1480px) {
   body.console-page-market .template-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  body.console-page-market .market-member-submission-grid {
+    grid-template-columns: 1fr;
   }
 }
 

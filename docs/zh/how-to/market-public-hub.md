@@ -70,6 +70,15 @@ python3 scripts/publish_public_market_pack.py \
 
 3. 脚本会写入 `docs/public/market/entries/*.json`，并自动重建 `catalog.snapshot.json`。
 
+## 可选：审核通过后自动发布
+
+1. 如需在 reviewer/admin 通过审核后自动发布到公开市场，可开启：
+   - `sharelife.webui.public_market.auto_publish_profile_pack_approve=true`
+   - `sharelife.webui.public_market.root=/abs/path/to/docs/public`（可选覆盖）
+   - `sharelife.webui.public_market.rebuild_snapshot_on_publish=true`
+2. 自动发布执行时，决策 API 响应会带 `public_market_publish` 字段。
+3. 自动发布采用 fail-safe：即便公开发布失败，审核通过结果仍保留。
+
 ## 冷备与定时同步
 
 1. 冷备范围仅限 `docs/public/market/`。

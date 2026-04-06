@@ -125,6 +125,9 @@ def test_onboarding_docs_surface_and_navigation_are_wired():
     assert "3-Minute Onboarding" in readme_text
     assert "Init Wizard And Config Template" in readme_text
     assert "scripts/sharelife-init-wizard" in readme_text
+    assert "--allow-anonymous-member" in readme_text
+    assert "--anonymous-member-user-id" in readme_text
+    assert "--anonymous-member-allowlist" in readme_text
     assert "QUICKSTART.md" in readme_text
     assert "config.template.yaml" in readme_text
 

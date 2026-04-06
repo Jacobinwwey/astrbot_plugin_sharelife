@@ -29,6 +29,18 @@ Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。
       "member_password": "",
       "token_ttl_seconds": 7200,
       "allow_query_token": false,
+      "allow_anonymous_member": false,
+      "anonymous_member_user_id": "webui-user",
+      "anonymous_member_allowlist": [
+        "POST /api/trial",
+        "GET /api/trial/status",
+        "POST /api/templates/install",
+        "GET /api/member/installations",
+        "POST /api/member/installations/refresh",
+        "GET /api/preferences",
+        "POST /api/preferences/mode",
+        "POST /api/preferences/observe"
+      ],
       "login_rate_limit_window_seconds": 60,
       "login_rate_limit_max_attempts": 10,
       "api_rate_limit_window_seconds": 60,
@@ -56,6 +68,8 @@ Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。
 10. `GET /api/ui/capabilities` 在登录前也可读取，会返回当前有效角色与可执行操作清单，供前端做能力门控。
 11. WebUI 默认会附加安全响应头（`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、`Content-Security-Policy`），可在 `webui.security_headers` 下调整。
 12. Reviewer / Admin 鉴权细节与密钥备份流程不出现在公开文档面。
+13. 若设置 `allow_anonymous_member=true`，可在不登录的情况下访问受控 member 端点（试用/安装/偏好/安装列表），但请求仍会强制绑定到 `anonymous_member_user_id`，不能跨 `user_id` 访问。
+14. `anonymous_member_allowlist` 可显式覆盖匿名可访问端点集合，格式为 `"METHOD /api/path"`；未配置时使用上面的安全默认集合。
 
 ## 启动与路由
 

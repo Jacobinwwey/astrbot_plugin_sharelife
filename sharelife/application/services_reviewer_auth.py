@@ -119,6 +119,8 @@ class ReviewerAuthService:
                 "status": str(row.get("status", "issued") or "issued").strip().lower(),
                 "redeemed_by": str(row.get("redeemed_by", "") or "").strip(),
                 "redeemed_at": float(row.get("redeemed_at", 0.0) or 0.0),
+                "revoked_by": str(row.get("revoked_by", "") or "").strip(),
+                "revoked_at": float(row.get("revoked_at", 0.0) or 0.0),
             }
         return out
 
@@ -144,6 +146,8 @@ class ReviewerAuthService:
             "status": "issued",
             "redeemed_by": "",
             "redeemed_at": 0.0,
+            "revoked_by": "",
+            "revoked_at": 0.0,
         }
         self._save_invites(invites)
         return {
@@ -194,6 +198,8 @@ class ReviewerAuthService:
         expires_at = float(invite.get("expires_at", 0.0) or 0.0)
         if status == "redeemed":
             return {"error": "invite_already_redeemed", "reviewer_id": str(invite.get("redeemed_by", "") or "")}
+        if status == "revoked":
+            return {"error": "invite_revoked"}
         if expires_at > 0 and now >= expires_at:
             invite["status"] = "expired"
             invites[code] = invite
@@ -221,6 +227,36 @@ class ReviewerAuthService:
             "status": "invite_redeemed",
             "reviewer_id": uid,
             "created": created,
+        }
+
+    def revoke_invite(self, invite_code: str, admin_id: str) -> dict[str, Any]:
+        code = str(invite_code or "").strip()
+        issuer = self._normalize_user_id(admin_id)
+        if not code:
+            return {"error": "invite_code_required"}
+        if not issuer:
+            return {"error": "admin_id_required"}
+
+        invites = self._load_invites()
+        invite = invites.get(code)
+        if not isinstance(invite, dict):
+            return {"error": "invite_not_found"}
+
+        status = str(invite.get("status", "issued") or "issued").strip().lower()
+        if status == "redeemed":
+            return {"error": "invite_already_redeemed", "reviewer_id": str(invite.get("redeemed_by", "") or "").strip()}
+
+        now = float(time.time())
+        invite["status"] = "revoked"
+        invite["revoked_by"] = issuer
+        invite["revoked_at"] = now
+        invites[code] = invite
+        self._save_invites(invites)
+        return {
+            "status": "revoked",
+            "invite_code": code,
+            "revoked_by": issuer,
+            "revoked_at": now,
         }
 
     def is_reviewer(self, user_id: str) -> bool:

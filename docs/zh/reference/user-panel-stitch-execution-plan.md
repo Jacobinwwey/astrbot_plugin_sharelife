@@ -14,14 +14,21 @@
    - 支持拖拽的上传中心
    - 任务队列与历史
 2. `/market` 已补齐等价的安装/上传控件、本地安装刷新，以及拖拽上传交互。
-3. 以下向后兼容 API 扩展已生效：
+3. `/market` 已补齐用户自有上传管理视图：
+   - 我的模板投稿列表 + 详情跳转
+   - 我的 profile-pack 投稿列表 + 详情跳转
+4. 以下向后兼容 API 扩展已生效：
    - `GET /api/member/installations`
    - `POST /api/member/installations/refresh`
+   - `GET /api/member/submissions`
+   - `GET /api/member/submissions/detail`
+   - `GET /api/member/profile-pack/submissions`
+   - `GET /api/member/profile-pack/submissions/detail`
    - `install_options`
    - `upload_options`
    - `submit_options`
-4. 验证已覆盖接口测试、WebUI 单测与浏览器 E2E。
-5. `/member` 已改为 Spotlight 优先的用户面板：顶部先给语言切换、本地刷新和单一全局搜索入口，成员页结果区不再重复渲染“市场中心”大标题。
+5. 验证已覆盖接口测试、WebUI 单测与浏览器 E2E。
+6. `/member` 已改为 Spotlight 优先的用户面板：顶部先给语言切换、本地刷新和单一全局搜索入口，成员页结果区不再重复渲染“市场中心”大标题。
 
 当前权衡：
 
@@ -70,6 +77,10 @@
 
 1. `GET /api/member/installations`  
 2. `POST /api/member/installations/refresh`
+3. `GET /api/member/submissions`
+4. `GET /api/member/submissions/detail`
+5. `GET /api/member/profile-pack/submissions`
+6. `GET /api/member/profile-pack/submissions/detail`
 
 响应 envelope 保持不变：
 `{ ok, message, data, error? }`

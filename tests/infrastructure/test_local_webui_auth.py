@@ -32,6 +32,9 @@ def test_merge_local_webui_auth_override_applies_local_file(tmp_path):
                 'member_password = "member-local"',
                 'admin_password = "admin-local"',
                 "login_rate_limit_max_attempts = 4",
+                "allow_anonymous_member = true",
+                'anonymous_member_user_id = "guest-member"',
+                'anonymous_member_allowlist = ["POST /api/trial", "GET /api/preferences"]',
             ]
         ),
         encoding="utf-8",
@@ -54,6 +57,12 @@ def test_merge_local_webui_auth_override_applies_local_file(tmp_path):
     assert merged["webui"]["auth"]["reviewer_password"] == "reviewer-from-config"
     assert merged["webui"]["auth"]["token_ttl_seconds"] == 7200
     assert merged["webui"]["auth"]["login_rate_limit_max_attempts"] == 4
+    assert merged["webui"]["auth"]["allow_anonymous_member"] is True
+    assert merged["webui"]["auth"]["anonymous_member_user_id"] == "guest-member"
+    assert merged["webui"]["auth"]["anonymous_member_allowlist"] == [
+        "POST /api/trial",
+        "GET /api/preferences",
+    ]
 
 
 def test_merge_local_webui_auth_override_ignores_unknown_fields(tmp_path):
@@ -85,6 +94,9 @@ def test_ensure_local_webui_auth_template_creates_file_without_overwriting(tmp_p
     text = auth_path.read_text(encoding="utf-8")
     assert "[webui.auth]" in text
     assert 'admin_password = ""' in text
+    assert "allow_anonymous_member = false" in text
+    assert 'anonymous_member_user_id = "webui-user"' in text
+    assert "anonymous_member_allowlist = [" in text
 
     auth_path.write_text("# keep-my-local-edit\n", encoding="utf-8")
     ensure_local_webui_auth_template(auth_path)

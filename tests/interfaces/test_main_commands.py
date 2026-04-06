@@ -529,3 +529,25 @@ def test_plugin_profile_pack_security_config_is_wired(tmp_path: Path) -> None:
     assert plugin.profile_pack_service.plugin_install_service.allow_http_source is True
     assert plugin.profile_pack_service.plugin_install_service.require_success_before_apply is True
     assert plugin.profile_pack_service.plugin_install_service.allowed_command_prefixes == {"pip", "uv"}
+
+
+def test_plugin_public_market_auto_publish_config_is_wired(tmp_path: Path) -> None:
+    module = _load_plugin_module(tmp_path)
+    public_market_root = tmp_path / "public-market-root"
+    plugin = module.SharelifePlugin(
+        module.Context(),
+        config={
+            "webui": {
+                "enabled": False,
+                "public_market": {
+                    "auto_publish_profile_pack_approve": True,
+                    "root": str(public_market_root),
+                    "rebuild_snapshot_on_publish": False,
+                },
+            },
+        },
+    )
+
+    assert plugin.api.public_market_auto_publish_profile_pack_approve is True
+    assert plugin.api.public_market_root == public_market_root.resolve()
+    assert plugin.api.public_market_rebuild_snapshot_on_publish is False

@@ -81,6 +81,12 @@
                 <option value="member" data-i18n-key="option.member">member</option>
               </select>
               <input
+                id="marketAuthUserId"
+                type="text"
+                data-i18n-placeholder-key="placeholder.user_id"
+                placeholder="user_id"
+              />
+              <input
                 id="marketAuthPassword"
                 type="password"
                 data-i18n-placeholder-key="market.placeholder.auth_password"
@@ -287,6 +293,29 @@
               Load local installations to manage existing configs.
             </div>
             <div id="marketInstallationsList" class="member-install-list"></div>
+            <div class="market-member-submission-grid">
+              <section class="market-member-submission-panel">
+                <div class="inline-form wrap market-member-submission-head">
+                  <strong data-i18n-key="submissions.resource">Submissions</strong>
+                  <button id="btnMarketListSubmissions" class="btn-ghost" type="button" data-i18n-key="button.list_submissions">List Submissions</button>
+                </div>
+                <div id="marketSubmissionsState" class="collection-state is-neutral" data-i18n-key="submissions.idle">
+                  Load submissions to review pending community packages.
+                </div>
+                <div id="marketSubmissionsList" class="member-task-list"></div>
+              </section>
+              <section class="market-member-submission-panel">
+                <div class="inline-form wrap market-member-submission-head">
+                  <strong data-i18n-key="profile_pack.market.submissions_resource">Profile pack submissions</strong>
+                  <button id="btnMarketListProfilePackSubmissions" class="btn-ghost" type="button" data-i18n-key="profile_pack.market.submissions_btn">List Pack Submissions</button>
+                  <button id="btnMarketDownloadProfilePackSubmission" class="btn-ghost" type="button" data-i18n-key="button.profile_download_export">Download Export</button>
+                </div>
+                <div id="marketProfilePackSubmissionsState" class="collection-state is-neutral" data-i18n-key="profile_pack.market.submissions_idle">
+                  Load profile-pack submissions to review pending community packs.
+                </div>
+                <div id="marketProfilePackSubmissionsList" class="member-task-list"></div>
+              </section>
+            </div>
             <div
               id="marketCatalogState"
               class="collection-state is-neutral"

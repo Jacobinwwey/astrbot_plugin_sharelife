@@ -238,6 +238,45 @@ class SharelifeWebApiV1:
         response = self.api.refresh_member_installations(user_id=user_id, limit=limit)
         return self._ok(response, "member installations refreshed")
 
+    def member_list_submissions(
+        self,
+        user_id: str,
+        status: str = "",
+        template_query: str = "",
+        risk_level: str = "",
+        review_label: str = "",
+        warning_flag: str = "",
+    ) -> WebApiResult:
+        response = self.api.member_list_submissions(
+            user_id=user_id,
+            status=status,
+            template_query=template_query,
+            risk_level=risk_level,
+            review_label=review_label,
+            warning_flag=warning_flag,
+        )
+        return self._from_api_error_or_ok(response, default_message="member submissions listed")
+
+    def member_get_submission_detail(self, user_id: str, submission_id: str) -> WebApiResult:
+        if not submission_id:
+            return self._error(
+                code="submission_id_required",
+                message="submission_id is required",
+                status_code=400,
+            )
+        response = self.api.member_get_submission_detail(user_id=user_id, submission_id=submission_id)
+        return self._from_api_error_or_ok(response, default_message="member submission detail ready")
+
+    def member_get_submission_package(self, user_id: str, submission_id: str) -> WebApiResult:
+        if not submission_id:
+            return self._error(
+                code="submission_id_required",
+                message="submission_id is required",
+                status_code=400,
+            )
+        response = self.api.member_get_submission_package(user_id=user_id, submission_id=submission_id)
+        return self._from_api_error_or_ok(response, default_message="member submission package ready")
+
     def generate_prompt_bundle(self, template_id: str) -> WebApiResult:
         if not template_id:
             return self._error(
@@ -298,6 +337,70 @@ class SharelifeWebApiV1:
             submit_options=submit_options,
         )
         return self._from_api_error_or_ok(response, default_message="profile pack submitted")
+
+    def member_list_profile_pack_submissions(
+        self,
+        user_id: str,
+        status: str = "",
+        pack_query: str = "",
+        pack_type: str = "",
+        risk_level: str = "",
+        review_label: str = "",
+        warning_flag: str = "",
+    ) -> WebApiResult:
+        response = self.api.member_list_profile_pack_submissions(
+            user_id=user_id,
+            status=status,
+            pack_query=pack_query,
+            pack_type=pack_type,
+            risk_level=risk_level,
+            review_label=review_label,
+            warning_flag=warning_flag,
+        )
+        return self._from_api_error_or_ok(
+            response,
+            default_message="member profile pack submissions listed",
+        )
+
+    def member_get_profile_pack_submission_detail(
+        self,
+        user_id: str,
+        submission_id: str,
+    ) -> WebApiResult:
+        if not submission_id:
+            return self._error(
+                code="submission_id_required",
+                message="submission_id is required",
+                status_code=400,
+            )
+        response = self.api.member_get_profile_pack_submission_detail(
+            user_id=user_id,
+            submission_id=submission_id,
+        )
+        return self._from_api_error_or_ok(
+            response,
+            default_message="member profile pack submission detail ready",
+        )
+
+    def member_get_profile_pack_submission_export(
+        self,
+        user_id: str,
+        submission_id: str,
+    ) -> WebApiResult:
+        if not submission_id:
+            return self._error(
+                code="submission_id_required",
+                message="submission_id is required",
+                status_code=400,
+            )
+        response = self.api.member_get_profile_pack_submission_export(
+            user_id=user_id,
+            submission_id=submission_id,
+        )
+        return self._from_api_error_or_ok(
+            response,
+            default_message="member profile pack export ready",
+        )
 
     def list_profile_pack_catalog(
         self,
@@ -520,6 +623,31 @@ class SharelifeWebApiV1:
     def admin_list_reviewer_invites(self, role: str, status: str = "") -> WebApiResult:
         response = self.api.admin_list_reviewer_invites(role=role, status=status)
         return self._from_api_error_or_ok(response, default_message="reviewer invites listed")
+
+    def admin_revoke_reviewer_invite(
+        self,
+        role: str,
+        invite_code: str,
+        admin_id: str,
+    ) -> WebApiResult:
+        if not invite_code:
+            return self._error(
+                code="invite_code_required",
+                message="invite_code is required",
+                status_code=400,
+            )
+        if not admin_id:
+            return self._error(
+                code="admin_id_required",
+                message="admin_id is required",
+                status_code=400,
+            )
+        response = self.api.admin_revoke_reviewer_invite(
+            role=role,
+            invite_code=invite_code,
+            admin_id=admin_id,
+        )
+        return self._from_api_error_or_ok(response, default_message="reviewer invite revoked")
 
     def reviewer_redeem_invite(self, invite_code: str, reviewer_id: str) -> WebApiResult:
         if not invite_code:
@@ -1131,6 +1259,7 @@ class SharelifeWebApiV1:
             "storage_service_unavailable": 503,
             "profile_pack_source_required": 400,
             "profile_pack_submission_not_found": 404,
+            "submission_id_required": 400,
             "profile_pack_not_published": 404,
             "reviewer_id_required": 400,
             "device_id_required": 400,
@@ -1141,6 +1270,7 @@ class SharelifeWebApiV1:
             "invite_not_found": 404,
             "invite_expired": 410,
             "invite_already_redeemed": 409,
+            "invite_revoked": 409,
             "admin_id_required": 400,
             "review_lock_held": 409,
             "takeover_reason_required": 400,
@@ -1187,6 +1317,7 @@ class SharelifeWebApiV1:
             "daily_upload_budget_exceeded": 409,
             "remote_sync_failed": 409,
             "remote_sync_command_not_found": 409,
+            "remote_encryption_required": 409,
             "artifact_not_found": 404,
             "artifact_checksum_missing": 409,
             "artifact_checksum_mismatch": 409,
@@ -1199,6 +1330,7 @@ class SharelifeWebApiV1:
             "storage_service_unavailable": "storage service unavailable",
             "profile_pack_source_required": "profile pack source required",
             "profile_pack_submission_not_found": "profile pack submission not found",
+            "submission_id_required": "submission_id is required",
             "profile_pack_not_published": "profile pack not published",
             "reviewer_id_required": "reviewer_id is required",
             "device_id_required": "device_id is required",
@@ -1209,6 +1341,7 @@ class SharelifeWebApiV1:
             "invite_not_found": "invite code not found",
             "invite_expired": "invite code expired",
             "invite_already_redeemed": "invite code already redeemed",
+            "invite_revoked": "invite code revoked",
             "admin_id_required": "admin_id is required",
             "review_lock_held": "review lock already held by another admin",
             "takeover_reason_required": "takeover reason required when force=true",
@@ -1255,6 +1388,7 @@ class SharelifeWebApiV1:
             "daily_upload_budget_exceeded": "daily upload budget exceeded",
             "remote_sync_failed": "remote sync failed",
             "remote_sync_command_not_found": "rclone binary not found",
+            "remote_encryption_required": "remote encryption required",
             "artifact_not_found": "artifact not found",
             "artifact_checksum_missing": "artifact checksum missing",
             "artifact_checksum_mismatch": "artifact checksum mismatch",

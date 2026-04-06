@@ -67,7 +67,14 @@ def build_bundle_zip(payload: dict) -> bytes:
     return buffer.getvalue()
 
 
-def build_server(output_root: Path):
+def build_server(
+    output_root: Path,
+    *,
+    auth_enabled: bool = False,
+    member_password: str = "member-secret",
+    reviewer_password: str = "reviewer-secret",
+    admin_password: str = "admin-secret",
+):
     clock = FrozenClock(datetime(2026, 3, 26, 12, 0, tzinfo=UTC))
     preferences = PreferenceService()
     queue = RetryQueueService(clock=clock)
@@ -115,7 +122,18 @@ def build_server(output_root: Path):
     )
     web_api = SharelifeWebApiV1(api=api, notifier=notifier)
     web_root = REPO_ROOT / "sharelife" / "webui"
-    server = SharelifeWebUIServer(api=web_api, config={}, web_root=web_root)
+    config: dict = {}
+    if auth_enabled:
+        config = {
+            "webui": {
+                "auth": {
+                    "member_password": str(member_password or "member-secret"),
+                    "reviewer_password": str(reviewer_password or "reviewer-secret"),
+                    "admin_password": str(admin_password or "admin-secret"),
+                }
+            }
+        }
+    server = SharelifeWebUIServer(api=web_api, config=config, web_root=web_root)
     return server, api
 
 
@@ -178,10 +196,20 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=38106, type=int)
+    parser.add_argument("--auth-enabled", action="store_true")
+    parser.add_argument("--member-password", default="member-secret")
+    parser.add_argument("--reviewer-password", default="reviewer-secret")
+    parser.add_argument("--admin-password", default="admin-secret")
     args = parser.parse_args()
 
     output_root = Path(tempfile.mkdtemp(prefix="sharelife-e2e-"))
-    server, api = build_server(output_root)
+    server, api = build_server(
+        output_root,
+        auth_enabled=bool(args.auth_enabled),
+        member_password=str(args.member_password or "member-secret"),
+        reviewer_password=str(args.reviewer_password or "reviewer-secret"),
+        admin_password=str(args.admin_password or "admin-secret"),
+    )
     seed_market(api)
 
     import uvicorn

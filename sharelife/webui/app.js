@@ -68,6 +68,13 @@ const state = {
     tasks: [],
     searchQuery: "",
   },
+  reviewerLifecycle: {
+    invites: [],
+    accounts: [],
+    devices: [],
+    maxDevices: 0,
+    selectedReviewerId: "",
+  },
 }
 
 const UI_LOCALE_STORAGE_KEY = "sharelife.uiLocale"
@@ -100,17 +107,22 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnDryrunPlan: "admin.apply.workflow",
   btnApplyPlan: "admin.apply.workflow",
   btnRollbackPlan: "admin.apply.workflow",
-  btnListSubmissions: "admin.submissions.read",
-  btnSubmissionDetail: "admin.submissions.read",
+  btnListSubmissions: "member.submissions.read",
+  btnSubmissionDetail: "member.submissions.detail.read",
   btnCompareSubmission: "admin.submissions.compare",
   btnSaveSubmissionReview: "admin.submissions.review",
   btnApproveSubmission: "admin.submissions.decide",
   btnRejectSubmission: "admin.submissions.decide",
-  btnDownloadSubmissionPackage: "admin.submissions.package.download",
+  btnDownloadSubmissionPackage: "member.submissions.package.download",
   btnListRetry: "admin.retry.manage",
   btnLockRetry: "admin.retry.manage",
   btnRetryDecide: "admin.retry.manage",
   btnAudit: "admin.audit.read",
+  btnReviewerInviteCreate: "admin.reviewer.lifecycle.manage",
+  btnReviewerInviteList: "admin.reviewer.lifecycle.manage",
+  btnReviewerAccountList: "admin.reviewer.lifecycle.manage",
+  btnReviewerDeviceList: "admin.reviewer.lifecycle.manage",
+  btnReviewerDeviceReset: "admin.reviewer.lifecycle.manage",
   btnNotice: "notifications.read",
   btnStorageSummary: "admin.storage.local_summary.read",
   btnStoragePoliciesGet: "admin.storage.policies.read",
@@ -124,7 +136,7 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnStorageRestoreJobsList: "admin.storage.restore.read",
   btnStorageRestoreJobGet: "admin.storage.restore.read",
   btnProfilePackExport: "admin.profile_pack.manage",
-  btnProfilePackDownloadExport: "admin.profile_pack.manage",
+  btnProfilePackDownloadExport: "member.profile_pack.submissions.export.download",
   btnProfilePackListExports: "admin.profile_pack.manage",
   btnProfilePackImport: "admin.profile_pack.manage",
   btnProfilePackImportFromExport: "admin.profile_pack.manage",
@@ -137,7 +149,7 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnProfilePackPluginConfirm: "admin.profile_pack.manage",
   btnProfilePackPluginExecute: "admin.profile_pack.manage",
   btnProfilePackSubmitCommunity: "profile_pack.community.submit",
-  btnProfilePackListPackSubmissions: "admin.profile_pack.market.review",
+  btnProfilePackListPackSubmissions: "member.profile_pack.submissions.read",
   btnProfilePackDecideSubmission: "admin.profile_pack.market.review",
   btnProfilePackListCatalog: "profile_pack.catalog.read",
   btnProfilePackCatalogDetail: "profile_pack.catalog.read",
@@ -527,6 +539,10 @@ function applyUiLocale(locale, options = {}) {
     updateProfilePackMarketPanel(state.profilePack.market.lastOperation)
     updateTemplatesTable(state.templates)
     updateProfilePackCatalogTable(state.profilePack.market.catalog)
+    updateReviewerInviteTable(state.reviewerLifecycle.invites)
+    updateReviewerAccountTable(state.reviewerLifecycle.accounts)
+    updateReviewerDeviceTable(state.reviewerLifecycle.devices)
+    renderReviewerLifecycleAuthState()
     applyConsoleScope()
     setWizardStep(state.marketHub.wizardStep || 1)
     rerenderScanPanelFromState()
@@ -869,6 +885,9 @@ function fixedRoleByPageMode() {
 }
 
 function fallbackCapabilityRole() {
+  if (state.pageMode === "reviewer" && !isReviewerAdminBridgeActive()) {
+    return "public"
+  }
   const fixedRole = fixedRoleByPageMode()
   if (fixedRole) return fixedRole
   const roleField = byId("role")
@@ -889,6 +908,12 @@ function fallbackCapabilityOperations(role) {
   const member = [
     "member.installations.read",
     "member.installations.refresh",
+    "member.submissions.read",
+    "member.submissions.detail.read",
+    "member.submissions.package.download",
+    "member.profile_pack.submissions.read",
+    "member.profile_pack.submissions.detail.read",
+    "member.profile_pack.submissions.export.download",
     "notifications.read",
     "preferences.read",
     "preferences.write",
@@ -907,6 +932,7 @@ function fallbackCapabilityOperations(role) {
   const admin = [
     "admin.apply.workflow",
     "admin.audit.read",
+    "admin.reviewer.lifecycle.manage",
     "admin.storage.jobs.read",
     "admin.storage.jobs.run",
     "admin.storage.local_summary.read",
@@ -971,6 +997,9 @@ function setCapabilities(payload, options = {}) {
 function hasCapability(capability) {
   const required = String(capability || "").trim()
   if (!required) return true
+  if (state.pageMode === "reviewer" && !isReviewerAdminBridgeActive()) {
+    return false
+  }
   const operations = Array.isArray(state.capabilities.operations)
     ? state.capabilities.operations
     : []
@@ -1194,6 +1223,7 @@ function updateAuthUi() {
   }
   syncRoleFields()
   syncReviewerAuthFields()
+  renderReviewerLifecycleAuthState()
   updateDeveloperModeUi()
   applyConsoleScope()
 }
@@ -1318,6 +1348,13 @@ function applyCompareEvidenceFocus() {
 async function jumpToCompareWithEvidence(item) {
   const normalized = normalizeRiskEvidenceItem(item)
   if (!normalized) return
+  if (!hasCapability("admin.submissions.compare")) {
+    byId("scanSummary").textContent = i18nMessage(
+      "scan.evidence.compare_unavailable",
+      "Compare evidence is available in reviewer/admin scope only.",
+    )
+    return
+  }
   const submissionField = byId("decisionSubmissionId")
   const candidateSubmissionId =
     String(state.selectedSubmissionId || "").trim() ||
@@ -3184,26 +3221,57 @@ async function exportProfilePack() {
 }
 
 async function downloadProfilePackExport() {
-  const artifactId = state.profilePack.exportArtifactId
-  if (!artifactId) {
-    updateProfilePackPanel({ status: "error", message: "No export artifact available yet." })
+  const a = actor()
+  const normalizedRole = String(a.role || "").trim().toLowerCase()
+  const useAdminEndpoint = hasCapability("admin.profile_pack.manage") && normalizedRole !== "member"
+  const useMemberEndpoint = !useAdminEndpoint && hasCapability("member.profile_pack.submissions.export.download")
+  if (!useAdminEndpoint && !useMemberEndpoint) {
+    render("profile_pack_download", buildClientErrorResponse("permission_denied", "permission denied", 403))
+    updateProfilePackPanel({ status: "error", message: "permission denied" })
     return
   }
-  const params = new URLSearchParams({ artifact_id: artifactId })
-  const response = await fetch(`/api/admin/profile-pack/export/download?${params.toString()}`, {
+
+  const params = new URLSearchParams()
+  let fallbackName = "profile-pack-export"
+  if (useAdminEndpoint) {
+    const artifactId = String(state.profilePack.exportArtifactId || "").trim()
+    if (!artifactId) {
+      updateProfilePackPanel({ status: "error", message: "No export artifact available yet." })
+      return
+    }
+    params.set("artifact_id", artifactId)
+    fallbackName = artifactId
+  } else {
+    const submissionId = String(byId("profilePackDecisionSubmissionId").value || "").trim()
+    if (!submissionId) {
+      updateProfilePackPanel({
+        status: "error",
+        message: i18nMessage("moderation.no_selection", "No submission selected."),
+      })
+      return
+    }
+    params.set("user_id", a.user_id)
+    params.set("submission_id", submissionId)
+    fallbackName = submissionId
+  }
+
+  const endpoint = useAdminEndpoint
+    ? `/api/admin/profile-pack/export/download?${params.toString()}`
+    : `/api/member/profile-pack/submissions/export/download?${params.toString()}`
+  const response = await fetch(endpoint, {
     method: "GET",
     headers: state.token && state.token !== "no-auth" ? { Authorization: `Bearer ${state.token}` } : {},
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({ ok: false, message: "download_failed" }))
-    render("admin_profile_pack_download", { status: response.status, data })
+    render("profile_pack_download", { status: response.status, data })
     updateProfilePackPanel({ status: "download_failed", error: data })
     return
   }
   const blob = await response.blob()
   const disposition = response.headers.get("Content-Disposition") || ""
   const match = disposition.match(/filename=\"?([^"]+)\"?$/i)
-  const filename = match ? match[1] : `${artifactId}.zip`
+  const filename = match ? match[1] : `${fallbackName}.zip`
   const url = URL.createObjectURL(blob)
   const link = document.createElement("a")
   link.href = url
@@ -3212,8 +3280,14 @@ async function downloadProfilePackExport() {
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
-  const payload = { status: "downloaded", artifact_id: artifactId, filename, size_bytes: blob.size }
-  render("admin_profile_pack_download", { status: response.status, data: payload })
+  const payload = {
+    status: "downloaded",
+    artifact_id: params.get("artifact_id") || "",
+    submission_id: params.get("submission_id") || "",
+    filename,
+    size_bytes: blob.size,
+  }
+  render("profile_pack_download", { status: response.status, data: payload })
   updateProfilePackPanel(payload)
 }
 
@@ -3510,12 +3584,25 @@ async function submitProfilePackToCommunity() {
 async function listProfilePackMarketSubmissions() {
   const a = actor()
   const filters = profilePackSubmissionTableFilters()
+  const normalizedRole = String(a.role || "").trim().toLowerCase()
+  const useAdminEndpoint = hasCapability("admin.profile_pack.market.review") && normalizedRole !== "member"
+  const useMemberEndpoint = !useAdminEndpoint && hasCapability("member.profile_pack.submissions.read")
   setCollectionStatus("profilePackSubmissions", { status: "loading", errorMessage: "" })
-  const response = await api(`/api/admin/profile-pack/submissions${queryString({
-    role: a.role,
-    ...filters,
-  })}`)
-  render("admin_list_profile_pack_submissions", response)
+  if (!useAdminEndpoint && !useMemberEndpoint) {
+    const denied = buildClientErrorResponse("permission_denied", "permission denied", 403)
+    render("list_profile_pack_submissions", denied)
+    setCollectionStatus("profilePackSubmissions", {
+      status: "error",
+      count: state.profilePack.market.submissions.length,
+      errorMessage: errorMessageForCollection("profilePackSubmissions", denied),
+    })
+    return denied
+  }
+  const endpoint = useAdminEndpoint
+    ? `/api/admin/profile-pack/submissions${queryString({ role: a.role, ...filters })}`
+    : `/api/member/profile-pack/submissions${queryString({ user_id: a.user_id, ...filters })}`
+  const response = await api(endpoint)
+  render(useAdminEndpoint ? "admin_list_profile_pack_submissions" : "member_list_profile_pack_submissions", response)
   if (workspaceRequestFailed(response)) {
     setCollectionStatus("profilePackSubmissions", {
       status: "error",
@@ -4186,7 +4273,11 @@ async function syncWorkspaceFromHash() {
   updateTemplatesTable(state.templates)
   updateSubmissionsTable(state.submissions)
   await loadSubmissionDetail({ submissionId: route.id, syncRoute: false })
-  await loadSubmissionCompare({ submissionId: route.id, syncRoute: false })
+  if (hasCapability("admin.submissions.compare")) {
+    await loadSubmissionCompare({ submissionId: route.id, syncRoute: false })
+  } else {
+    resetComparePanel()
+  }
   flushPendingWorkspaceScroll()
 }
 
@@ -5236,6 +5327,514 @@ function bindInteractiveRow(tr, onSelect) {
   })
 }
 
+function reviewerLifecycleNode(nodeId) {
+  return byId(nodeId)
+}
+
+function setReviewerLifecycleState(nodeId, tone, key, fallback, tokens = {}) {
+  const node = reviewerLifecycleNode(nodeId)
+  if (!node) return
+  node.textContent = i18nFormat(key, fallback, tokens)
+  node.className = `collection-state is-${tone}`
+}
+
+function formatEpochTimestamp(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return "-"
+  const milliseconds = numeric > 1e12 ? numeric : numeric * 1000
+  const timestamp = new Date(milliseconds)
+  if (Number.isNaN(timestamp.getTime())) return "-"
+  try {
+    return timestamp.toLocaleString(state.uiLocale || "en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    })
+  } catch (_error) {
+    return timestamp.toISOString()
+  }
+}
+
+function reviewerLifecycleCopyLabel() {
+  return i18nMessage("button.copy_code", "Copy code")
+}
+
+function reviewerLifecycleRevokeLabel() {
+  return i18nMessage("button.revoke", "Revoke")
+}
+
+function reviewerLifecycleSelectedReviewerId() {
+  const node = byId("reviewerDeviceTargetId")
+  const value = String(node && node.value ? node.value : "").trim()
+  if (value) {
+    state.reviewerLifecycle.selectedReviewerId = value
+  }
+  return state.reviewerLifecycle.selectedReviewerId || ""
+}
+
+function setReviewerLifecycleSelectedReviewer(reviewerId) {
+  const normalized = String(reviewerId || "").trim()
+  state.reviewerLifecycle.selectedReviewerId = normalized
+  const node = byId("reviewerDeviceTargetId")
+  if (node && node.value !== normalized) {
+    node.value = normalized
+  }
+}
+
+function renderReviewerLifecycleAuthState() {
+  const maxDevices = Number(state.reviewerLifecycle.maxDevices || 0) || 0
+  if (!state.authRequired) {
+    setReviewerLifecycleState(
+      "reviewerLifecycleAuthState",
+      "warning",
+      "reviewer.lifecycle.auth_state.local_mode",
+      "Auth disabled. Reviewer lifecycle runs in local admin mode only.",
+    )
+    return
+  }
+  if (state.availableRoles.includes("reviewer")) {
+    setReviewerLifecycleState(
+      "reviewerLifecycleAuthState",
+      "success",
+      "reviewer.lifecycle.auth_state.enabled",
+      "Reviewer auth enabled. Max devices per reviewer: {count}.",
+      { count: maxDevices || 3 },
+    )
+    return
+  }
+  setReviewerLifecycleState(
+    "reviewerLifecycleAuthState",
+    "danger",
+    "reviewer.lifecycle.auth_state.unavailable",
+    "Reviewer auth is unavailable. Configure reviewer credentials before handing out invites.",
+  )
+}
+
+async function copyTextToClipboard(value) {
+  const text = String(value || "").trim()
+  if (!text) return false
+  if (!globalThis.navigator || !navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+    return false
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch (_error) {
+    return false
+  }
+}
+
+async function copyReviewerInviteCode(inviteCode) {
+  const success = await copyTextToClipboard(inviteCode)
+  setReviewerLifecycleState(
+    "reviewerInviteState",
+    success ? "success" : "warning",
+    success ? "reviewer.lifecycle.invites.copied" : "reviewer.lifecycle.invites.copy_failed",
+    success ? "Invite code copied: {invite_code}" : "Clipboard unavailable. Copy invite code manually: {invite_code}",
+    { invite_code: String(inviteCode || "").trim() },
+  )
+}
+
+function reviewerLifecycleActionButton(label, tone = "ghost") {
+  const button = document.createElement("button")
+  button.type = "button"
+  button.className = tone === "primary" ? "btn-primary compare-inline-action" : "btn-ghost compare-inline-action"
+  button.textContent = label
+  return button
+}
+
+function updateReviewerInviteTable(rows) {
+  state.reviewerLifecycle.invites = Array.isArray(rows) ? rows : []
+  const table = byId("reviewerInviteTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
+  tbody.innerHTML = ""
+  state.reviewerLifecycle.invites.forEach((item) => {
+    const tr = document.createElement("tr")
+    const inviteCode = String(item.code || item.invite_code || "").trim()
+    const status = String(item.status || "unknown").trim().toLowerCase()
+    tr.appendChild(cell(inviteCode || "-"))
+    tr.appendChild(cell(enumLabelValue("status", status || "unknown")))
+    tr.appendChild(cell(String(item.issued_by || "").trim() || "-"))
+    tr.appendChild(cell(String(item.redeemed_by || "").trim() || "-"))
+    tr.appendChild(cell(formatEpochTimestamp(item.expires_at)))
+
+    const actions = document.createElement("td")
+    const actionRow = document.createElement("div")
+    actionRow.className = "inline-form wrap"
+
+    const copyButton = reviewerLifecycleActionButton(reviewerLifecycleCopyLabel())
+    copyButton.disabled = !hasCapability("admin.reviewer.lifecycle.manage")
+    copyButton.addEventListener("click", (event) => {
+      event.stopPropagation()
+      void copyReviewerInviteCode(inviteCode)
+    })
+    actionRow.appendChild(copyButton)
+
+    if (status !== "redeemed" && status !== "revoked") {
+      const revokeButton = reviewerLifecycleActionButton(reviewerLifecycleRevokeLabel())
+      revokeButton.disabled = !hasCapability("admin.reviewer.lifecycle.manage")
+      revokeButton.addEventListener("click", (event) => {
+        event.stopPropagation()
+        void revokeReviewerInvite(inviteCode)
+      })
+      actionRow.appendChild(revokeButton)
+    }
+
+    actions.appendChild(actionRow)
+    tr.appendChild(actions)
+    bindInteractiveRow(tr, async () => {
+      const redeemedBy = String(item.redeemed_by || "").trim()
+      if (redeemedBy) {
+        setReviewerLifecycleSelectedReviewer(redeemedBy)
+        await listReviewerDevices({ reviewerId: redeemedBy })
+      }
+    })
+    tbody.appendChild(tr)
+  })
+}
+
+function updateReviewerAccountTable(rows) {
+  state.reviewerLifecycle.accounts = Array.isArray(rows) ? rows : []
+  const table = byId("reviewerAccountTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
+  tbody.innerHTML = ""
+  state.reviewerLifecycle.accounts.forEach((item) => {
+    const tr = document.createElement("tr")
+    const reviewerId = String(item.reviewer_id || "").trim()
+    tr.appendChild(cell(reviewerId || "-"))
+    tr.appendChild(cell(String(item.created_by || "").trim() || "-"))
+    tr.appendChild(cell(String(item.source_invite || "").trim() || "-"))
+    tr.appendChild(cell(String(Number(item.device_count || 0))))
+    tr.appendChild(cell(formatEpochTimestamp(item.created_at)))
+    bindInteractiveRow(tr, async () => {
+      setReviewerLifecycleSelectedReviewer(reviewerId)
+      await listReviewerDevices({ reviewerId })
+    })
+    tbody.appendChild(tr)
+  })
+}
+
+function updateReviewerDeviceTable(rows) {
+  state.reviewerLifecycle.devices = Array.isArray(rows) ? rows : []
+  const table = byId("reviewerDeviceTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
+  tbody.innerHTML = ""
+  state.reviewerLifecycle.devices.forEach((item) => {
+    const tr = document.createElement("tr")
+    const deviceId = String(item.device_id || "").trim()
+    tr.appendChild(cell(deviceId || "-"))
+    tr.appendChild(cell(String(item.label || "").trim() || "-"))
+    tr.appendChild(cell(formatEpochTimestamp(item.registered_at)))
+    tr.appendChild(cell(formatEpochTimestamp(item.last_used_at)))
+
+    const actions = document.createElement("td")
+    const actionRow = document.createElement("div")
+    actionRow.className = "inline-form wrap"
+    const revokeButton = reviewerLifecycleActionButton(reviewerLifecycleRevokeLabel())
+    revokeButton.disabled = !hasCapability("admin.reviewer.lifecycle.manage")
+    revokeButton.addEventListener("click", (event) => {
+      event.stopPropagation()
+      void revokeReviewerDevice(deviceId)
+    })
+    actionRow.appendChild(revokeButton)
+    actions.appendChild(actionRow)
+    tr.appendChild(actions)
+    tbody.appendChild(tr)
+  })
+}
+
+async function createReviewerInvite() {
+  const a = actor()
+  const ttlSeconds = readIntegerField("reviewerInviteTtlSeconds", 3600, 60)
+  setReviewerLifecycleState(
+    "reviewerInviteState",
+    "warning",
+    "reviewer.lifecycle.invites.loading",
+    "Creating reviewer invite...",
+  )
+  const response = await api("/api/reviewer/invites", {
+    method: "POST",
+    body: {
+      role: a.role,
+      admin_id: a.admin_id,
+      expires_in_seconds: ttlSeconds,
+    },
+  })
+  render("reviewer_invite_create", response)
+  if (!response.data || !response.data.ok) {
+    setReviewerLifecycleState(
+      "reviewerInviteState",
+      "danger",
+      "reviewer.lifecycle.invites.error",
+      "Failed to create reviewer invite.",
+    )
+    return response
+  }
+  await listReviewerInvites()
+  const payload = apiData(response)
+  setReviewerLifecycleState(
+    "reviewerInviteState",
+    "success",
+    "reviewer.lifecycle.invites.created",
+    "Invite created. Code: {invite_code}",
+    { invite_code: String(payload.invite_code || "").trim() },
+  )
+  return response
+}
+
+async function listReviewerInvites() {
+  const a = actor()
+  const status = readTextField("reviewerInviteStatusFilter")
+  setReviewerLifecycleState(
+    "reviewerInviteState",
+    "warning",
+    "reviewer.lifecycle.invites.loading",
+    "Loading reviewer invites...",
+  )
+  const response = await api(`/api/reviewer/invites${queryString({ role: a.role, status })}`)
+  render("reviewer_invite_list", response)
+  if (!response.data || !response.data.ok) {
+    updateReviewerInviteTable([])
+    setReviewerLifecycleState(
+      "reviewerInviteState",
+      "danger",
+      "reviewer.lifecycle.invites.error",
+      "Failed to load reviewer invites.",
+    )
+    return response
+  }
+  const invites = Array.isArray(apiData(response).invites) ? apiData(response).invites : []
+  updateReviewerInviteTable(invites)
+  setReviewerLifecycleState(
+    "reviewerInviteState",
+    invites.length ? "success" : "neutral",
+    invites.length ? "reviewer.lifecycle.invites.loaded" : "reviewer.lifecycle.invites.empty",
+    invites.length ? "Loaded {count} reviewer invites." : "No reviewer invites matched the current filter.",
+    { count: invites.length },
+  )
+  return response
+}
+
+async function revokeReviewerInvite(inviteCode) {
+  const a = actor()
+  setReviewerLifecycleState(
+    "reviewerInviteState",
+    "warning",
+    "reviewer.lifecycle.invites.revoking",
+    "Revoking reviewer invite...",
+  )
+  const response = await api("/api/reviewer/invites/revoke", {
+    method: "POST",
+    body: {
+      role: a.role,
+      admin_id: a.admin_id,
+      invite_code: String(inviteCode || "").trim(),
+    },
+  })
+  render("reviewer_invite_revoke", response)
+  if (!response.data || !response.data.ok) {
+    setReviewerLifecycleState(
+      "reviewerInviteState",
+      "danger",
+      "reviewer.lifecycle.invites.revoke_failed",
+      "Failed to revoke reviewer invite.",
+    )
+    return response
+  }
+  await listReviewerInvites()
+  setReviewerLifecycleState(
+    "reviewerInviteState",
+    "success",
+    "reviewer.lifecycle.invites.revoked",
+    "Invite revoked: {invite_code}",
+    { invite_code: String(inviteCode || "").trim() },
+  )
+  return response
+}
+
+async function listReviewerAccounts() {
+  const a = actor()
+  setReviewerLifecycleState(
+    "reviewerAccountState",
+    "warning",
+    "reviewer.lifecycle.accounts.loading",
+    "Loading reviewer accounts...",
+  )
+  const response = await api(`/api/reviewer/accounts${queryString({ role: a.role })}`)
+  render("reviewer_account_list", response)
+  if (!response.data || !response.data.ok) {
+    updateReviewerAccountTable([])
+    setReviewerLifecycleState(
+      "reviewerAccountState",
+      "danger",
+      "reviewer.lifecycle.accounts.error",
+      "Failed to load reviewer accounts.",
+    )
+    return response
+  }
+  const data = apiData(response)
+  const reviewers = Array.isArray(data.reviewers) ? data.reviewers : []
+  state.reviewerLifecycle.maxDevices = Number(data.max_devices || 0) || state.reviewerLifecycle.maxDevices
+  updateReviewerAccountTable(reviewers)
+  renderReviewerLifecycleAuthState()
+  setReviewerLifecycleState(
+    "reviewerAccountState",
+    reviewers.length ? "success" : "neutral",
+    reviewers.length ? "reviewer.lifecycle.accounts.loaded" : "reviewer.lifecycle.accounts.empty",
+    reviewers.length ? "Loaded {count} reviewer accounts." : "No reviewer accounts have redeemed invites yet.",
+    { count: reviewers.length },
+  )
+  return response
+}
+
+async function listReviewerDevices(options = {}) {
+  const a = actor()
+  const reviewerId = String(options.reviewerId || reviewerLifecycleSelectedReviewerId()).trim()
+  if (!reviewerId) {
+    setReviewerLifecycleState(
+      "reviewerDeviceState",
+      "danger",
+      "reviewer.lifecycle.devices.target_required",
+      "Reviewer ID is required before loading devices.",
+    )
+    return buildClientErrorResponse("reviewer_id_required", "reviewer_id is required", 400)
+  }
+  setReviewerLifecycleSelectedReviewer(reviewerId)
+  setReviewerLifecycleState(
+    "reviewerDeviceState",
+    "warning",
+    "reviewer.lifecycle.devices.loading",
+    "Loading reviewer devices...",
+  )
+  const response = await api(`/api/reviewer/devices${queryString({ role: a.role, reviewer_id: reviewerId })}`)
+  render("reviewer_device_list", response)
+  if (!response.data || !response.data.ok) {
+    updateReviewerDeviceTable([])
+    setReviewerLifecycleState(
+      "reviewerDeviceState",
+      "danger",
+      "reviewer.lifecycle.devices.error",
+      "Failed to load reviewer devices.",
+    )
+    return response
+  }
+  const data = apiData(response)
+  const devices = Array.isArray(data.devices) ? data.devices : []
+  state.reviewerLifecycle.maxDevices = Number(data.max_devices || 0) || state.reviewerLifecycle.maxDevices
+  updateReviewerDeviceTable(devices)
+  renderReviewerLifecycleAuthState()
+  setReviewerLifecycleState(
+    "reviewerDeviceState",
+    devices.length ? "success" : "neutral",
+    devices.length ? "reviewer.lifecycle.devices.loaded" : "reviewer.lifecycle.devices.empty",
+    devices.length ? "Loaded {count} devices for {reviewer_id}." : "No active devices for {reviewer_id}.",
+    { count: devices.length, reviewer_id: reviewerId },
+  )
+  return response
+}
+
+async function revokeReviewerDevice(deviceId) {
+  const a = actor()
+  const reviewerId = reviewerLifecycleSelectedReviewerId()
+  if (!reviewerId) {
+    setReviewerLifecycleState(
+      "reviewerDeviceState",
+      "danger",
+      "reviewer.lifecycle.devices.target_required",
+      "Reviewer ID is required before revoking devices.",
+    )
+    return buildClientErrorResponse("reviewer_id_required", "reviewer_id is required", 400)
+  }
+  setReviewerLifecycleState(
+    "reviewerDeviceState",
+    "warning",
+    "reviewer.lifecycle.devices.revoking",
+    "Revoking reviewer device...",
+  )
+  const response = await api(
+    `/api/reviewer/devices/${encodeURIComponent(String(deviceId || "").trim())}${queryString({ role: a.role, reviewer_id: reviewerId })}`,
+    {
+      method: "DELETE",
+    },
+  )
+  render("reviewer_device_revoke", response)
+  if (!response.data || !response.data.ok) {
+    setReviewerLifecycleState(
+      "reviewerDeviceState",
+      "danger",
+      "reviewer.lifecycle.devices.revoke_failed",
+      "Failed to revoke reviewer device.",
+    )
+    return response
+  }
+  await listReviewerDevices({ reviewerId })
+  setReviewerLifecycleState(
+    "reviewerDeviceState",
+    "success",
+    "reviewer.lifecycle.devices.revoked",
+    "Revoked device {device_id} for {reviewer_id}.",
+    { device_id: String(deviceId || "").trim(), reviewer_id: reviewerId },
+  )
+  return response
+}
+
+async function resetReviewerDevices() {
+  const a = actor()
+  const reviewerId = reviewerLifecycleSelectedReviewerId()
+  if (!reviewerId) {
+    setReviewerLifecycleState(
+      "reviewerDeviceState",
+      "danger",
+      "reviewer.lifecycle.devices.target_required",
+      "Reviewer ID is required before resetting devices.",
+    )
+    return buildClientErrorResponse("reviewer_id_required", "reviewer_id is required", 400)
+  }
+  setReviewerLifecycleState(
+    "reviewerDeviceState",
+    "warning",
+    "reviewer.lifecycle.devices.resetting",
+    "Resetting reviewer devices...",
+  )
+  const response = await api("/api/reviewer/accounts/reset-devices", {
+    method: "POST",
+    body: {
+      role: a.role,
+      admin_id: a.admin_id,
+      reviewer_id: reviewerId,
+    },
+  })
+  render("reviewer_device_reset", response)
+  if (!response.data || !response.data.ok) {
+    setReviewerLifecycleState(
+      "reviewerDeviceState",
+      "danger",
+      "reviewer.lifecycle.devices.reset_failed",
+      "Failed to reset reviewer devices.",
+    )
+    return response
+  }
+  await listReviewerAccounts()
+  await listReviewerDevices({ reviewerId })
+  const payload = apiData(response)
+  setReviewerLifecycleState(
+    "reviewerDeviceState",
+    "success",
+    "reviewer.lifecycle.devices.reset",
+    "Reset {count} devices for {reviewer_id}.",
+    {
+      count: Number(payload.revoked_devices || 0),
+      reviewer_id: reviewerId,
+    },
+  )
+  return response
+}
+
 function updateTemplatesTable(rows) {
   state.templates = Array.isArray(rows) ? rows : []
   const tbody = byId("templatesTable").querySelector("tbody")
@@ -5383,20 +5982,31 @@ async function listTemplates() {
 async function listSubmissions() {
   const a = actor()
   const filters = submissionListFilters()
+  const normalizedRole = String(a.role || "").trim().toLowerCase()
+  const useAdminEndpoint = hasCapability("admin.submissions.read") && normalizedRole !== "member"
+  const useMemberEndpoint = !useAdminEndpoint && hasCapability("member.submissions.read")
   setCollectionStatus("submissions", { status: "loading", errorMessage: "" })
-  const response = await api(
-    `/api/admin/submissions${queryString({
-      role: a.role,
-      ...filters
-    })}`
-  )
+  if (!useAdminEndpoint && !useMemberEndpoint) {
+    const denied = buildClientErrorResponse("permission_denied", "permission denied", 403)
+    render("list_submissions", denied)
+    setCollectionStatus("submissions", {
+      status: "error",
+      count: state.submissions.length,
+      errorMessage: errorMessageForCollection("submissions", denied),
+    })
+    return denied
+  }
+  const endpoint = useAdminEndpoint
+    ? `/api/admin/submissions${queryString({ role: a.role, ...filters })}`
+    : `/api/member/submissions${queryString({ user_id: a.user_id, ...filters })}`
+  const response = await api(endpoint)
   if (workspaceRequestFailed(response)) {
     setCollectionStatus("submissions", {
       status: "error",
       count: state.submissions.length,
       errorMessage: errorMessageForCollection("submissions", response),
     })
-    render("admin_list_submissions", response)
+    render(useAdminEndpoint ? "admin_list_submissions" : "member_list_submissions", response)
     return response
   }
   const rows = response.data && response.data.data ? response.data.data.submissions : []
@@ -5406,7 +6016,7 @@ async function listSubmissions() {
     count: rows.length,
     errorMessage: "",
   })
-  render("admin_list_submissions", response)
+  render(useAdminEndpoint ? "admin_list_submissions" : "member_list_submissions", response)
   return response
 }
 
@@ -5980,8 +6590,22 @@ async function downloadPackage() {
 
 async function downloadSubmissionPackage() {
   const submissionId = byId("decisionSubmissionId").value
+  const a = actor()
+  const normalizedRole = String(a.role || "").trim().toLowerCase()
+  const useAdminEndpoint = hasCapability("admin.submissions.package.download") && normalizedRole !== "member"
+  const useMemberEndpoint = !useAdminEndpoint && hasCapability("member.submissions.package.download")
+  if (!useAdminEndpoint && !useMemberEndpoint) {
+    render("submission_package_download", buildClientErrorResponse("permission_denied", "permission denied", 403))
+    return
+  }
   const params = new URLSearchParams({ submission_id: submissionId })
-  const response = await fetch(`/api/admin/submissions/package/download?${params.toString()}`, {
+  if (useMemberEndpoint) {
+    params.set("user_id", a.user_id)
+  }
+  const endpoint = useAdminEndpoint
+    ? `/api/admin/submissions/package/download?${params.toString()}`
+    : `/api/member/submissions/package/download?${params.toString()}`
+  const response = await fetch(endpoint, {
     method: "GET",
     headers: state.token && state.token !== "no-auth" ? { Authorization: `Bearer ${state.token}` } : {}
   })
@@ -6117,11 +6741,31 @@ async function loadSubmissionDetail(options = {}) {
   clearScanPanelSource()
   rerenderScanPanelFromState()
   const a = actor()
-  const response = await api(`/api/admin/submissions/detail${queryString({
-    role: a.role,
-    submission_id: submissionId
-  })}`)
-  render("submission_detail", response)
+  const normalizedRole = String(a.role || "").trim().toLowerCase()
+  const useAdminEndpoint = hasCapability("admin.submissions.read") && normalizedRole !== "member"
+  const useMemberEndpoint = !useAdminEndpoint && hasCapability("member.submissions.detail.read")
+  if (!useAdminEndpoint && !useMemberEndpoint) {
+    const denied = buildClientErrorResponse("permission_denied", "permission denied", 403)
+    render("submission_detail", denied)
+    setPanelStatus("submissionDetail", {
+      status: "error",
+      id: submissionId,
+      errorMessage: errorMessageForPanel("submissionDetail", denied),
+    })
+    updateSubmissionDetailPanel({})
+    return denied
+  }
+  const endpoint = useAdminEndpoint
+    ? `/api/admin/submissions/detail${queryString({
+      role: a.role,
+      submission_id: submissionId,
+    })}`
+    : `/api/member/submissions/detail${queryString({
+      user_id: a.user_id,
+      submission_id: submissionId,
+    })}`
+  const response = await api(endpoint)
+  render(useAdminEndpoint ? "admin_submission_detail" : "member_submission_detail", response)
   if (workspaceRequestFailed(response)) {
     setPanelStatus("submissionDetail", {
       status: "error",
@@ -6135,6 +6779,11 @@ async function loadSubmissionDetail(options = {}) {
 async function loadSubmissionCompare(options = {}) {
   const submissionId = options.submissionId || byId("decisionSubmissionId").value
   if (!submissionId) return
+  if (!hasCapability("admin.submissions.compare")) {
+    resetComparePanel()
+    setPanelStatus("compare", { status: "idle", id: submissionId, errorMessage: "" })
+    return buildClientErrorResponse("permission_denied", "permission denied", 403)
+  }
   if (options.syncRoute !== false) {
     await navigateToWorkspace({ scope: "submission", id: submissionId }, { targetId: "submissionWorkspaceSection" })
     return
@@ -6304,6 +6953,43 @@ function bindButtons() {
     void syncWorkspaceFromHash()
   })
   byId("btnClearWorkspace").addEventListener("click", clearWorkspaceRoute)
+
+  const reviewerInviteCreateButton = byId("btnReviewerInviteCreate")
+  if (reviewerInviteCreateButton) {
+    reviewerInviteCreateButton.addEventListener("click", () => {
+      void createReviewerInvite()
+    })
+  }
+  const reviewerInviteListButton = byId("btnReviewerInviteList")
+  if (reviewerInviteListButton) {
+    reviewerInviteListButton.addEventListener("click", () => {
+      void listReviewerInvites()
+    })
+  }
+  const reviewerAccountListButton = byId("btnReviewerAccountList")
+  if (reviewerAccountListButton) {
+    reviewerAccountListButton.addEventListener("click", () => {
+      void listReviewerAccounts()
+    })
+  }
+  const reviewerDeviceListButton = byId("btnReviewerDeviceList")
+  if (reviewerDeviceListButton) {
+    reviewerDeviceListButton.addEventListener("click", () => {
+      void listReviewerDevices()
+    })
+  }
+  const reviewerDeviceResetButton = byId("btnReviewerDeviceReset")
+  if (reviewerDeviceResetButton) {
+    reviewerDeviceResetButton.addEventListener("click", () => {
+      void resetReviewerDevices()
+    })
+  }
+  const reviewerDeviceTargetNode = byId("reviewerDeviceTargetId")
+  if (reviewerDeviceTargetNode) {
+    reviewerDeviceTargetNode.addEventListener("change", () => {
+      setReviewerLifecycleSelectedReviewer(String(reviewerDeviceTargetNode.value || "").trim())
+    })
+  }
 
   byId("btnPrefGet").addEventListener("click", async () => {
     const a = actor()
@@ -6922,6 +7608,12 @@ async function bootstrap() {
   }
   if (state.pageMode === "member" && byId("btnTemplates") && isInlineMemberMarketVisible()) {
     await listTemplates()
+    if (byId("btnListSubmissions")) {
+      await listSubmissions()
+    }
+    if (byId("btnProfilePackListPackSubmissions")) {
+      await listProfilePackMarketSubmissions()
+    }
   }
   await syncWorkspaceFromHash()
 }

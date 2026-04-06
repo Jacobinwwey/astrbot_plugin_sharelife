@@ -19,6 +19,7 @@
         </div>
         <nav class="sidebar-nav" aria-label="Admin console navigation">
           <a class="sidebar-link is-active" href="#section-overview" data-i18n-key="console.nav.overview">Overview</a>
+          <a class="sidebar-link" href="#section-reviewer-lifecycle" data-i18n-key="console.nav.reviewer_lifecycle">Reviewer Lifecycle</a>
           <a class="sidebar-link" href="#section-preferences" data-i18n-key="console.nav.preferences">Preferences</a>
           <a class="sidebar-link" href="#section-profile-pack" data-i18n-key="console.nav.profile_pack">Profile Pack</a>
           <a class="sidebar-link" href="#section-admin-submissions" data-i18n-key="console.nav.moderation">Moderation</a>
@@ -129,6 +130,104 @@
         </div>
       </details>
       <p class="note" data-i18n-key="console.note.auth_binding">When WebUI auth is enabled, admin capability is bound to the login token. The manual role field is only advisory for no-auth local mode.</p>
+        </section>
+
+        <section class="card" id="section-reviewer-lifecycle" data-console-scope="admin">
+      <h2 data-i18n-key="console.section.reviewer_lifecycle">Reviewer Lifecycle</h2>
+      <p class="note" data-i18n-key="console.note.reviewer_lifecycle">Issue invites, inspect reviewer accounts, and manage device keys from one admin workspace.</p>
+      <div id="reviewerLifecycleAuthState" class="collection-state is-neutral" data-i18n-key="reviewer.lifecycle.auth_state.idle">Reviewer auth configuration status will appear here.</div>
+      <div class="detail-grid">
+        <section class="detail-card">
+          <h3 class="glossary-title" data-i18n-key="reviewer.lifecycle.invites.heading">Invites</h3>
+          <div class="grid">
+            <label>
+              <span data-i18n-key="field.reviewer_invite_ttl_seconds">Invite TTL (seconds)</span>
+              <input id="reviewerInviteTtlSeconds" type="number" min="60" step="60" value="3600" />
+            </label>
+            <label>
+              <span data-i18n-key="field.reviewer_invite_status_filter">Invite Status</span>
+              <select id="reviewerInviteStatusFilter">
+                <option value="" data-i18n-key="option.reviewer_invite_status.all">all</option>
+                <option value="issued" data-i18n-key="option.reviewer_invite_status.issued">issued</option>
+                <option value="redeemed" data-i18n-key="option.reviewer_invite_status.redeemed">redeemed</option>
+                <option value="expired" data-i18n-key="option.reviewer_invite_status.expired">expired</option>
+                <option value="revoked" data-i18n-key="option.reviewer_invite_status.revoked">revoked</option>
+              </select>
+            </label>
+          </div>
+          <div class="inline-form wrap">
+            <button id="btnReviewerInviteCreate" class="btn-primary" type="button" data-i18n-key="button.reviewer_invite_create">Create Invite</button>
+            <button id="btnReviewerInviteList" type="button" data-i18n-key="button.reviewer_invite_list">Load Invites</button>
+          </div>
+          <div id="reviewerInviteState" class="collection-state is-neutral" data-i18n-key="reviewer.lifecycle.invites.idle">Create or load reviewer invites.</div>
+          <div class="table-wrap">
+            <table id="reviewerInviteTable">
+              <thead>
+                <tr>
+                  <th data-i18n-key="table.header.invite_code">Invite Code</th>
+                  <th data-i18n-key="table.header.status">Status</th>
+                  <th data-i18n-key="table.header.issued_by">Issued By</th>
+                  <th data-i18n-key="table.header.redeemed_by">Redeemed By</th>
+                  <th data-i18n-key="table.header.expires_at">Expires</th>
+                  <th data-i18n-key="table.header.actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <h3 class="glossary-title" data-i18n-key="reviewer.lifecycle.accounts.heading">Accounts</h3>
+          <div class="inline-form wrap">
+            <button id="btnReviewerAccountList" class="btn-primary" type="button" data-i18n-key="button.reviewer_account_list">Load Accounts</button>
+          </div>
+          <div id="reviewerAccountState" class="collection-state is-neutral" data-i18n-key="reviewer.lifecycle.accounts.idle">Load reviewer accounts to inspect redemption and device usage.</div>
+          <div class="table-wrap">
+            <table id="reviewerAccountTable">
+              <thead>
+                <tr>
+                  <th data-i18n-key="table.header.reviewer_id">Reviewer ID</th>
+                  <th data-i18n-key="table.header.created_by">Created By</th>
+                  <th data-i18n-key="table.header.source_invite">Source Invite</th>
+                  <th data-i18n-key="table.header.device_count">Devices</th>
+                  <th data-i18n-key="table.header.created_at">Created</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <h3 class="glossary-title" data-i18n-key="reviewer.lifecycle.devices.heading">Device Keys</h3>
+          <div class="grid">
+            <label>
+              <span data-i18n-key="field.reviewer_target_id">Reviewer ID</span>
+              <input id="reviewerDeviceTargetId" type="text" data-i18n-placeholder-key="placeholder.reviewer_target_id" placeholder="reviewer_id" />
+            </label>
+          </div>
+          <div class="inline-form wrap">
+            <button id="btnReviewerDeviceList" class="btn-primary" type="button" data-i18n-key="button.reviewer_device_list">Load Devices</button>
+            <button id="btnReviewerDeviceReset" type="button" data-i18n-key="button.reviewer_device_reset">Reset All Devices</button>
+          </div>
+          <div id="reviewerDeviceState" class="collection-state is-neutral" data-i18n-key="reviewer.lifecycle.devices.idle">Pick a reviewer account to inspect or revoke device keys.</div>
+          <div class="table-wrap">
+            <table id="reviewerDeviceTable">
+              <thead>
+                <tr>
+                  <th data-i18n-key="table.header.device_id">Device ID</th>
+                  <th data-i18n-key="table.header.label">Label</th>
+                  <th data-i18n-key="table.header.registered_at">Registered</th>
+                  <th data-i18n-key="table.header.last_used_at">Last Used</th>
+                  <th data-i18n-key="table.header.actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
         </section>
 
         <section class="card developer-only-card" id="section-preferences" data-console-scope="all">

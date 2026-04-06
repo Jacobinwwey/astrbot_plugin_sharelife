@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,7 +31,13 @@ class FrozenClock:
         self.current = self.current + timedelta(**kwargs)
 
 
-def build_interfaces(tmp_path):
+def build_interfaces(
+    tmp_path,
+    *,
+    auto_publish_profile_pack_approve: bool = False,
+    public_market_root: Path | None = None,
+    rebuild_snapshot_on_publish: bool = True,
+):
     clock = FrozenClock(datetime(2026, 3, 30, 3, 0, tzinfo=UTC))
     runtime = InMemoryRuntimeBridge(
         initial_state={
@@ -69,6 +76,9 @@ def build_interfaces(tmp_path):
         apply_service=apply_service,
         audit_service=audit,
         profile_pack_service=profile_pack,
+        public_market_auto_publish_profile_pack_approve=auto_publish_profile_pack_approve,
+        public_market_root=public_market_root,
+        public_market_rebuild_snapshot_on_publish=rebuild_snapshot_on_publish,
     )
     web_api = SharelifeWebApiV1(api=api, notifier=notifier)
     return api, web_api
@@ -455,6 +465,62 @@ def test_api_profile_pack_submission_review_publish_flow(tmp_path):
     assert isinstance(row["diff_preview"], list)
 
 
+def test_api_member_profile_pack_submission_views_are_owner_scoped(tmp_path):
+    api, _ = build_interfaces(tmp_path)
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-owner-scope",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    own = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported["artifact_id"],
+    )
+    other = api.submit_profile_pack(
+        user_id="member-2",
+        artifact_id=exported["artifact_id"],
+    )
+
+    listed = api.member_list_profile_pack_submissions(user_id="member-1")
+    assert listed["user_id"] == "member-1"
+    assert len(listed["submissions"]) == 1
+    assert listed["submissions"][0]["submission_id"] == own["submission_id"]
+
+    own_detail = api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=own["submission_id"],
+    )
+    assert own_detail["submission_id"] == own["submission_id"]
+    assert own_detail["user_id"] == "member-1"
+
+    own_export = api.member_get_profile_pack_submission_export(
+        user_id="member-1",
+        submission_id=own["submission_id"],
+    )
+    assert own_export["submission_id"] == own["submission_id"]
+    assert own_export["artifact_id"] == own_detail["artifact_id"]
+    assert Path(own_export["path"]).exists()
+
+    denied = api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=other["submission_id"],
+    )
+    assert denied["error"] == "permission_denied"
+
+    denied_export = api.member_get_profile_pack_submission_export(
+        user_id="member-1",
+        submission_id=other["submission_id"],
+    )
+    assert denied_export["error"] == "permission_denied"
+
+    missing_export = api.member_get_profile_pack_submission_export(
+        user_id="member-1",
+        submission_id="",
+    )
+    assert missing_export["error"] == "submission_id_required"
+
+
 def test_api_profile_pack_catalog_exposes_governance_evidence_and_featured_toggle(tmp_path):
     api, _ = build_interfaces(tmp_path)
     exported = api.admin_export_profile_pack(
@@ -491,6 +557,101 @@ def test_api_profile_pack_catalog_exposes_governance_evidence_and_featured_toggl
 
     featured_only = api.list_profile_pack_catalog(featured="true")
     assert any(item["pack_id"] == "profile/community-governed" for item in featured_only["packs"])
+
+
+def test_api_profile_pack_approval_auto_publishes_to_public_market(tmp_path):
+    public_market_root = tmp_path / "public-root"
+    api, _ = build_interfaces(
+        tmp_path / "workspace",
+        auto_publish_profile_pack_approve=True,
+        public_market_root=public_market_root,
+    )
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-autopublish",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    submitted = api.submit_profile_pack(user_id="member-1", artifact_id=exported["artifact_id"])
+    decided = api.admin_decide_profile_pack_submission(
+        role="admin",
+        submission_id=submitted["submission_id"],
+        decision="approve",
+        review_note="publish this to public market",
+        review_labels=["risk_low", "approved"],
+    )
+
+    publish = decided.get("public_market_publish", {})
+    assert publish.get("status") == "succeeded"
+    entry_path = Path(str(publish["entry_path"]))
+    package_path = Path(str(publish["package_path"]))
+    assert entry_path.exists()
+    assert package_path.exists()
+    assert entry_path.parent == public_market_root / "market" / "entries"
+    assert package_path.parent == public_market_root / "market" / "packages" / "community"
+
+    entry_payload = json.loads(entry_path.read_text(encoding="utf-8"))
+    assert entry_payload["pack_id"] == "profile/community-autopublish"
+    assert entry_payload["source_submission_id"] == submitted["submission_id"]
+    assert entry_payload["redaction_mode"] == "exclude_secrets"
+
+    snapshot = public_market_root / "market" / "catalog.snapshot.json"
+    assert snapshot.exists()
+    snapshot_rows = json.loads(snapshot.read_text(encoding="utf-8"))["rows"]
+    assert any(item.get("pack_id") == "profile/community-autopublish" for item in snapshot_rows)
+
+
+def test_api_profile_pack_approval_does_not_publish_when_flag_disabled(tmp_path):
+    public_market_root = tmp_path / "public-root"
+    api, _ = build_interfaces(
+        tmp_path / "workspace",
+        auto_publish_profile_pack_approve=False,
+        public_market_root=public_market_root,
+    )
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-not-published",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    submitted = api.submit_profile_pack(user_id="member-1", artifact_id=exported["artifact_id"])
+    decided = api.admin_decide_profile_pack_submission(
+        role="admin",
+        submission_id=submitted["submission_id"],
+        decision="approve",
+    )
+
+    assert decided["status"] == "approved"
+    assert "public_market_publish" not in decided
+    assert not (public_market_root / "market" / "entries").exists()
+    assert not (public_market_root / "market" / "catalog.snapshot.json").exists()
+
+
+def test_api_profile_pack_approval_keeps_decision_when_public_redaction_not_allowed(tmp_path):
+    public_market_root = tmp_path / "public-root"
+    api, _ = build_interfaces(
+        tmp_path / "workspace",
+        auto_publish_profile_pack_approve=True,
+        public_market_root=public_market_root,
+    )
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-redaction-blocked",
+        version="1.0.0",
+        redaction_mode="include_provider_no_key",
+    )
+    submitted = api.submit_profile_pack(user_id="member-1", artifact_id=exported["artifact_id"])
+    decided = api.admin_decide_profile_pack_submission(
+        role="admin",
+        submission_id=submitted["submission_id"],
+        decision="approve",
+    )
+
+    assert decided["status"] == "approved"
+    publish = decided.get("public_market_publish", {})
+    assert publish.get("status") == "failed"
+    assert publish.get("error") == "public_market_redaction_not_allowed"
+    assert not (public_market_root / "market" / "entries").exists()
 
 
 def test_api_profile_pack_catalog_insights_returns_metrics_and_ranked_rows(tmp_path):
@@ -607,6 +768,107 @@ def test_web_api_profile_pack_submission_review_publish_routes(tmp_path):
     assert isinstance(row["before_preview"], list)
     assert isinstance(row["after_preview"], list)
     assert isinstance(row["diff_preview"], list)
+
+
+def test_web_api_member_profile_pack_submission_views_are_owner_scoped(tmp_path):
+    _, web_api = build_interfaces(tmp_path)
+    exported = web_api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-web-owner-scope",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    assert exported.ok is True
+
+    own = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported.data["artifact_id"],
+    )
+    other = web_api.submit_profile_pack(
+        user_id="member-2",
+        artifact_id=exported.data["artifact_id"],
+    )
+    assert own.ok is True
+    assert other.ok is True
+
+    listed = web_api.member_list_profile_pack_submissions(user_id="member-1")
+    assert listed.ok is True
+    assert listed.data["user_id"] == "member-1"
+    assert len(listed.data["submissions"]) == 1
+    assert listed.data["submissions"][0]["submission_id"] == own.data["submission_id"]
+
+    own_detail = web_api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=own.data["submission_id"],
+    )
+    assert own_detail.ok is True
+    assert own_detail.data["submission_id"] == own.data["submission_id"]
+
+    own_export = web_api.member_get_profile_pack_submission_export(
+        user_id="member-1",
+        submission_id=own.data["submission_id"],
+    )
+    assert own_export.ok is True
+    assert own_export.data["submission_id"] == own.data["submission_id"]
+    assert own_export.data["artifact_id"] == own_detail.data["artifact_id"]
+
+    denied = web_api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=other.data["submission_id"],
+    )
+    assert denied.ok is False
+    assert denied.status_code == 403
+    assert denied.error_code == "permission_denied"
+
+    denied_export = web_api.member_get_profile_pack_submission_export(
+        user_id="member-1",
+        submission_id=other.data["submission_id"],
+    )
+    assert denied_export.ok is False
+    assert denied_export.status_code == 403
+    assert denied_export.error_code == "permission_denied"
+
+    missing_export = web_api.member_get_profile_pack_submission_export(
+        user_id="member-1",
+        submission_id="",
+    )
+    assert missing_export.ok is False
+    assert missing_export.status_code == 400
+    assert missing_export.error_code == "submission_id_required"
+
+
+def test_web_api_profile_pack_decision_exposes_public_market_publish_payload(tmp_path):
+    public_market_root = tmp_path / "public-root"
+    _, web_api = build_interfaces(
+        tmp_path / "workspace",
+        auto_publish_profile_pack_approve=True,
+        public_market_root=public_market_root,
+    )
+    exported = web_api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-webapi-autopublish",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    assert exported.ok is True
+
+    submitted = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported.data["artifact_id"],
+    )
+    assert submitted.ok is True
+
+    decided = web_api.admin_decide_profile_pack_submission(
+        role="admin",
+        submission_id=submitted.data["submission_id"],
+        decision="approve",
+        review_labels=["risk_low", "approved"],
+    )
+    assert decided.ok is True
+    publish = decided.data.get("public_market_publish", {})
+    assert publish.get("status") == "succeeded"
+    assert Path(str(publish.get("entry_path", ""))).exists()
+    assert Path(str(publish.get("package_path", ""))).exists()
 
 
 def test_web_api_profile_pack_featured_route(tmp_path):

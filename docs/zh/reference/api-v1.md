@@ -19,6 +19,10 @@
 13. `list_profile_pack_catalog(pack_query="", pack_type="", risk_level="", review_label="", warning_flag="", featured="")`
 14. `get_profile_pack_catalog_detail(pack_id)`
 15. `compare_profile_pack_catalog(pack_id, selected_sections=None)`
+16. `member_list_submissions(user_id, status="", template_query="", risk_level="", review_label="", warning_flag="")`
+17. `member_get_submission_detail(user_id, submission_id)`
+18. `member_list_profile_pack_submissions(user_id, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
+19. `member_get_profile_pack_submission_detail(user_id, submission_id)`
 
 ## 管理员侧
 
@@ -64,46 +68,51 @@
 
 1. `admin_create_reviewer_invite(role, admin_id, expires_in_seconds=3600)`
 2. `admin_list_reviewer_invites(role, status="")`
-3. `reviewer_redeem_invite(invite_code, reviewer_id)`
-4. `reviewer_register_device(reviewer_id, label="")`
-5. `reviewer_list_devices(reviewer_id)`
-6. `reviewer_revoke_device(reviewer_id, device_id)`
-7. `admin_list_reviewers(role)`
-8. `admin_force_reset_reviewer_devices(role, reviewer_id, admin_id)`
-9. `admin_list_profile_pack_submissions(role, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
-10. `admin_decide_profile_pack_submission(role, submission_id, decision, review_note="", review_labels=None, reviewer_id="")`
+3. `admin_revoke_reviewer_invite(role, invite_code, admin_id)`
+4. `reviewer_redeem_invite(invite_code, reviewer_id)`
+5. `reviewer_register_device(reviewer_id, label="")`
+6. `reviewer_list_devices(reviewer_id)`
+7. `reviewer_revoke_device(reviewer_id, device_id)`
+8. `admin_list_reviewers(role)`
+9. `admin_force_reset_reviewer_devices(role, reviewer_id, admin_id)`
+10. `admin_list_profile_pack_submissions(role, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
+11. `admin_decide_profile_pack_submission(role, submission_id, decision, review_note="", review_labels=None, reviewer_id="")`
 
 ## 错误码约定（节选）
 
 1. `permission_denied`
-2. `review_lock_held`
-3. `takeover_reason_required`
-4. `review_lock_required`
-5. `review_lock_not_owner`
-6. `request_version_conflict`
-7. `lock_version_conflict`
-8. `template_not_installable`
-9. `package_service_unavailable`
-10. `package_payload_required`
-11. `invalid_package_payload`
-12. `plan_not_found`
-13. `plan_not_applied`
-14. `invalid_pack_type`
-15. `profile_pack_plugin_install_confirm_required`
-16. `profile_pack_plugin_not_in_plan`
-17. `profile_pack_plugin_id_required`
-18. `profile_pack_plugin_install_exec_disabled`
-19. `profile_pack_plugin_install_exec_required`
-20. `profile_pack_plugin_install_exec_failed`
-21. `pipeline_service_unavailable`
-22. `invalid_pipeline_contract`
-23. `pipeline_execution_failed`
-24. `storage_service_unavailable`
-25. `daily_upload_budget_exceeded`
-26. `remote_sync_command_not_found`
-27. `remote_sync_failed`
-28. `artifact_not_found`
-29. `artifact_checksum_mismatch`
+2. `invite_revoked`
+3. `review_lock_held`
+4. `takeover_reason_required`
+5. `review_lock_required`
+6. `review_lock_not_owner`
+7. `request_version_conflict`
+8. `lock_version_conflict`
+9. `template_not_installable`
+10. `package_service_unavailable`
+11. `package_payload_required`
+12. `invalid_package_payload`
+13. `plan_not_found`
+14. `plan_not_applied`
+15. `invalid_pack_type`
+16. `profile_pack_plugin_install_confirm_required`
+17. `profile_pack_plugin_not_in_plan`
+18. `profile_pack_plugin_id_required`
+19. `profile_pack_plugin_install_exec_disabled`
+20. `profile_pack_plugin_install_exec_required`
+21. `profile_pack_plugin_install_exec_failed`
+22. `pipeline_service_unavailable`
+23. `invalid_pipeline_contract`
+24. `pipeline_execution_failed`
+25. `storage_service_unavailable`
+26. `daily_upload_budget_exceeded`
+27. `remote_sync_command_not_found`
+28. `remote_sync_failed`
+29. `artifact_not_found`
+30. `artifact_checksum_mismatch`
+31. `remote_encryption_required`
+32. `remote_retention_failed`
+33. `remote_retention_command_not_found`
 
 ## 并发治理规则
 
@@ -135,27 +144,32 @@ Phase 3 新增 `sharelife/interfaces/web_api_v1.py` 与 `sharelife/interfaces/we
 14. `GET /api/profile-pack/catalog/detail?pack_id=...`
 15. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
 16. `GET /api/profile-pack/catalog/insights`
+17. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
+18. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
+19. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
+20. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
 
 审核员侧：
 
 1. `POST /api/reviewer/invites`
 2. `GET /api/reviewer/invites`
-3. `POST /api/reviewer/redeem`
-4. `POST /api/reviewer/devices/register`
-5. `GET /api/reviewer/devices`
-6. `DELETE /api/reviewer/devices/{device_id}`
-7. `GET /api/reviewer/accounts`
-8. `POST /api/reviewer/accounts/reset-devices`
-9. `GET /api/reviewer/session`
-10. `POST /api/reviewer/session/logout`
-11. `GET /api/reviewer/submissions`
-12. `POST /api/reviewer/submissions/review`
-13. `POST /api/reviewer/submissions/decide`
-14. `GET /api/reviewer/submissions/detail?submission_id=...`
-15. `GET /api/reviewer/submissions/compare?submission_id=...`
-16. `GET /api/reviewer/submissions/package/download?submission_id=...`
-17. `GET /api/reviewer/profile-pack/submissions`
-18. `POST /api/reviewer/profile-pack/submissions/decide`
+3. `POST /api/reviewer/invites/revoke`
+4. `POST /api/reviewer/redeem`
+5. `POST /api/reviewer/devices/register`
+6. `GET /api/reviewer/devices`
+7. `DELETE /api/reviewer/devices/{device_id}`
+8. `GET /api/reviewer/accounts`
+9. `POST /api/reviewer/accounts/reset-devices`
+10. `GET /api/reviewer/session`
+11. `POST /api/reviewer/session/logout`
+12. `GET /api/reviewer/submissions`
+13. `POST /api/reviewer/submissions/review`
+14. `POST /api/reviewer/submissions/decide`
+15. `GET /api/reviewer/submissions/detail?submission_id=...`
+16. `GET /api/reviewer/submissions/compare?submission_id=...`
+17. `GET /api/reviewer/submissions/package/download?submission_id=...`
+18. `GET /api/reviewer/profile-pack/submissions`
+19. `POST /api/reviewer/profile-pack/submissions/decide`
 
 管理员侧：
 
@@ -215,8 +229,19 @@ Phase 3 新增 `sharelife/interfaces/web_api_v1.py` 与 `sharelife/interfaces/we
 | --- | --- | --- |
 | `GET /api/ui/capabilities` | `public` | 不适用 |
 | `POST /api/login` | `public` | `401 invalid_credentials` 或 `429 rate_limited` |
-| `GET /api/profile-pack/catalog` | `member|reviewer|admin`（关闭鉴权时可 `public`） | 由部署鉴权模式决定 `401/403` |
-| `POST /api/reviewer/redeem` | `public`（邀请码准入） | 邀请码校验失败返回 `400/404/410` |
+| `GET /api/templates` | `public`（只读市场能力） | 不适用 |
+| `GET /api/templates/detail` | `public`（只读市场能力） | 不适用 |
+| `GET /api/profile-pack/catalog` | `public`（只读市场能力） | 不适用 |
+| `GET /api/profile-pack/catalog/detail` | `public`（只读市场能力） | 不适用 |
+| `GET /api/profile-pack/catalog/compare` | `public`（只读市场能力） | 不适用 |
+| `GET /api/profile-pack/catalog/insights` | `public`（只读市场能力） | 不适用 |
+| `POST /api/templates/submit` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 提交他人 `user_id` 时 `403 permission_denied` |
+| `GET /api/member/submissions` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询他人 `user_id` 时 `403 permission_denied` |
+| `GET /api/member/submissions/detail` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询非本人 `submission_id` 时 `403 permission_denied` |
+| `GET /api/member/profile-pack/submissions` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询他人 `user_id` 时 `403 permission_denied` |
+| `GET /api/member/profile-pack/submissions/detail` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询非本人 `submission_id` 时 `403 permission_denied` |
+| `POST /api/reviewer/invites/revoke` | `admin` | `403 permission_denied` |
+| `POST /api/reviewer/redeem` | `public`（邀请码准入） | 邀请码校验失败返回 `400/404/409/410` |
 | `GET /api/reviewer/submissions` | `reviewer|admin` | `403 permission_denied` |
 | `POST /api/reviewer/submissions/decide` | `reviewer|admin` | `403 permission_denied` |
 | `POST /api/admin/apply` | `admin` | `403 permission_denied` |
@@ -244,3 +269,6 @@ Phase 3 新增 `sharelife/interfaces/web_api_v1.py` 与 `sharelife/interfaces/we
 15. WebUI 的语言切换（`en-US` / `zh-CN` / `ja-JP`）属于前端行为；API 接口不接收 locale 参数，返回 schema 不随语言变化。
 16. WebUI 中的本地化文案（集合状态、面板状态、审核提示、详情字段标签）由前端字典映射生成；API 字段 key 保持稳定（英文 `snake_case`）。
 17. `GET /api/ui/capabilities` 设计为登录前可读；开启鉴权但未携带 token 时，角色解析为 `public`，仅返回最小能力集。
+18. 即便开启鉴权，市场目录只读接口仍保持公开（`GET /api/templates*`、`GET /api/profile-pack/catalog*`），所有写接口继续要求 token。
+19. 当 `webui.public_market.auto_publish_profile_pack_approve=true` 时，审核通过 profile-pack 提交后，决策响应会附带 `public_market_publish` 字段，返回发布状态与生成产物路径。
+20. 公共市场自动发布相关运行时配置键：`webui.public_market.auto_publish_profile_pack_approve`、`webui.public_market.root`、`webui.public_market.rebuild_snapshot_on_publish`。

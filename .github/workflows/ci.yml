@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, feature/**]
+    branches: [main, feature/**, feat/**]
   pull_request:
 
 jobs:
@@ -47,6 +47,9 @@ jobs:
 
       - name: Run WebUI E2E
         run: bash scripts/run_webui_e2e.sh
+
+      - name: Run WebUI Market Auth E2E
+        run: bash scripts/run_webui_market_auth_e2e.sh
 
   docs:
     runs-on: ubuntu-latest

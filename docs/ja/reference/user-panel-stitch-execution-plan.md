@@ -14,14 +14,21 @@
    - ドラッグアンドドロップ対応アップロードセンター
    - タスクキューと履歴
 2. `/market` に同等の install/upload コントロール、ローカルインストール更新、ドラッグアンドドロップ UI を追加。
-3. 後方互換な API 拡張を実装:
+3. `/market` に member 所有アップロード管理ビューを追加:
+   - 自分の template submission 一覧 + detail ジャンプ
+   - 自分の profile-pack submission 一覧 + detail ジャンプ
+4. 後方互換な API 拡張を実装:
    - `GET /api/member/installations`
    - `POST /api/member/installations/refresh`
+   - `GET /api/member/submissions`
+   - `GET /api/member/submissions/detail`
+   - `GET /api/member/profile-pack/submissions`
+   - `GET /api/member/profile-pack/submissions/detail`
    - `install_options`
    - `upload_options`
    - `submit_options`
-4. interface test、WebUI unit test、browser E2E に検証を追加。
-5. `/member` は Spotlight 優先の構成に更新済みです。上部に言語切替・ローカル更新・単一検索入口を集約し、member 側結果面から重複した `Market Hub` 見出しを除去しました。
+5. interface test、WebUI unit test、browser E2E に検証を追加。
+6. `/member` は Spotlight 優先の構成に更新済みです。上部に言語切替・ローカル更新・単一検索入口を集約し、member 側結果面から重複した `Market Hub` 見出しを除去しました。
 
 現在のトレードオフ:
 
@@ -70,6 +77,10 @@
 
 1. `GET /api/member/installations`  
 2. `POST /api/member/installations/refresh`
+3. `GET /api/member/submissions`
+4. `GET /api/member/submissions/detail`
+5. `GET /api/member/profile-pack/submissions`
+6. `GET /api/member/profile-pack/submissions/detail`
 
 レスポンス envelope:
 `{ ok, message, data, error? }`

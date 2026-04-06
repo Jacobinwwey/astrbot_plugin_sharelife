@@ -229,6 +229,16 @@ def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWe
         plugin_version="0.3.12",
         state_store=state_stores["profile_pack_state"],
     )
+    webui_cfg = config.get("webui", {}) if isinstance(config.get("webui"), dict) else {}
+    public_market_cfg = (
+        webui_cfg.get("public_market", {})
+        if isinstance(webui_cfg.get("public_market"), dict)
+        else {}
+    )
+    public_market_root = str(
+        public_market_cfg.get("root", str(REPO_ROOT / "docs" / "public"))
+        or str(REPO_ROOT / "docs" / "public")
+    ).strip()
     # Keep standalone market useful on first launch: always seed bundled official pack baseline.
     ProfilePackBootstrapService(profile_pack_service=profile_pack).sync()
     audit = AuditService(clock=clock, state_store=state_stores["audit_state"])
@@ -241,6 +251,15 @@ def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWe
         apply_service=apply,
         audit_service=audit,
         profile_pack_service=profile_pack,
+        public_market_auto_publish_profile_pack_approve=_as_bool(
+            str(public_market_cfg.get("auto_publish_profile_pack_approve", "false")),
+            default=False,
+        ),
+        public_market_root=public_market_root,
+        public_market_rebuild_snapshot_on_publish=_as_bool(
+            str(public_market_cfg.get("rebuild_snapshot_on_publish", "true")),
+            default=True,
+        ),
     )
     web_api = SharelifeWebApiV1(api=api, notifier=notifier)
     web_root = REPO_ROOT / "sharelife" / "webui"

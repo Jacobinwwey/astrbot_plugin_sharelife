@@ -36,16 +36,18 @@ Notes:
 - Aggregated audit summary exists for reviewer/device/action visibility.
 - Public docs and private docs have been separated: detailed operator/auth runbooks are no longer part of the public site.
 
-### 3.2 Not complete yet
-- Admin-to-reviewer key management is **not** fully closed from frontend to backend.
-  - The backend has invite/device foundations.
-  - The admin WebUI does not yet provide a complete reviewer lifecycle management console.
-- Owner-aware policy is still incomplete across all mutation paths.
-  - Submission and profile-pack resources already carry owner identity fields.
-  - Full backend enforcement is not yet uniformly applied across every user-facing mutation.
+### 3.2 Remaining gaps
+- Owner-aware policy has been enforced for upload and uploaded-resource management surfaces.
+  - Enforced routes include template/profile-pack submit and member-scoped submission browsing/detail endpoints.
+  - Non-upload surfaces (for example preferences and generic market read paths) intentionally keep the previous behavior and are not treated as owner-bound resources.
 - Reviewer session behavior still needs refinement.
   - The roadmap no longer treats reviewer-global single-session behavior as a target state.
   - The intended direction is device-granular session invalidation.
+- Admin-to-reviewer lifecycle closure is complete for the current local auth model:
+  - invite issuance, listing, revocation, redemption denial on revoked invites
+  - reviewer account/device visibility
+  - device revoke/reset and audit trace
+  - public docs remain interface-level only; operator SOP stays private
 
 ## 4. Public-Facing Execution Direction
 
@@ -69,18 +71,13 @@ Notes:
 This stage is only considered complete when all of the following are true:
 1. Interface and WebUI tests pass, including reviewer invite/device/session paths.
 2. Unauthenticated privileged access returns `401`, and authenticated-but-denied access returns `403`.
-3. User mutation paths are owner-aware for their own resources and deny access to non-owned resources.
+3. Upload and uploaded-resource management paths are owner-aware for owned resources and deny access to non-owned resources.
 4. Public docs no longer expose reviewer/admin operator procedures, secret handling, or recovery runbooks.
-5. `admin-to-reviewer` key management closure is documented as an explicit in-progress workstream rather than implied as complete.
+5. `admin-to-reviewer` lifecycle closure is reflected in code, tests, and public interface docs, while sensitive operator SOP remains private.
 
 ## 6. Next Iteration Targets
 
-1. Close the `admin-to-reviewer` lifecycle from frontend to backend:
-   - invite issuance
-   - device visibility/reset
-   - session revoke
-   - audit trace
-2. Add owner-aware authorization checks across user mutation flows without creating a separate `Creator` role.
-3. Refine reviewer session handling toward device-granular invalidation.
-4. Move toward code-first auth metadata and generated permission documentation.
-5. Evaluate optional external identity providers only after the local model is internally consistent.
+1. Keep owner-aware enforcement scoped to upload and uploaded-resource management flows without creating a separate `Creator` role.
+2. Refine reviewer session handling toward device-granular invalidation.
+3. Move toward code-first auth metadata and generated permission documentation.
+4. Evaluate optional external identity providers only after the local model is internally consistent.

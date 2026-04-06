@@ -28,8 +28,11 @@ bash scripts/sharelife-init-wizard --yes --output config.generated.yaml
 2. `--api-key <value>`
 3. `--preset standard_qa|sharelife_companion|research_safe`
 4. `--webui-auth true|false`
-5. `--enable-plugin-install-exec true|false`
-6. `--print-only`
+5. `--allow-anonymous-member true|false`
+6. `--anonymous-member-user-id <value>`
+7. `--anonymous-member-allowlist "POST /api/trial,GET /api/trial/status,..."`
+8. `--enable-plugin-install-exec true|false`
+9. `--print-only`
 
 ## Self-Documenting Config Template
 
@@ -45,6 +48,7 @@ config.template.yaml
 2. sharelife WebUI 認証とレート制御
 3. profile-pack 署名/暗号化設定
 4. plugin install 実行ゲート（既定無効、prefix allowlist、timeout）
+5. 匿名 member モード既定値とエンドポイント allowlist 上書き設定
 
 ## 推奨運用
 

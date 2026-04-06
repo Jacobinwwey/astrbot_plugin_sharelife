@@ -199,6 +199,21 @@
             "type": "bool",
             "default": false
           },
+          "allow_anonymous_member": {
+            "description": "Allow anonymous member access for selected low-risk member endpoints without login",
+            "type": "bool",
+            "default": false
+          },
+          "anonymous_member_user_id": {
+            "description": "Fixed user_id used for anonymous member requests when allow_anonymous_member=true",
+            "type": "string",
+            "default": "webui-user"
+          },
+          "anonymous_member_allowlist": {
+            "description": "Comma-separated allowlist entries in METHOD /api/path format for anonymous member mode; empty uses runtime defaults",
+            "type": "string",
+            "default": ""
+          },
           "login_rate_limit_window_seconds": {
             "description": "Rate-limit window for login attempts",
             "type": "int",

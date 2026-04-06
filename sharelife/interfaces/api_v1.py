@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import json
+import shutil
 from dataclasses import asdict
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from ..application.services_apply import ApplyService
 from ..application.services_audit import AuditService
@@ -33,6 +39,9 @@ class SharelifeApiV1:
         pipeline_orchestrator: PipelineOrchestrator | None = None,
         reviewer_auth_service: ReviewerAuthService | None = None,
         storage_backup_service: StorageBackupService | None = None,
+        public_market_auto_publish_profile_pack_approve: bool = False,
+        public_market_root: Path | str | None = None,
+        public_market_rebuild_snapshot_on_publish: bool = True,
     ):
         self.preference_service = preference_service
         self.retry_queue_service = retry_queue_service
@@ -45,6 +54,14 @@ class SharelifeApiV1:
         self.pipeline_orchestrator = pipeline_orchestrator
         self.reviewer_auth_service = reviewer_auth_service
         self.storage_backup_service = storage_backup_service
+        self.public_market_auto_publish_profile_pack_approve = bool(
+            public_market_auto_publish_profile_pack_approve,
+        )
+        if public_market_root:
+            self.public_market_root = Path(public_market_root).expanduser().resolve()
+        else:
+            self.public_market_root = Path(__file__).resolve().parents[2] / "docs" / "public"
+        self.public_market_rebuild_snapshot_on_publish = bool(public_market_rebuild_snapshot_on_publish)
 
     @staticmethod
     def _normalize_role(role: str) -> str:
@@ -1100,6 +1117,35 @@ class SharelifeApiV1:
             return {"error": "reviewer_auth_service_unavailable"}
         return {"invites": self.reviewer_auth_service.list_invites(status=status)}
 
+    def admin_revoke_reviewer_invite(
+        self,
+        role: str,
+        invite_code: str,
+        admin_id: str,
+    ) -> dict:
+        if not self._is_admin_role(role):
+            return {"error": "permission_denied"}
+        if self.reviewer_auth_service is None:
+            return {"error": "reviewer_auth_service_unavailable"}
+        result = self.reviewer_auth_service.revoke_invite(
+            invite_code=invite_code,
+            admin_id=admin_id or "admin",
+        )
+        if result.get("error"):
+            return result
+        self._audit(
+            action="reviewer.invite_revoked",
+            actor_id=str(admin_id or "admin"),
+            actor_role="admin",
+            target_id=str(result.get("invite_code", "") or invite_code or ""),
+            status=str(result.get("status", "revoked")),
+            detail={
+                "invite_code": str(result.get("invite_code", "") or invite_code or ""),
+                "revoked_by": str(result.get("revoked_by", "") or admin_id or "admin"),
+            },
+        )
+        return result
+
     def reviewer_redeem_invite(self, invite_code: str, reviewer_id: str) -> dict:
         if self.reviewer_auth_service is None:
             return {"error": "reviewer_auth_service_unavailable"}
@@ -1260,6 +1306,101 @@ class SharelifeApiV1:
             rows.append(self._profile_pack_submission_payload(item))
         return {"submissions": rows}
 
+    def member_list_profile_pack_submissions(
+        self,
+        user_id: str,
+        status: str = "",
+        pack_query: str = "",
+        pack_type: str = "",
+        risk_level: str = "",
+        review_label: str = "",
+        warning_flag: str = "",
+    ) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable"}
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        query = str(pack_query or "").strip().lower()
+        normalized_pack_type = str(pack_type or "").strip().lower()
+        normalized_risk = str(risk_level or "").strip().lower()
+        normalized_review_label = str(review_label or "").strip().lower()
+        normalized_warning_flag = str(warning_flag or "").strip().lower()
+
+        rows = []
+        for item in self.profile_pack_service.list_submissions(status=status):
+            if str(item.user_id or "").strip() != normalized_user_id:
+                continue
+            if query and query not in item.pack_id.lower():
+                continue
+            if normalized_pack_type and item.pack_type.lower() != normalized_pack_type:
+                continue
+            if normalized_risk and item.risk_level.lower() != normalized_risk:
+                continue
+            if not self._matches_metadata_filters(
+                review_labels=item.review_labels,
+                warning_flags=item.warning_flags,
+                review_label=normalized_review_label,
+                warning_flag=normalized_warning_flag,
+            ):
+                continue
+            rows.append(self._profile_pack_submission_payload(item))
+        return {"user_id": normalized_user_id, "submissions": rows}
+
+    def member_get_profile_pack_submission_detail(
+        self,
+        user_id: str,
+        submission_id: str,
+    ) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable", "submission_id": submission_id}
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_submission_id = str(submission_id or "").strip()
+        if not normalized_submission_id:
+            return {"error": "submission_id_required"}
+        try:
+            submission = self.profile_pack_service.get_submission(submission_id=normalized_submission_id)
+        except ValueError:
+            return {"error": "profile_pack_submission_not_found", "submission_id": normalized_submission_id}
+        if str(submission.user_id or "").strip() != normalized_user_id:
+            return {"error": "permission_denied", "submission_id": normalized_submission_id}
+        return self._profile_pack_submission_payload(submission)
+
+    def member_get_profile_pack_submission_export(
+        self,
+        user_id: str,
+        submission_id: str,
+    ) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable", "submission_id": submission_id}
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_submission_id = str(submission_id or "").strip()
+        if not normalized_submission_id:
+            return {"error": "submission_id_required"}
+        try:
+            submission = self.profile_pack_service.get_submission(submission_id=normalized_submission_id)
+        except ValueError:
+            return {"error": "profile_pack_submission_not_found", "submission_id": normalized_submission_id}
+        if str(submission.user_id or "").strip() != normalized_user_id:
+            return {"error": "permission_denied", "submission_id": normalized_submission_id}
+        artifact_id = str(submission.artifact_id or "").strip()
+        if not artifact_id:
+            return {"error": "profile_pack_not_found", "artifact_id": normalized_submission_id}
+        try:
+            artifact = self.profile_pack_service.get_export_artifact(artifact_id=artifact_id)
+        except ValueError as exc:
+            return self._profile_pack_error_payload(exc=exc, fallback_id=artifact_id)
+        return {
+            "submission_id": normalized_submission_id,
+            "artifact_id": artifact.artifact_id,
+            "pack_type": artifact.manifest.pack_type,
+            "pack_id": artifact.pack_id,
+            "version": artifact.version,
+            "exported_at": artifact.exported_at,
+            "path": str(artifact.path),
+            "filename": artifact.filename,
+            "sha256": artifact.sha256,
+            "size_bytes": artifact.size_bytes,
+        }
+
     def admin_decide_profile_pack_submission(
         self,
         role: str,
@@ -1292,7 +1433,15 @@ class SharelifeApiV1:
             status=submission.status,
             detail={"pack_id": submission.pack_id, "version": submission.version},
         )
-        return self._profile_pack_submission_payload(submission)
+        payload = self._profile_pack_submission_payload(submission)
+        publish_result = self._auto_publish_profile_pack_submission(
+            submission=submission,
+            actor_id=actor_id,
+            actor_role=actor_role,
+        )
+        if publish_result:
+            payload["public_market_publish"] = publish_result
+        return payload
 
     def admin_set_profile_pack_featured(
         self,
@@ -1439,6 +1588,80 @@ class SharelifeApiV1:
                 continue
             submissions.append(self._submission_payload(item))
         return {"submissions": submissions}
+
+    def member_list_submissions(
+        self,
+        user_id: str,
+        status: str = "",
+        template_query: str = "",
+        risk_level: str = "",
+        review_label: str = "",
+        warning_flag: str = "",
+    ) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        filter_status = status.strip().lower() or None
+        query = template_query.strip().lower()
+        normalized_risk = risk_level.strip().lower()
+        normalized_review_label = review_label.strip().lower()
+        normalized_warning_flag = warning_flag.strip().lower()
+        submissions = []
+        for item in self.market_service.list_submissions(status=filter_status):
+            if str(item.user_id or "").strip() != normalized_user_id:
+                continue
+            if query and query not in item.template_id.lower():
+                continue
+            if normalized_risk and item.risk_level.lower() != normalized_risk:
+                continue
+            if not self._matches_metadata_filters(
+                review_labels=item.review_labels or [],
+                warning_flags=item.warning_flags or [],
+                review_label=normalized_review_label,
+                warning_flag=normalized_warning_flag,
+            ):
+                continue
+            submissions.append(self._submission_payload(item))
+        return {"user_id": normalized_user_id, "submissions": submissions}
+
+    def member_get_submission_detail(self, user_id: str, submission_id: str) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_submission_id = str(submission_id or "").strip()
+        if not normalized_submission_id:
+            return {"error": "submission_id_required"}
+        try:
+            submission = self.market_service.get_submission(submission_id=normalized_submission_id)
+        except KeyError:
+            return {"error": "submission_not_found", "submission_id": normalized_submission_id}
+        if str(submission.user_id or "").strip() != normalized_user_id:
+            return {"error": "permission_denied", "submission_id": normalized_submission_id}
+        return self._submission_detail_payload(submission)
+
+    def member_get_submission_package(self, user_id: str, submission_id: str) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_submission_id = str(submission_id or "").strip()
+        if not normalized_submission_id:
+            return {"error": "submission_id_required"}
+        if self.package_service is None:
+            return {"error": "package_service_unavailable", "submission_id": normalized_submission_id}
+        try:
+            submission = self.market_service.get_submission(submission_id=normalized_submission_id)
+        except KeyError:
+            return {"error": "submission_not_found", "submission_id": normalized_submission_id}
+        if str(submission.user_id or "").strip() != normalized_user_id:
+            return {"error": "permission_denied", "submission_id": normalized_submission_id}
+        try:
+            artifact = self.package_service.get_submission_package_artifact(submission_id=normalized_submission_id)
+        except ValueError:
+            return {"error": "submission_package_not_available", "submission_id": normalized_submission_id}
+        return {
+            "submission_id": normalized_submission_id,
+            "template_id": artifact.template_id,
+            "version": artifact.version,
+            "path": str(artifact.path),
+            "sha256": artifact.sha256,
+            "filename": artifact.filename,
+            "source": artifact.source,
+            "size_bytes": artifact.size_bytes,
+        }
 
     def admin_get_submission_detail(self, role: str, submission_id: str) -> dict:
         if not self._is_reviewer_role(role):
@@ -2088,6 +2311,234 @@ class SharelifeApiV1:
             "created_at": submission.created_at,
             "updated_at": submission.updated_at,
         }
+
+    @staticmethod
+    def _safe_slug(value: str) -> str:
+        slug = "".join(char if char.isalnum() else "-" for char in str(value or "").strip().lower())
+        slug = "-".join(part for part in slug.split("-") if part)
+        return slug or "profile-pack"
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _auto_publish_profile_pack_submission(
+        self,
+        *,
+        submission,
+        actor_id: str,
+        actor_role: str,
+    ) -> dict[str, Any]:
+        if not self.public_market_auto_publish_profile_pack_approve:
+            return {}
+        if self.profile_pack_service is None:
+            return {"status": "failed", "error": "profile_pack_service_unavailable"}
+        status = str(getattr(submission, "status", "") or "").strip().lower()
+        if status != "approved":
+            return {"status": "skipped", "reason": "submission_not_approved"}
+        redaction_mode = str(getattr(submission, "redaction_mode", "") or "").strip().lower()
+        if redaction_mode not in {"exclude_secrets", "masked_secrets"}:
+            result = {"status": "failed", "error": "public_market_redaction_not_allowed"}
+            self._audit(
+                action="profile_pack.public_market.publish",
+                actor_id=actor_id,
+                actor_role=actor_role,
+                target_id=str(getattr(submission, "submission_id", "") or ""),
+                status=result["status"],
+                detail={
+                    "error": result["error"],
+                    "pack_id": str(getattr(submission, "pack_id", "") or ""),
+                    "version": str(getattr(submission, "version", "") or ""),
+                    "redaction_mode": redaction_mode,
+                },
+            )
+            return result
+        try:
+            artifact = self.profile_pack_service.get_export_artifact(
+                artifact_id=str(getattr(submission, "artifact_id", "") or ""),
+            )
+        except ValueError:
+            artifact = None
+        if artifact is None or not artifact.path.exists():
+            result = {"status": "failed", "error": "profile_pack_not_found"}
+            self._audit(
+                action="profile_pack.public_market.publish",
+                actor_id=actor_id,
+                actor_role=actor_role,
+                target_id=str(getattr(submission, "submission_id", "") or ""),
+                status=result["status"],
+                detail={
+                    "error": result["error"],
+                    "pack_id": str(getattr(submission, "pack_id", "") or ""),
+                    "version": str(getattr(submission, "version", "") or ""),
+                },
+            )
+            return result
+
+        pack_id = str(getattr(submission, "pack_id", "") or "").strip()
+        version = str(getattr(submission, "version", "") or "").strip()
+        package_filename = f"{self._safe_slug(pack_id)}-{self._safe_slug(version)}.zip"
+        packages_dir = self.public_market_root / "market" / "packages" / "community"
+        entries_dir = self.public_market_root / "market" / "entries"
+        packages_dir.mkdir(parents=True, exist_ok=True)
+        entries_dir.mkdir(parents=True, exist_ok=True)
+        target_package = (packages_dir / package_filename).resolve()
+        shutil.copyfile(artifact.path, target_package)
+        package_sha256 = self._file_sha256(target_package)
+        package_size = int(target_package.stat().st_size)
+
+        risk_level = str(getattr(submission, "risk_level", "low") or "low").strip() or "low"
+        review_labels = [str(item or "").strip() for item in list(getattr(submission, "review_labels", []) or []) if str(item or "").strip()]
+        warning_flags = [str(item or "").strip() for item in list(getattr(submission, "warning_flags", []) or []) if str(item or "").strip()]
+        compatibility_issues = [
+            str(item or "").strip()
+            for item in list(getattr(submission, "compatibility_issues", []) or [])
+            if str(item or "").strip()
+        ]
+        scan_summary = dict(getattr(submission, "scan_summary", {}) or {})
+        compatibility = str(getattr(submission, "compatibility", "") or "compatible").strip() or "compatible"
+        review_note = str(getattr(submission, "review_note", "") or "").strip()
+        published_at = str(getattr(submission, "updated_at", "") or "").strip()
+        source_submission_id = str(getattr(submission, "submission_id", "") or "").strip()
+        maintainer = "community"
+
+        entry_payload = {
+            "pack_id": pack_id,
+            "template_id": pack_id,
+            "title": pack_id,
+            "description": review_note,
+            "version": version,
+            "pack_type": str(getattr(submission, "pack_type", "bot_profile_pack") or "bot_profile_pack").strip(),
+            "artifact_id": str(getattr(submission, "artifact_id", "") or ""),
+            "import_id": str(getattr(submission, "import_id", "") or ""),
+            "source_submission_id": source_submission_id,
+            "filename": target_package.name,
+            "sha256": package_sha256,
+            "size_bytes": package_size,
+            "sections": [str(item or "").strip() for item in list(getattr(submission, "sections", []) or []) if str(item or "").strip()],
+            "redaction_mode": redaction_mode,
+            "capability_summary": dict(getattr(submission, "capability_summary", {}) or {}),
+            "compatibility_matrix": dict(getattr(submission, "compatibility_matrix", {}) or {}),
+            "review_evidence": dict(getattr(submission, "review_evidence", {}) or {}),
+            "featured": False,
+            "featured_note": "",
+            "featured_by": "",
+            "featured_at": "",
+            "review_note": review_note,
+            "review_labels": review_labels,
+            "warning_flags": warning_flags,
+            "risk_level": risk_level,
+            "scan_summary": scan_summary,
+            "compatibility": compatibility,
+            "compatibility_issues": compatibility_issues,
+            "source_channel": "community_submission",
+            "maintainer": maintainer,
+            "published_at": published_at,
+            "engagement": {"installs": 0, "trial_requests": 0},
+            "package_path": f"/market/packages/community/{target_package.name}",
+            "catalog_origin": "public",
+            "runtime_available": False,
+        }
+        entry_name = f"{self._safe_slug(pack_id)}-{self._safe_slug(version)}.json"
+        entry_path = (entries_dir / entry_name).resolve()
+        entry_path.write_text(
+            json.dumps(entry_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        snapshot_result: dict[str, Any] = {"status": "skipped", "reason": "snapshot_rebuild_disabled"}
+        if self.public_market_rebuild_snapshot_on_publish:
+            snapshot_result = self._rebuild_public_market_snapshot()
+
+        result = {
+            "status": "succeeded",
+            "entry_path": str(entry_path),
+            "package_path": str(target_package),
+            "entry_id": entry_name,
+            "snapshot": snapshot_result,
+        }
+        self._audit(
+            action="profile_pack.public_market.publish",
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_id=source_submission_id or pack_id,
+            status=result["status"],
+            detail={
+                "pack_id": pack_id,
+                "version": version,
+                "entry_path": str(entry_path),
+                "package_path": str(target_package),
+                "snapshot": snapshot_result,
+            },
+        )
+        return result
+
+    def _rebuild_public_market_snapshot(self) -> dict[str, Any]:
+        market_dir = self.public_market_root / "market"
+        snapshot_path = market_dir / "catalog.snapshot.json"
+        entries_dir = market_dir / "entries"
+        rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        try:
+            if snapshot_path.exists():
+                previous = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                previous_rows = previous.get("rows", []) if isinstance(previous, dict) else []
+                if isinstance(previous_rows, list):
+                    for item in previous_rows:
+                        if not isinstance(item, dict):
+                            continue
+                        pack_id = str(item.get("pack_id", "") or "").strip()
+                        version = str(item.get("version", "") or "").strip()
+                        if not pack_id or not version:
+                            continue
+                        rows_by_key[(pack_id, version)] = dict(item)
+            if entries_dir.exists():
+                for entry_path in sorted(entries_dir.glob("*.json")):
+                    payload = json.loads(entry_path.read_text(encoding="utf-8"))
+                    if not isinstance(payload, dict):
+                        continue
+                    pack_id = str(payload.get("pack_id", "") or "").strip()
+                    version = str(payload.get("version", "") or "").strip()
+                    package_path = str(payload.get("package_path", "") or "").strip()
+                    if not pack_id or not version or not package_path:
+                        continue
+                    package_file = self.public_market_root / package_path.lstrip("/")
+                    if not package_file.exists():
+                        continue
+                    normalized = dict(payload)
+                    normalized["template_id"] = pack_id
+                    normalized["filename"] = package_file.name
+                    normalized["sha256"] = self._file_sha256(package_file)
+                    normalized["size_bytes"] = int(package_file.stat().st_size)
+                    rows_by_key[(pack_id, version)] = normalized
+            rows = list(rows_by_key.values())
+            rows.sort(
+                key=lambda item: (
+                    0 if bool(item.get("featured")) else 1,
+                    -int(item.get("engagement", {}).get("installs", 0) or 0),
+                    str(item.get("pack_id") or ""),
+                    str(item.get("version") or ""),
+                ),
+            )
+            payload = {
+                "schema_version": "v1",
+                "generated_at": datetime.now(UTC).isoformat(),
+                "rows": rows,
+            }
+            content = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+            previous_text = snapshot_path.read_text(encoding="utf-8") if snapshot_path.exists() else ""
+            changed = content != previous_text
+            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_path.write_text(content, encoding="utf-8")
+            return {"status": "succeeded", "changed": changed}
+        except Exception as exc:  # pragma: no cover - runtime guard
+            return {
+                "status": "failed",
+                "error": "snapshot_rebuild_failed",
+                "reason": f"{type(exc).__name__}:{exc}",
+            }
 
     def _filtered_profile_pack_catalog_rows(
         self,

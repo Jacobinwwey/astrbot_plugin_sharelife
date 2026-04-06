@@ -9,6 +9,7 @@ from sharelife.application.services_audit import AuditService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_preferences import PreferenceService
+from sharelife.application.services_profile_pack import ProfilePackService
 from sharelife.application.services_queue import RetryQueueService
 from sharelife.application.services_reviewer_auth import ReviewerAuthService
 from sharelife.application.services_storage_backup import StorageBackupService
@@ -40,7 +41,7 @@ def build_bundle_zip(payload: dict) -> bytes:
     return buffer.getvalue()
 
 
-def build_web_api(tmp_path):
+def build_web_api(tmp_path, *, with_profile_pack: bool = False):
     clock = FrozenClock(datetime(2026, 3, 25, 12, 0, tzinfo=UTC))
     preferences = PreferenceService()
     queue = RetryQueueService(clock=clock)
@@ -53,13 +54,30 @@ def build_web_api(tmp_path):
     )
     market = MarketService(clock=clock)
     package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
-    apply = ApplyService(runtime=InMemoryRuntimeBridge(initial_state={}))
+    runtime = InMemoryRuntimeBridge(
+        initial_state={
+            "astrbot_core": {"name": "sharelife-bot"},
+            "providers": {"openai": {"api_key": "sk-live-secret", "model": "gpt-5"}},
+            "plugins": {"sharelife": {"enabled": True}},
+        }
+    )
+    apply = ApplyService(runtime=runtime)
     audit = AuditService(clock=clock)
     storage_backup = StorageBackupService(
         state_store=JsonStateStore(tmp_path / "storage_state.json"),
         data_root=tmp_path,
         clock=clock,
     )
+    profile_pack = None
+    if with_profile_pack:
+        profile_pack = ProfilePackService(
+            runtime=runtime,
+            apply_service=apply,
+            output_root=tmp_path / "profile-packs",
+            clock=clock,
+            astrbot_version="4.16.0",
+            plugin_version="0.1.0",
+        )
     api = SharelifeApiV1(
         preference_service=preferences,
         retry_queue_service=queue,
@@ -68,6 +86,7 @@ def build_web_api(tmp_path):
         package_service=package,
         apply_service=apply,
         audit_service=audit,
+        profile_pack_service=profile_pack,
         reviewer_auth_service=ReviewerAuthService(
             state_store=JsonStateStore(tmp_path / "reviewer_auth_state.json"),
         ),
@@ -287,6 +306,36 @@ def test_web_api_lists_audit_with_summary_payload(tmp_path):
     assert any(item["device_id"] == device["device_id"] for item in audit.data["summary"]["devices"])
 
 
+def test_web_api_reviewer_invite_revoke_blocks_redeem_and_maps_error_codes(tmp_path):
+    web_api = build_web_api(tmp_path)
+    invite = web_api.admin_create_reviewer_invite(role="admin", admin_id="admin-1")
+    assert invite.ok is True
+    invite_code = invite.data["invite_code"]
+
+    denied = web_api.admin_revoke_reviewer_invite(
+        role="member",
+        invite_code=invite_code,
+        admin_id="member-1",
+    )
+    assert denied.ok is False
+    assert denied.status_code == 403
+    assert denied.error_code == "permission_denied"
+
+    revoked = web_api.admin_revoke_reviewer_invite(
+        role="admin",
+        invite_code=invite_code,
+        admin_id="admin-1",
+    )
+    assert revoked.ok is True
+    assert revoked.data["status"] == "revoked"
+    assert revoked.data["invite_code"] == invite_code
+
+    redeemed = web_api.reviewer_redeem_invite(invite_code=invite_code, reviewer_id="reviewer-1")
+    assert redeemed.ok is False
+    assert redeemed.status_code == 409
+    assert redeemed.error_code == "invite_revoked"
+
+
 def test_web_api_exposes_trial_status_and_apply_rollback_cycle(tmp_path):
     web_api = build_web_api(tmp_path)
 
@@ -456,6 +505,31 @@ def test_web_api_admin_storage_surface_supports_policy_backup_and_restore_cycle(
     assert committed.data["restore"]["restore_state"] == "committed"
 
 
+def test_web_api_admin_storage_run_job_requires_encrypted_remote_when_policy_enabled(tmp_path):
+    web_api = build_web_api(tmp_path)
+    updated = web_api.admin_storage_set_policies(
+        role="admin",
+        patch={
+            "sync_remote_enabled": True,
+            "remote_required": True,
+            "encryption_required": True,
+            "rclone_remote_path": "gdrive:/sharelife-backup",
+        },
+        admin_id="admin-1",
+    )
+    assert updated.ok is True
+
+    started = web_api.admin_storage_run_job(
+        role="admin",
+        admin_id="admin-1",
+        trigger="manual",
+        note="encrypted-remote-check",
+    )
+    assert started.ok is True
+    assert started.data["job"]["status"] == "failed"
+    assert started.data["job"]["reason"] == "remote_encryption_required"
+
+
 def test_web_api_admin_compare_submission_against_published_baseline(tmp_path):
     web_api = build_web_api(tmp_path)
     first = web_api.submit_template_package(
@@ -623,6 +697,142 @@ def test_web_api_can_load_template_and_submission_detail(tmp_path):
     assert submission_detail.ok is True
     assert submission_detail.data["status"] == "pending"
     assert submission_detail.data["prompt_preview"].startswith("Ignore previous")
+
+
+def test_web_api_member_submission_endpoints_are_owner_scoped(tmp_path):
+    web_api = build_web_api(tmp_path)
+    own_submission = web_api.submit_template_package(
+        user_id="member-1",
+        template_id="community/member-one",
+        version="1.0.0",
+        filename="community-member-one.zip",
+        content_base64=base64.b64encode(
+            build_bundle_zip(
+                {
+                    "template_id": "community/member-one",
+                    "version": "1.0.0",
+                    "prompt": "Member one prompt.",
+                }
+            )
+        ).decode("ascii"),
+    )
+    other_submission = web_api.submit_template_package(
+        user_id="member-2",
+        template_id="community/member-two",
+        version="1.0.0",
+        filename="community-member-two.zip",
+        content_base64=base64.b64encode(
+            build_bundle_zip(
+                {
+                    "template_id": "community/member-two",
+                    "version": "1.0.0",
+                    "prompt": "Member two prompt.",
+                }
+            )
+        ).decode("ascii"),
+    )
+
+    listed = web_api.member_list_submissions(user_id="member-1")
+    assert listed.ok is True
+    assert listed.data["user_id"] == "member-1"
+    assert [row["template_id"] for row in listed.data["submissions"]] == ["community/member-one"]
+
+    detail = web_api.member_get_submission_detail(
+        user_id="member-1",
+        submission_id=own_submission.data["submission_id"],
+    )
+    assert detail.ok is True
+    assert detail.data["template_id"] == "community/member-one"
+
+    denied = web_api.member_get_submission_detail(
+        user_id="member-1",
+        submission_id=other_submission.data["submission_id"],
+    )
+    assert denied.ok is False
+    assert denied.status_code == 403
+    assert denied.error_code == "permission_denied"
+
+    missing_id = web_api.member_get_submission_detail(user_id="member-1", submission_id="")
+    assert missing_id.ok is False
+    assert missing_id.status_code == 400
+    assert missing_id.error_code == "submission_id_required"
+
+    own_package = web_api.member_get_submission_package(
+        user_id="member-1",
+        submission_id=own_submission.data["submission_id"],
+    )
+    assert own_package.ok is True
+    assert own_package.data["filename"] == "community-member-one.zip"
+
+    denied_package = web_api.member_get_submission_package(
+        user_id="member-1",
+        submission_id=other_submission.data["submission_id"],
+    )
+    assert denied_package.ok is False
+    assert denied_package.status_code == 403
+    assert denied_package.error_code == "permission_denied"
+
+    missing_package = web_api.member_get_submission_package(user_id="member-1", submission_id="")
+    assert missing_package.ok is False
+    assert missing_package.status_code == 400
+    assert missing_package.error_code == "submission_id_required"
+
+
+def test_web_api_member_profile_pack_submission_endpoints_are_owner_scoped(tmp_path):
+    web_api = build_web_api(tmp_path, with_profile_pack=True)
+    exported_self = web_api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/member-one",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    assert exported_self.ok is True
+    own_submission = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported_self.data["artifact_id"],
+    )
+    assert own_submission.ok is True
+
+    exported_other = web_api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/member-two",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    assert exported_other.ok is True
+    other_submission = web_api.submit_profile_pack(
+        user_id="member-2",
+        artifact_id=exported_other.data["artifact_id"],
+    )
+    assert other_submission.ok is True
+
+    listed = web_api.member_list_profile_pack_submissions(user_id="member-1")
+    assert listed.ok is True
+    assert listed.data["user_id"] == "member-1"
+    assert [row["pack_id"] for row in listed.data["submissions"]] == ["profile/member-one"]
+
+    detail = web_api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=own_submission.data["submission_id"],
+    )
+    assert detail.ok is True
+    assert detail.data["pack_id"] == "profile/member-one"
+
+    denied = web_api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=other_submission.data["submission_id"],
+    )
+    assert denied.ok is False
+    assert denied.status_code == 403
+    assert denied.error_code == "permission_denied"
+
+    missing_id = web_api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id="",
+    )
+    assert missing_id.ok is False
+    assert missing_id.status_code == 400
+    assert missing_id.error_code == "submission_id_required"
 
 
 def test_web_api_exposes_engagement_and_sorting_for_templates(tmp_path):

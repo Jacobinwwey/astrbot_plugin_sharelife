@@ -20,6 +20,19 @@ If you want defaults without prompts:
 bash scripts/sharelife-init-wizard --yes --output config.generated.yaml
 ```
 
+If you want auth enabled plus explicit anonymous-member policy:
+
+```bash
+bash scripts/sharelife-init-wizard --yes \
+  --webui-auth true \
+  --member-password "<member_password>" \
+  --admin-password "<admin_password_12plus>" \
+  --allow-anonymous-member true \
+  --anonymous-member-user-id "webui-user" \
+  --anonymous-member-allowlist "POST /api/trial,GET /api/trial/status,POST /api/templates/install,GET /api/member/installations,POST /api/member/installations/refresh,GET /api/preferences,POST /api/preferences/mode,POST /api/preferences/observe" \
+  --output config.generated.yaml
+```
+
 ## 3. Start AstrBot + Sharelife
 
 Load the plugin with your generated config and enter chat:

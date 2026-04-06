@@ -21,6 +21,9 @@ _ALLOWED_AUTH_FIELDS = frozenset(
         "token_ttl_seconds",
         "reviewer_token_ttl_seconds",
         "allow_query_token",
+        "allow_anonymous_member",
+        "anonymous_member_user_id",
+        "anonymous_member_allowlist",
         "login_rate_limit_window_seconds",
         "login_rate_limit_max_attempts",
         "api_rate_limit_window_seconds",
@@ -38,6 +41,18 @@ admin_password = ""
 token_ttl_seconds = 7200
 reviewer_token_ttl_seconds = 604800
 allow_query_token = false
+allow_anonymous_member = false
+anonymous_member_user_id = "webui-user"
+anonymous_member_allowlist = [
+  "POST /api/trial",
+  "GET /api/trial/status",
+  "POST /api/templates/install",
+  "GET /api/member/installations",
+  "POST /api/member/installations/refresh",
+  "GET /api/preferences",
+  "POST /api/preferences/mode",
+  "POST /api/preferences/observe",
+]
 login_rate_limit_window_seconds = 60
 login_rate_limit_max_attempts = 10
 api_rate_limit_window_seconds = 60

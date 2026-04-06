@@ -28,8 +28,11 @@ Common flags:
 2. `--api-key <value>`
 3. `--preset standard_qa|sharelife_companion|research_safe`
 4. `--webui-auth true|false`
-5. `--enable-plugin-install-exec true|false`
-6. `--print-only`
+5. `--allow-anonymous-member true|false`
+6. `--anonymous-member-user-id <value>`
+7. `--anonymous-member-allowlist "POST /api/trial,GET /api/trial/status,..."`
+8. `--enable-plugin-install-exec true|false`
+9. `--print-only`
 
 ## Use the config template
 
@@ -41,6 +44,7 @@ It includes:
 2. WebUI auth and rate-limit settings
 3. profile-pack signing/encryption fields
 4. plugin-install guardrails (default off, allowlist, timeout)
+5. anonymous member mode defaults and endpoint allowlist override fields
 
 ## Team workflow that works
 

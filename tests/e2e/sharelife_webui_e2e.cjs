@@ -707,6 +707,23 @@ async function main() {
     })
     const profileSubmissionId = String(await page.locator("#profilePackDecisionSubmissionId").inputValue()).trim()
     assert.ok(profileSubmissionId)
+    const profilePackOwnerId = String(await page.locator("#userId").inputValue()).trim() || "webui-user"
+    assert.ok(profilePackOwnerId)
+    const deniedProfilePackOwnerId = profilePackOwnerId === "u1" ? "u2" : "u1"
+    const ownProfilePackDownloadStatus = await page.evaluate(async ({ sid, userId }) => {
+      const response = await fetch(
+        `/api/member/profile-pack/submissions/export/download?user_id=${encodeURIComponent(String(userId || ""))}&submission_id=${encodeURIComponent(String(sid || ""))}`,
+      )
+      return response.status
+    }, { sid: profileSubmissionId, userId: profilePackOwnerId })
+    assert.equal(ownProfilePackDownloadStatus, 200)
+    const deniedProfilePackDownloadStatus = await page.evaluate(async ({ sid, userId }) => {
+      const response = await fetch(
+        `/api/member/profile-pack/submissions/export/download?user_id=${encodeURIComponent(String(userId || ""))}&submission_id=${encodeURIComponent(String(sid || ""))}`,
+      )
+      return response.status
+    }, { sid: profileSubmissionId, userId: deniedProfilePackOwnerId })
+    assert.equal(deniedProfilePackDownloadStatus, 403)
 
     await page.fill("#profilePackSubmissionPackFilter", "profile/research")
     const profileSubmissionListDelay = async (route) => {
@@ -794,6 +811,33 @@ async function main() {
       const rows = document.querySelectorAll("#marketInstallationsList .member-install-item")
       if (!rows.length) return false
       return /community\/basic/i.test(String(rows[0].textContent || ""))
+    })
+    await page.click("#btnMarketListSubmissions")
+    await page.waitForFunction(() => {
+      const state = document.querySelector("#marketSubmissionsState")
+      const rows = document.querySelectorAll("#marketSubmissionsList .member-task-item")
+      if (!state) return false
+      if (/Failed to load/i.test(String(state.textContent || ""))) return false
+      return rows.length >= 1
+    })
+    await page.locator("#marketSubmissionsList .member-task-item").first().click()
+    await page.waitForFunction(() => {
+      const details = String(document.querySelector("#marketDetails")?.textContent || "")
+      return /"submission_id":\s*"/.test(details)
+    })
+    await page.click("#btnMarketListProfilePackSubmissions")
+    await page.waitForFunction(() => {
+      const state = document.querySelector("#marketProfilePackSubmissionsState")
+      const rows = document.querySelectorAll("#marketProfilePackSubmissionsList .member-task-item")
+      if (!state) return false
+      if (/Failed to load/i.test(String(state.textContent || ""))) return false
+      return rows.length >= 1
+    })
+    await page.locator("#marketProfilePackSubmissionsList .member-task-item").first().click()
+    await page.click("#btnMarketDownloadProfilePackSubmission")
+    await page.waitForFunction(() => {
+      const details = String(document.querySelector("#marketDetails")?.textContent || "")
+      return /"status":\s*"downloaded"/.test(details) && /"submission_id":\s*"/.test(details)
     })
     await page.waitForFunction(() => {
       const panel = document.querySelector("#marketDetailPanel")
@@ -905,6 +949,30 @@ async function main() {
     const row = page.locator("tr[data-submission-id]").first()
     const submissionId = await row.getAttribute("data-submission-id")
     assert.ok(submissionId)
+    const memberOwnerId = await page.evaluate(async (sid) => {
+      const response = await fetch(
+        `/api/admin/submissions/detail?role=admin&submission_id=${encodeURIComponent(String(sid || ""))}`,
+      )
+      if (!response.ok) return ""
+      const payload = await response.json()
+      return String(payload?.data?.data?.user_id || payload?.data?.user_id || "").trim()
+    }, submissionId)
+    assert.ok(memberOwnerId)
+    const deniedMemberId = memberOwnerId === "u1" ? "u2" : "u1"
+    const memberOwnDownloadStatus = await page.evaluate(async ({ sid, userId }) => {
+      const response = await fetch(
+        `/api/member/submissions/package/download?user_id=${encodeURIComponent(String(userId || ""))}&submission_id=${encodeURIComponent(String(sid || ""))}`,
+      )
+      return response.status
+    }, { sid: submissionId, userId: memberOwnerId })
+    assert.equal(memberOwnDownloadStatus, 200)
+    const memberDeniedDownloadStatus = await page.evaluate(async ({ sid, userId }) => {
+      const response = await fetch(
+        `/api/member/submissions/package/download?user_id=${encodeURIComponent(String(userId || ""))}&submission_id=${encodeURIComponent(String(sid || ""))}`,
+      )
+      return response.status
+    }, { sid: submissionId, userId: deniedMemberId })
+    assert.equal(memberDeniedDownloadStatus, 403)
 
     await row.locator("td").first().click()
 

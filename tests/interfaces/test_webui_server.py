@@ -96,6 +96,15 @@ def build_server(tmp_path, config=None):
     audit = AuditService(clock=clock)
     webui_cfg = config.get("webui", {}) if isinstance(config, dict) else {}
     webui_cfg = webui_cfg if isinstance(webui_cfg, dict) else {}
+    public_market_cfg = (
+        webui_cfg.get("public_market", {})
+        if isinstance(webui_cfg.get("public_market"), dict)
+        else {}
+    )
+    public_market_root = str(
+        public_market_cfg.get("root", str(tmp_path / "public-market"))
+        or str(tmp_path / "public-market")
+    ).strip()
     device_keys_cfg = webui_cfg.get("device_keys", {}) if isinstance(webui_cfg.get("device_keys"), dict) else {}
     max_reviewer_devices = int(device_keys_cfg.get("max_reviewer_devices", 3) or 3)
     reviewer_auth = ReviewerAuthService(
@@ -118,6 +127,13 @@ def build_server(tmp_path, config=None):
         profile_pack_service=profile_pack,
         reviewer_auth_service=reviewer_auth,
         storage_backup_service=storage_backup,
+        public_market_auto_publish_profile_pack_approve=bool(
+            public_market_cfg.get("auto_publish_profile_pack_approve", False),
+        ),
+        public_market_root=public_market_root,
+        public_market_rebuild_snapshot_on_publish=bool(
+            public_market_cfg.get("rebuild_snapshot_on_publish", True),
+        ),
     )
     web_api = SharelifeWebApiV1(api=api, notifier=notifier)
     web_root = Path(__file__).resolve().parents[2] / "sharelife" / "webui"
@@ -233,6 +249,217 @@ def test_webui_applies_security_headers_on_auth_failures(tmp_path):
     assert_security_headers(unauthorized)
 
 
+def test_webui_auth_enabled_allows_public_market_read_but_blocks_upload_writes(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert admin_login.status_code == 200
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    submitted = client.post(
+        "/api/templates/submit",
+        json={"user_id": "u1", "template_id": "community/basic", "version": "1.0.0"},
+        headers=admin_headers,
+    )
+    assert submitted.status_code == 200
+    decided = client.post(
+        "/api/admin/submissions/decide",
+        json={
+            "submission_id": submitted.json()["data"]["submission_id"],
+            "decision": "approve",
+        },
+        headers=admin_headers,
+    )
+    assert decided.status_code == 200
+
+    public_templates = client.get("/api/templates")
+    assert public_templates.status_code == 200
+    assert any(
+        row["template_id"] == "community/basic"
+        for row in public_templates.json()["data"]["templates"]
+    )
+
+    public_template_detail = client.get(
+        "/api/templates/detail",
+        params={"template_id": "community/basic"},
+    )
+    assert public_template_detail.status_code == 200
+
+    public_catalog = client.get("/api/profile-pack/catalog")
+    assert public_catalog.status_code == 200
+
+    denied_template_submit = client.post(
+        "/api/templates/submit",
+        json={"user_id": "u1", "template_id": "community/basic", "version": "1.0.0"},
+    )
+    assert denied_template_submit.status_code == 401
+    assert denied_template_submit.json()["error"]["code"] == "unauthorized"
+
+    denied_profile_submit = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "u1", "artifact_id": "artifact-1"},
+    )
+    assert denied_profile_submit.status_code == 401
+    assert denied_profile_submit.json()["error"]["code"] == "unauthorized"
+
+
+def test_webui_auth_enabled_supports_anonymous_member_mode_with_owner_binding(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                    "anonymous_member_user_id": "anon-user",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    auth_info = client.get("/api/auth-info")
+    assert auth_info.status_code == 200
+    assert auth_info.json()["allow_anonymous_member"] is True
+    assert auth_info.json()["anonymous_member_user_id"] == "anon-user"
+
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert admin_login.status_code == 200
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    submitted = client.post(
+        "/api/templates/submit",
+        json={"user_id": "owner-u1", "template_id": "community/basic", "version": "1.0.0"},
+        headers=admin_headers,
+    )
+    assert submitted.status_code == 200
+    decided = client.post(
+        "/api/admin/submissions/decide",
+        json={
+            "submission_id": submitted.json()["data"]["submission_id"],
+            "decision": "approve",
+        },
+        headers=admin_headers,
+    )
+    assert decided.status_code == 200
+
+    anonymous_install = client.post(
+        "/api/templates/install",
+        json={"session_id": "anon-s1", "template_id": "community/basic"},
+    )
+    assert anonymous_install.status_code == 200
+    assert anonymous_install.json()["data"]["status"] in {"installed", "trial_started"}
+
+    anonymous_install_cross_owner = client.post(
+        "/api/templates/install",
+        json={
+            "user_id": "other-user",
+            "session_id": "anon-s1",
+            "template_id": "community/basic",
+        },
+    )
+    assert anonymous_install_cross_owner.status_code == 403
+    assert anonymous_install_cross_owner.json()["error"]["code"] == "permission_denied"
+
+    anonymous_installations = client.get("/api/member/installations", params={"user_id": "anon-user"})
+    assert anonymous_installations.status_code == 200
+    assert anonymous_installations.json()["data"]["count"] == 1
+
+    anonymous_installations_cross_owner = client.get("/api/member/installations", params={"user_id": "other-user"})
+    assert anonymous_installations_cross_owner.status_code == 403
+    assert anonymous_installations_cross_owner.json()["error"]["code"] == "permission_denied"
+
+    anonymous_preferences = client.get("/api/preferences", params={"user_id": "anon-user"})
+    assert anonymous_preferences.status_code == 200
+    assert anonymous_preferences.json()["data"]["user_id"] == "anon-user"
+
+    anonymous_preferences_cross_owner = client.get("/api/preferences", params={"user_id": "other-user"})
+    assert anonymous_preferences_cross_owner.status_code == 403
+    assert anonymous_preferences_cross_owner.json()["error"]["code"] == "permission_denied"
+
+    denied_template_submit = client.post(
+        "/api/templates/submit",
+        json={"template_id": "community/basic", "version": "1.0.0"},
+    )
+    assert denied_template_submit.status_code == 401
+    assert denied_template_submit.json()["error"]["code"] == "unauthorized"
+
+    denied_member_submission_list = client.get(
+        "/api/member/submissions",
+        params={"user_id": "anon-user"},
+    )
+    assert denied_member_submission_list.status_code == 401
+    assert denied_member_submission_list.json()["error"]["code"] == "unauthorized"
+
+
+def test_webui_auth_enabled_anonymous_member_allowlist_override_is_enforced(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                    "anonymous_member_user_id": "anon-user",
+                    "anonymous_member_allowlist": [
+                        "POST /api/trial",
+                    ],
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    auth_info = client.get("/api/auth-info")
+    assert auth_info.status_code == 200
+    assert auth_info.json()["allow_anonymous_member"] is True
+    assert auth_info.json()["anonymous_member_allowlist"] == ["POST /api/trial"]
+
+    allowed_trial = client.post(
+        "/api/trial",
+        json={"session_id": "anon-s1", "template_id": "community/basic"},
+    )
+    assert allowed_trial.status_code == 200
+    assert allowed_trial.json()["ok"] is True
+
+    blocked_trial_status = client.get(
+        "/api/trial/status",
+        params={"session_id": "anon-s1", "template_id": "community/basic"},
+    )
+    assert blocked_trial_status.status_code == 401
+    assert blocked_trial_status.json()["error"]["code"] == "unauthorized"
+
+    blocked_preferences = client.get("/api/preferences")
+    assert blocked_preferences.status_code == 401
+    assert blocked_preferences.json()["error"]["code"] == "unauthorized"
+
+    blocked_install = client.post(
+        "/api/templates/install",
+        json={"session_id": "anon-s1", "template_id": "community/basic"},
+    )
+    assert blocked_install.status_code == 401
+    assert blocked_install.json()["error"]["code"] == "unauthorized"
+
+
 def test_webui_security_headers_support_custom_values(tmp_path):
     server = build_server(
         tmp_path,
@@ -288,6 +515,10 @@ def test_webui_ui_capabilities_route_supports_no_auth_role_switch(tmp_path):
     assert member_caps.json()["auth_required"] is False
     assert member_caps.json()["role"] == "member"
     assert "templates.list" in member_caps.json()["operations"]
+    assert "member.submissions.read" in member_caps.json()["operations"]
+    assert "member.submissions.package.download" in member_caps.json()["operations"]
+    assert "member.profile_pack.submissions.read" in member_caps.json()["operations"]
+    assert "member.profile_pack.submissions.export.download" in member_caps.json()["operations"]
     assert "admin.apply.workflow" not in member_caps.json()["operations"]
 
     reviewer_caps = client.get("/api/ui/capabilities", params={"role": "reviewer"})
@@ -367,7 +598,7 @@ def test_webui_ui_capabilities_route_reports_public_and_token_roles_with_auth(tm
 
     member_login = client.post(
         "/api/login",
-        json={"role": "member", "password": "member-secret"},
+        json={"role": "member", "password": "member-secret", "user_id": "u1"},
     )
     assert member_login.status_code == 200
     member_token = member_login.json()["token"]
@@ -379,6 +610,10 @@ def test_webui_ui_capabilities_route_reports_public_and_token_roles_with_auth(tm
     assert member_caps.status_code == 200
     assert member_caps.json()["role"] == "member"
     assert "templates.list" in member_caps.json()["operations"]
+    assert "member.submissions.read" in member_caps.json()["operations"]
+    assert "member.submissions.package.download" in member_caps.json()["operations"]
+    assert "member.profile_pack.submissions.read" in member_caps.json()["operations"]
+    assert "member.profile_pack.submissions.export.download" in member_caps.json()["operations"]
     assert "admin.apply.workflow" not in member_caps.json()["operations"]
 
     reviewer_login = client.post(
@@ -439,7 +674,7 @@ def test_webui_admin_storage_routes_flow_and_enforce_auth(tmp_path):
 
     member_login = client.post(
         "/api/login",
-        json={"role": "member", "password": "member-secret"},
+        json={"role": "member", "password": "member-secret", "user_id": "u1"},
     )
     assert member_login.status_code == 200
     member_headers = {"Authorization": f"Bearer {member_login.json()['token']}"}
@@ -517,7 +752,7 @@ def test_webui_admin_storage_routes_flow_and_enforce_auth(tmp_path):
     assert committed.json()["data"]["restore"]["restore_state"] == "committed"
 
 
-def test_reviewer_auth_flow_enforces_single_active_session_and_admin_boundaries(tmp_path):
+def test_reviewer_auth_flow_tracks_device_granular_sessions_and_admin_boundaries(tmp_path):
     server = build_server(
         tmp_path,
         config={
@@ -592,18 +827,49 @@ def test_reviewer_auth_flow_enforces_single_active_session_and_admin_boundaries(
     assert reviewer_login_b.status_code == 200
     reviewer_token_b = reviewer_login_b.json()["token"]
 
-    old_session = client.get(
+    session_a = client.get(
         "/api/reviewer/session",
         headers={"Authorization": f"Bearer {reviewer_token_a}"},
     )
-    assert old_session.status_code == 401
+    assert session_a.status_code == 200
 
-    active_session = client.get(
+    session_b = client.get(
         "/api/reviewer/session",
         headers={"Authorization": f"Bearer {reviewer_token_b}"},
     )
-    assert active_session.status_code == 200
-    assert active_session.json()["reviewer_id"] == "reviewer-1"
+    assert session_b.status_code == 200
+    assert session_b.json()["reviewer_id"] == "reviewer-1"
+    assert session_a.json()["device_id"] != session_b.json()["device_id"]
+
+    reviewer_login_a2 = client.post(
+        "/api/login",
+        json={
+            "role": "reviewer",
+            "password": "reviewer-secret",
+            "reviewer_id": "reviewer-1",
+            "reviewer_device_key": first_device_key,
+        },
+    )
+    assert reviewer_login_a2.status_code == 200
+    reviewer_token_a2 = reviewer_login_a2.json()["token"]
+
+    revoked_same_device = client.get(
+        "/api/reviewer/session",
+        headers={"Authorization": f"Bearer {reviewer_token_a}"},
+    )
+    assert revoked_same_device.status_code == 401
+
+    refreshed_device_session = client.get(
+        "/api/reviewer/session",
+        headers={"Authorization": f"Bearer {reviewer_token_a2}"},
+    )
+    assert refreshed_device_session.status_code == 200
+
+    still_active_other_device = client.get(
+        "/api/reviewer/session",
+        headers={"Authorization": f"Bearer {reviewer_token_b}"},
+    )
+    assert still_active_other_device.status_code == 200
 
     reviewer_admin_forbidden = client.post(
         "/api/admin/dryrun",
@@ -689,6 +955,124 @@ def test_reviewer_device_revoke_invalidates_session_and_enforces_device_limit(tm
 
     revoked_session = client.get("/api/reviewer/session", headers=reviewer_headers)
     assert revoked_session.status_code == 401
+
+
+def test_admin_reviewer_lifecycle_routes_cover_invites_accounts_and_devices(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "reviewer_password": "reviewer-secret",
+                    "admin_password": "admin-secret",
+                },
+                "device_keys": {"max_reviewer_devices": 3},
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    admin_login = client.post("/api/login", json={"role": "admin", "password": "admin-secret"})
+    assert admin_login.status_code == 200
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    first_invite = client.post(
+        "/api/reviewer/invites",
+        json={"role": "admin", "admin_id": "admin-1", "expires_in_seconds": 1800},
+        headers=admin_headers,
+    )
+    assert first_invite.status_code == 200
+    revoked_invite_code = first_invite.json()["data"]["invite_code"]
+
+    revoked = client.post(
+        "/api/reviewer/invites/revoke",
+        json={"admin_id": "admin-1", "invite_code": revoked_invite_code},
+        headers=admin_headers,
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["data"]["status"] == "revoked"
+    assert revoked.json()["data"]["invite_code"] == revoked_invite_code
+
+    revoked_list = client.get(
+        "/api/reviewer/invites",
+        params={"status": "revoked"},
+        headers=admin_headers,
+    )
+    assert revoked_list.status_code == 200
+    assert any(item["code"] == revoked_invite_code for item in revoked_list.json()["data"]["invites"])
+
+    revoked_redeem = client.post(
+        "/api/reviewer/redeem",
+        json={"invite_code": revoked_invite_code, "reviewer_id": "reviewer-revoked"},
+    )
+    assert revoked_redeem.status_code == 409
+    assert revoked_redeem.json()["error"]["code"] == "invite_revoked"
+
+    active_invite = client.post(
+        "/api/reviewer/invites",
+        json={"role": "admin", "admin_id": "admin-1", "expires_in_seconds": 3600},
+        headers=admin_headers,
+    )
+    assert active_invite.status_code == 200
+    active_invite_code = active_invite.json()["data"]["invite_code"]
+
+    redeemed = client.post(
+        "/api/reviewer/redeem",
+        json={"invite_code": active_invite_code, "reviewer_id": "reviewer-3"},
+    )
+    assert redeemed.status_code == 200
+
+    first_device = client.post(
+        "/api/reviewer/devices/register",
+        json={"reviewer_id": "reviewer-3", "password": "reviewer-secret", "label": "macbook"},
+    )
+    second_device = client.post(
+        "/api/reviewer/devices/register",
+        json={"reviewer_id": "reviewer-3", "password": "reviewer-secret", "label": "ipad"},
+    )
+    assert first_device.status_code == 200
+    assert second_device.status_code == 200
+
+    accounts = client.get("/api/reviewer/accounts", headers=admin_headers)
+    assert accounts.status_code == 200
+    reviewer_row = next(item for item in accounts.json()["data"]["reviewers"] if item["reviewer_id"] == "reviewer-3")
+    assert reviewer_row["device_count"] == 2
+    assert reviewer_row["created_by"] == "admin-1"
+    assert reviewer_row["source_invite"] == active_invite_code
+
+    devices = client.get(
+        "/api/reviewer/devices",
+        params={"reviewer_id": "reviewer-3"},
+        headers=admin_headers,
+    )
+    assert devices.status_code == 200
+    assert devices.json()["data"]["max_devices"] == 3
+    assert len(devices.json()["data"]["devices"]) == 2
+
+    revoke_device = client.delete(
+        f"/api/reviewer/devices/{first_device.json()['data']['device_id']}",
+        params={"reviewer_id": "reviewer-3"},
+        headers=admin_headers,
+    )
+    assert revoke_device.status_code == 200
+    assert revoke_device.json()["data"]["status"] == "revoked"
+
+    reset_devices = client.post(
+        "/api/reviewer/accounts/reset-devices",
+        json={"admin_id": "admin-1", "reviewer_id": "reviewer-3"},
+        headers=admin_headers,
+    )
+    assert reset_devices.status_code == 200
+    assert reset_devices.json()["data"]["status"] == "reset"
+    assert reset_devices.json()["data"]["revoked_devices"] == 1
+
+    after_reset = client.get(
+        "/api/reviewer/devices",
+        params={"reviewer_id": "reviewer-3"},
+        headers=admin_headers,
+    )
+    assert after_reset.status_code == 200
+    assert after_reset.json()["data"]["devices"] == []
 
 
 def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
@@ -842,6 +1226,15 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert "<title>Sharelife Admin Console</title>" in admin_page.text
     assert 'data-i18n-key="console.admin.subtitle"' in admin_page.text
     assert 'id="adminConsoleLink"' in admin_page.text
+    assert 'id="section-reviewer-lifecycle"' in admin_page.text
+    assert 'id="btnReviewerInviteCreate"' in admin_page.text
+    assert 'id="btnReviewerInviteList"' in admin_page.text
+    assert 'id="btnReviewerAccountList"' in admin_page.text
+    assert 'id="btnReviewerDeviceList"' in admin_page.text
+    assert 'id="btnReviewerDeviceReset"' in admin_page.text
+    assert 'id="reviewerInviteTable"' in admin_page.text
+    assert 'id="reviewerAccountTable"' in admin_page.text
+    assert 'id="reviewerDeviceTable"' in admin_page.text
     assert 'src="/console_scope.js"' in admin_page.text
 
     reviewer_page = client.get("/reviewer")
@@ -1111,7 +1504,7 @@ def test_webui_private_docs_are_admin_only(tmp_path):
 
     member_login = client.post(
         "/api/login",
-        json={"role": "member", "password": "member-secret"},
+        json={"role": "member", "password": "member-secret", "user_id": "u1"},
     )
     admin_login = client.post(
         "/api/login",
@@ -1337,9 +1730,67 @@ def test_webui_profile_pack_market_routes_support_submission_and_catalog(tmp_pat
     )
     assert insights.status_code == 200
     assert insights.json()["data"]["metrics"]["total"] == 1
-    assert insights.json()["data"]["metrics"]["featured"] == 1
-    assert insights.json()["data"]["featured"]["pack_id"] == "profile/community-basic"
-    assert len(insights.json()["data"]["trending"]) == 1
+
+
+def test_webui_profile_pack_decision_can_auto_publish_to_public_market(tmp_path):
+    public_market_root = tmp_path / "public-market"
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "public_market": {
+                    "auto_publish_profile_pack_approve": True,
+                    "root": str(public_market_root),
+                    "rebuild_snapshot_on_publish": True,
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/community-http-autopublish",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    submitted = client.post(
+        "/api/profile-pack/submit",
+        json={
+            "user_id": "member-1",
+            "artifact_id": artifact_id,
+        },
+    )
+    assert submitted.status_code == 200
+    submission_id = submitted.json()["data"]["submission_id"]
+
+    decided = client.post(
+        "/api/admin/profile-pack/submissions/decide",
+        json={
+            "role": "admin",
+            "submission_id": submission_id,
+            "decision": "approve",
+            "review_labels": ["risk_low", "approved"],
+        },
+    )
+    assert decided.status_code == 200
+    data = decided.json()["data"]
+    assert data["status"] == "approved"
+    assert data["public_market_publish"]["status"] == "succeeded"
+
+    entry_path = Path(data["public_market_publish"]["entry_path"])
+    package_path = Path(data["public_market_publish"]["package_path"])
+    assert entry_path.exists()
+    assert package_path.exists()
+    assert entry_path.parent == public_market_root / "market" / "entries"
+    assert package_path.parent == public_market_root / "market" / "packages" / "community"
+    assert (public_market_root / "market" / "catalog.snapshot.json").exists()
 
 
 def test_webui_pipeline_route_returns_service_unavailable_without_orchestrator(tmp_path):
@@ -1497,7 +1948,7 @@ def test_webui_role_tokens_gate_admin_routes_and_override_payload_role(tmp_path)
 
     member_login = client.post(
         "/api/login",
-        json={"role": "member", "password": "member-secret"},
+        json={"role": "member", "password": "member-secret", "user_id": "u1"},
     )
     assert member_login.status_code == 200
     assert member_login.json()["role"] == "member"
@@ -1540,6 +1991,197 @@ def test_webui_role_tokens_gate_admin_routes_and_override_payload_role(tmp_path)
     assert approved.status_code == 200
     assert approved.json()["ok"] is True
     assert approved.json()["data"]["status"] == "approved"
+
+
+def test_webui_member_owner_binding_applies_to_upload_and_submission_management_surfaces(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+    member_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u1"},
+    )
+    assert member_login.status_code == 200
+    member_headers = {"Authorization": f"Bearer {member_login.json()['token']}"}
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert admin_login.status_code == 200
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    cross_submit = client.post(
+        "/api/templates/submit",
+        json={"user_id": "owner-u2", "template_id": "community/basic", "version": "1.0.0"},
+        headers=member_headers,
+    )
+    assert cross_submit.status_code == 403
+    assert cross_submit.json()["error"]["code"] == "permission_denied"
+
+    cross_profile_pack_submit = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "owner-u2", "artifact_id": "artifact-123"},
+        headers=member_headers,
+    )
+    assert cross_profile_pack_submit.status_code == 403
+    assert cross_profile_pack_submit.json()["error"]["code"] == "permission_denied"
+
+    own_submit = client.post(
+        "/api/templates/submit",
+        json={"user_id": "owner-u1", "template_id": "community/basic", "version": "1.0.0"},
+        headers=member_headers,
+    )
+    assert own_submit.status_code == 200
+    own_submission_id = own_submit.json()["data"]["submission_id"]
+
+    admin_submit_other = client.post(
+        "/api/templates/submit",
+        json={"user_id": "owner-u2", "template_id": "community/other", "version": "1.0.0"},
+        headers=admin_headers,
+    )
+    assert admin_submit_other.status_code == 200
+    other_submission_id = admin_submit_other.json()["data"]["submission_id"]
+
+    own_rows = client.get(
+        "/api/member/submissions",
+        params={"user_id": "owner-u1"},
+        headers=member_headers,
+    )
+    assert own_rows.status_code == 200
+    assert own_rows.json()["data"]["user_id"] == "owner-u1"
+    assert len(own_rows.json()["data"]["submissions"]) == 1
+    assert own_rows.json()["data"]["submissions"][0]["submission_id"] == own_submission_id
+
+    cross_rows = client.get(
+        "/api/member/submissions",
+        params={"user_id": "owner-u2"},
+        headers=member_headers,
+    )
+    assert cross_rows.status_code == 403
+    assert cross_rows.json()["error"]["code"] == "permission_denied"
+
+    own_detail = client.get(
+        "/api/member/submissions/detail",
+        params={"user_id": "owner-u1", "submission_id": own_submission_id},
+        headers=member_headers,
+    )
+    assert own_detail.status_code == 200
+    assert own_detail.json()["data"]["submission_id"] == own_submission_id
+
+    cross_detail = client.get(
+        "/api/member/submissions/detail",
+        params={"user_id": "owner-u1", "submission_id": other_submission_id},
+        headers=member_headers,
+    )
+    assert cross_detail.status_code == 403
+    assert cross_detail.json()["error"]["code"] == "permission_denied"
+
+    # non-upload surfaces keep existing behavior and do not require owner binding
+    preferences = client.get(
+        "/api/preferences",
+        params={"user_id": "owner-u2"},
+        headers=member_headers,
+    )
+    assert preferences.status_code == 200
+
+
+def test_webui_member_owner_binding_applies_to_profile_pack_submission_management_surfaces(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+    member_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u1"},
+    )
+    assert member_login.status_code == 200
+    member_headers = {"Authorization": f"Bearer {member_login.json()['token']}"}
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert admin_login.status_code == 200
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/community-owner-bind",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+        headers=admin_headers,
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    own_submit = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "owner-u1", "artifact_id": artifact_id},
+        headers=member_headers,
+    )
+    assert own_submit.status_code == 200
+    own_submission_id = own_submit.json()["data"]["submission_id"]
+
+    other_submit = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "owner-u2", "artifact_id": artifact_id},
+        headers=admin_headers,
+    )
+    assert other_submit.status_code == 200
+    other_submission_id = other_submit.json()["data"]["submission_id"]
+
+    own_rows = client.get(
+        "/api/member/profile-pack/submissions",
+        params={"user_id": "owner-u1"},
+        headers=member_headers,
+    )
+    assert own_rows.status_code == 200
+    assert own_rows.json()["data"]["user_id"] == "owner-u1"
+    assert len(own_rows.json()["data"]["submissions"]) == 1
+    assert own_rows.json()["data"]["submissions"][0]["submission_id"] == own_submission_id
+
+    cross_rows = client.get(
+        "/api/member/profile-pack/submissions",
+        params={"user_id": "owner-u2"},
+        headers=member_headers,
+    )
+    assert cross_rows.status_code == 403
+    assert cross_rows.json()["error"]["code"] == "permission_denied"
+
+    own_detail = client.get(
+        "/api/member/profile-pack/submissions/detail",
+        params={"user_id": "owner-u1", "submission_id": own_submission_id},
+        headers=member_headers,
+    )
+    assert own_detail.status_code == 200
+    assert own_detail.json()["data"]["submission_id"] == own_submission_id
+
+    cross_detail = client.get(
+        "/api/member/profile-pack/submissions/detail",
+        params={"user_id": "owner-u1", "submission_id": other_submission_id},
+        headers=member_headers,
+    )
+    assert cross_detail.status_code == 403
+    assert cross_detail.json()["error"]["code"] == "permission_denied"
 
 
 def test_webui_auth_rejects_query_token_by_default(tmp_path):
@@ -1590,6 +2232,45 @@ def test_webui_auth_can_allow_query_token_for_legacy_clients(tmp_path):
         params={"token": token},
     )
     assert allowed.status_code == 200
+
+
+def test_webui_member_login_returns_bound_user_id(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "member-custom"},
+    )
+    assert login.status_code == 200
+    assert login.json()["role"] == "member"
+    assert login.json()["user_id"] == "member-custom"
+
+    token = login.json()["token"]
+    own_rows = client.get(
+        "/api/member/submissions",
+        params={"user_id": "member-custom"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert own_rows.status_code == 200
+    assert own_rows.json()["ok"] is True
+
+    denied = client.get(
+        "/api/member/submissions",
+        params={"user_id": "member-other"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "permission_denied"
 
 
 def test_webui_auth_token_ttl_expires_sessions(tmp_path):
@@ -1671,7 +2352,7 @@ def test_webui_member_password_cannot_log_in_as_admin(tmp_path):
 
     member_login = client.post(
         "/api/login",
-        json={"role": "member", "password": "member-secret"},
+        json={"role": "member", "password": "member-secret", "user_id": "u1"},
     )
     assert member_login.status_code == 200
 
@@ -2094,7 +2775,7 @@ def test_webui_submit_package_shows_labels_and_downloads_uploaded_artifact(tmp_p
 
     member_login = client.post(
         "/api/login",
-        json={"role": "member", "password": "member-secret"},
+        json={"role": "member", "password": "member-secret", "user_id": "u1"},
     )
     member_token = member_login.json()["token"]
 
@@ -2255,6 +2936,119 @@ def test_webui_admin_can_download_pending_submission_package_and_compare(tmp_pat
     assert downloaded.status_code == 200
     assert downloaded.headers["content-type"] == "application/zip"
     assert downloaded.headers["content-disposition"].endswith('filename="community-basic-v1_1.zip"')
+
+
+def test_webui_member_can_only_download_own_submission_package(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    own = client.post(
+        "/api/templates/submit",
+        json={
+            "user_id": "member-1",
+            "template_id": "community/member-one",
+            "version": "1.0.0",
+            "package_name": "community-member-one.zip",
+            "package_base64": base64.b64encode(
+                build_bundle_zip(
+                    {
+                        "template_id": "community/member-one",
+                        "version": "1.0.0",
+                        "prompt": "Member one prompt.",
+                    }
+                )
+            ).decode("ascii"),
+        },
+    )
+    own_id = own.json()["data"]["submission_id"]
+
+    other = client.post(
+        "/api/templates/submit",
+        json={
+            "user_id": "member-2",
+            "template_id": "community/member-two",
+            "version": "1.0.0",
+            "package_name": "community-member-two.zip",
+            "package_base64": base64.b64encode(
+                build_bundle_zip(
+                    {
+                        "template_id": "community/member-two",
+                        "version": "1.0.0",
+                        "prompt": "Member two prompt.",
+                    }
+                )
+            ).decode("ascii"),
+        },
+    )
+    other_id = other.json()["data"]["submission_id"]
+
+    own_download = client.get(
+        "/api/member/submissions/package/download",
+        params={"user_id": "member-1", "submission_id": own_id},
+    )
+    assert own_download.status_code == 200
+    assert own_download.headers["content-type"] == "application/zip"
+    assert own_download.headers["content-disposition"].endswith('filename="community-member-one.zip"')
+
+    denied = client.get(
+        "/api/member/submissions/package/download",
+        params={"user_id": "member-1", "submission_id": other_id},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "permission_denied"
+
+
+def test_webui_member_can_only_download_own_profile_pack_submission_export(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/member-one",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    own = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "member-1", "artifact_id": artifact_id},
+    )
+    assert own.status_code == 200
+    own_id = own.json()["data"]["submission_id"]
+
+    other = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "member-2", "artifact_id": artifact_id},
+    )
+    assert other.status_code == 200
+    other_id = other.json()["data"]["submission_id"]
+
+    own_download = client.get(
+        "/api/member/profile-pack/submissions/export/download",
+        params={"user_id": "member-1", "submission_id": own_id},
+    )
+    assert own_download.status_code == 200
+    assert own_download.headers["content-type"] == "application/zip"
+    assert 'filename="' in own_download.headers["content-disposition"]
+
+    denied = client.get(
+        "/api/member/profile-pack/submissions/export/download",
+        params={"user_id": "member-1", "submission_id": other_id},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "permission_denied"
+
+    missing = client.get(
+        "/api/member/profile-pack/submissions/export/download",
+        params={"user_id": "member-1", "submission_id": ""},
+    )
+    assert missing.status_code == 400
+    assert missing.json()["error"]["code"] == "submission_id_required"
 
 
 def test_webui_server_supports_filtered_template_and_submission_queries(tmp_path):

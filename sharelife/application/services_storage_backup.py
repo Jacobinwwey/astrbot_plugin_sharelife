@@ -48,6 +48,7 @@ class StorageBackupService:
         "encryption_required": True,
         "sync_remote_enabled": False,
         "remote_required": False,
+        "remote_encryption_verified": False,
         "rclone_binary": "rclone",
         "rclone_remote_path": "",
         "rclone_bwlimit": "10M",
@@ -71,6 +72,7 @@ class StorageBackupService:
         "encryption_required": (bool,),
         "sync_remote_enabled": (bool,),
         "remote_required": (bool,),
+        "remote_encryption_verified": (bool,),
         "rclone_binary": (str,),
         "rclone_remote_path": (str,),
         "rclone_bwlimit": (str,),
@@ -297,6 +299,10 @@ class StorageBackupService:
             if bool(policies.get("remote_required", False)):
                 return {"status": "failed", "error": "remote_target_missing"}
             return {"status": "skipped", "reason": "remote_target_missing"}
+        if bool(policies.get("encryption_required", True)):
+            encryption_verified = bool(policies.get("remote_encryption_verified", False))
+            if not encryption_verified and not self._remote_path_looks_encrypted(remote_path):
+                return {"status": "failed", "error": "remote_encryption_required"}
 
         rclone_binary = str(policies.get("rclone_binary", "rclone") or "rclone").strip() or "rclone"
         timeout_seconds = max(30, self._safe_int(policies.get("command_timeout_seconds"), 900))
@@ -353,6 +359,82 @@ class StorageBackupService:
             "stderr_tail": stderr_tail,
             "remote_object": f"{remote_path.rstrip('/')}/{archive_path.name}",
         }
+
+    def _apply_remote_retention(self, *, policies: dict[str, Any]) -> dict[str, Any]:
+        if not bool(policies.get("sync_remote_enabled", False)):
+            return {"status": "skipped", "reason": "remote_sync_disabled"}
+        remote_path = str(policies.get("rclone_remote_path", "") or "").strip()
+        if not remote_path:
+            return {"status": "skipped", "reason": "remote_target_missing"}
+        retention_days = max(1, self._safe_int(policies.get("remote_retention_days"), 30))
+        rclone_binary = str(policies.get("rclone_binary", "rclone") or "rclone").strip() or "rclone"
+        timeout_seconds = max(30, self._safe_int(policies.get("command_timeout_seconds"), 900))
+        command = [
+            rclone_binary,
+            "delete",
+            remote_path.rstrip("/"),
+            "--min-age",
+            f"{retention_days}d",
+            "--rmdirs",
+        ]
+        if bool(policies.get("upload_bandwidth_limit_enabled", True)):
+            bwlimit = str(policies.get("rclone_bwlimit", "") or "").strip()
+            if not bwlimit:
+                mbps = max(1, self._safe_int(policies.get("upload_bandwidth_limit_mbps"), 10))
+                bwlimit = f"{mbps}M"
+            command.extend(["--bwlimit", bwlimit])
+
+        started_at = time.time()
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except FileNotFoundError:
+            return {"status": "failed", "error": "remote_retention_command_not_found"}
+        except subprocess.TimeoutExpired:
+            return {"status": "failed", "error": "remote_retention_failed", "reason": "timeout"}
+        except Exception as exc:  # pragma: no cover - defensive execution guard
+            return {
+                "status": "failed",
+                "error": "remote_retention_failed",
+                "reason": f"{type(exc).__name__}:{exc}",
+            }
+
+        duration = round(max(0.0, time.time() - started_at), 3)
+        stdout_tail = self._tail_text(completed.stdout, self._COMMAND_OUTPUT_TAIL)
+        stderr_tail = self._tail_text(completed.stderr, self._COMMAND_OUTPUT_TAIL)
+        if int(completed.returncode) != 0:
+            return {
+                "status": "failed",
+                "error": "remote_retention_failed",
+                "exit_code": int(completed.returncode),
+                "duration_seconds": duration,
+                "stdout_tail": stdout_tail,
+                "stderr_tail": stderr_tail,
+            }
+        return {
+            "status": "succeeded",
+            "exit_code": int(completed.returncode),
+            "duration_seconds": duration,
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "retention_days": retention_days,
+            "remote_path": remote_path.rstrip("/"),
+        }
+
+    @staticmethod
+    def _remote_path_looks_encrypted(remote_path: str) -> bool:
+        text = str(remote_path or "").strip()
+        if not text:
+            return False
+        remote_name = text.split(":", 1)[0].strip().lower()
+        if not remote_name:
+            return False
+        return "crypt" in remote_name
 
     def _apply_local_retention(self, *, jobs: list[dict[str, Any]], keep_count: int) -> list[dict[str, Any]]:
         if keep_count < 1:
@@ -555,6 +637,7 @@ class StorageBackupService:
             "artifact_size_bytes": 0,
             "remote_target": str(policies.get("rclone_remote_path", "") or ""),
             "remote_sync": {"status": "skipped", "reason": "not_started"},
+            "remote_retention": {"status": "skipped", "reason": "not_started"},
         }
         backup_jobs.append(job)
         self._save_backup_jobs(backup_jobs)
@@ -600,7 +683,14 @@ class StorageBackupService:
             policies=policies,
         )
         job["remote_sync"] = remote_sync
-        if str(remote_sync.get("status", "")).strip().lower() == "failed":
+        remote_sync_status = str(remote_sync.get("status", "")).strip().lower()
+        if remote_sync_status == "succeeded":
+            job["remote_retention"] = self._apply_remote_retention(policies=policies)
+        elif remote_sync_status == "skipped":
+            job["remote_retention"] = {"status": "skipped", "reason": "remote_sync_skipped"}
+        else:
+            job["remote_retention"] = {"status": "skipped", "reason": "remote_sync_failed"}
+        if remote_sync_status == "failed":
             job["status"] = "failed"
             job["reason"] = str(remote_sync.get("error", "remote_sync_failed") or "remote_sync_failed")
         else:
