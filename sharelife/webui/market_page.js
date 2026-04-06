@@ -145,6 +145,10 @@
     return globalScope.SharelifeMarketStatusView || null
   }
 
+  function marketAuthViewHelpers() {
+    return globalScope.SharelifeMarketAuthView || null
+  }
+
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
   }
@@ -1500,23 +1504,17 @@
     if (!roleNode) return
     roleNode.innerHTML = ""
     const preferredRole = fixedAuthRole()
-    const inputRoles = Array.isArray(roles) ? roles : []
-    const effectiveRoles = inputRoles.includes(preferredRole) ? [preferredRole] : [preferredRole]
-    effectiveRoles.forEach((role) => {
+    const authView = marketAuthViewHelpers()
+    const options = authView && typeof authView.buildAuthRoleOptions === "function"
+      ? authView.buildAuthRoleOptions(roles, preferredRole, { i18nMessage })
+      : [{ value: preferredRole, label: i18nMessage("option.member", "member"), i18nKey: "option.member" }]
+    options.forEach((entry) => {
       const option = document.createElement("option")
-      option.value = role
-      if (role === "member") {
-        option.setAttribute("data-i18n-key", "option.member")
-        option.textContent = i18nMessage("option.member", "member")
-      } else if (role === "reviewer") {
-        option.setAttribute("data-i18n-key", "option.reviewer")
-        option.textContent = i18nMessage("option.reviewer", "reviewer")
-      } else if (role === "admin") {
-        option.setAttribute("data-i18n-key", "option.admin")
-        option.textContent = i18nMessage("option.admin", "admin")
-      } else {
-        option.textContent = role
+      option.value = String(entry.value || preferredRole)
+      if (entry.i18nKey) {
+        option.setAttribute("data-i18n-key", String(entry.i18nKey))
       }
+      option.textContent = String(entry.label || entry.value || preferredRole)
       roleNode.appendChild(option)
     })
     roleNode.value = preferredRole
@@ -1528,8 +1526,12 @@
     const roleNode = byId("marketAuthRole")
     const fieldsNode = byId("marketReviewerAuthFields")
     if (!roleNode || !fieldsNode) return
-    const role = String(roleNode.value || "").trim().toLowerCase()
-    fieldsNode.classList.toggle("hidden", role !== "reviewer")
+    const authView = marketAuthViewHelpers()
+    const role = String(roleNode.value || "").trim()
+    const visible = authView && typeof authView.isReviewerRole === "function"
+      ? authView.isReviewerRole(role)
+      : role.toLowerCase() === "reviewer"
+    fieldsNode.classList.toggle("hidden", !visible)
   }
 
   function updateAuthUi() {
@@ -1565,12 +1567,24 @@
     const reviewerLink = byId("marketReviewerConsoleLink")
     const adminLink = byId("marketAdminConsoleLink")
     const fullLink = byId("marketFullConsoleLink")
+    const authView = marketAuthViewHelpers()
+    if (authView && typeof authView.resolveConsoleVisibility === "function" && typeof authView.applyConsoleVisibility === "function") {
+      const visibility = authView.resolveConsoleVisibility(state.authRequired, state.authRole)
+      authView.applyConsoleVisibility(
+        {
+          member: memberLink,
+          reviewer: reviewerLink,
+          admin: adminLink,
+          full: fullLink,
+        },
+        visibility,
+      )
+      return
+    }
     const hide = (node, value) => {
       if (!node) return
       node.classList.toggle("hidden", Boolean(value))
     }
-
-    // Public/no-auth market should only expose member console entry.
     if (!state.authRequired) {
       hide(memberLink, false)
       hide(reviewerLink, true)
@@ -1578,7 +1592,6 @@
       hide(fullLink, true)
       return
     }
-
     const role = String(state.authRole || "member").trim().toLowerCase()
     if (role === "admin") {
       hide(memberLink, false)
