@@ -3489,8 +3489,8 @@ body.console-page-member .member-spotlight-action:hover {
 }
 
 body.console-page-market {
-  --market-muted: #344054;
-  --market-muted-strong: #1f2937;
+  --market-muted: #253041;
+  --market-muted-strong: #111827;
 }
 
 body.console-page-market .market-filter-sidebar-head h2,
@@ -3534,6 +3534,48 @@ body.console-page-market .template-card-signal {
   border-color: rgba(15, 23, 42, 0.08);
 }
 
+body.console-page-market .featured-template-entry:hover,
+body.console-page-market .featured-template-entry:focus-visible,
+body.console-page-market .trending-template-item:hover,
+body.console-page-market .trending-template-item:focus-visible,
+body.console-page-market .template-card:hover,
+body.console-page-market .template-card:focus-visible {
+  background: #eef2f7;
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+body.console-page-market .featured-template-entry:hover .featured-template-subtitle,
+body.console-page-market .featured-template-entry:hover .featured-template-description,
+body.console-page-market .featured-template-entry:hover .featured-template-metrics,
+body.console-page-market .featured-template-entry:hover .featured-template-score,
+body.console-page-market .featured-template-entry:focus-visible .featured-template-subtitle,
+body.console-page-market .featured-template-entry:focus-visible .featured-template-description,
+body.console-page-market .featured-template-entry:focus-visible .featured-template-metrics,
+body.console-page-market .featured-template-entry:focus-visible .featured-template-score,
+body.console-page-market .trending-template-item:hover .trending-template-name,
+body.console-page-market .trending-template-item:hover .trending-template-score,
+body.console-page-market .trending-template-item:focus-visible .trending-template-name,
+body.console-page-market .trending-template-item:focus-visible .trending-template-score,
+body.console-page-market .template-card:hover .template-card-owner,
+body.console-page-market .template-card:hover .template-card-subtitle,
+body.console-page-market .template-card:hover .template-card-description,
+body.console-page-market .template-card:hover .template-card-meta-item,
+body.console-page-market .template-card:focus-visible .template-card-owner,
+body.console-page-market .template-card:focus-visible .template-card-subtitle,
+body.console-page-market .template-card:focus-visible .template-card-description,
+body.console-page-market .template-card:focus-visible .template-card-meta-item {
+  color: #1f2937;
+}
+
+body.console-page-market .featured-template-entry:hover .featured-template-title,
+body.console-page-market .featured-template-entry:focus-visible .featured-template-title,
+body.console-page-market .trending-template-item:hover .trending-template-rank,
+body.console-page-market .trending-template-item:focus-visible .trending-template-rank,
+body.console-page-market .template-card:hover .template-card-title,
+body.console-page-market .template-card:focus-visible .template-card-title {
+  color: #111827;
+}
+
 body.console-page-market .trending-template-rank {
   color: #0f766e;
 }
@@ -3541,4 +3583,8 @@ body.console-page-market .trending-template-rank {
 body.console-page-market .market-filter-note,
 body.console-page-market .note {
   color: #475467;
+}
+
+body.console-page-market .featured-template-action {
+  color: #0f766e;
 }
