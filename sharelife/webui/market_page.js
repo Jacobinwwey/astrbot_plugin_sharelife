@@ -157,6 +157,10 @@
     return globalScope.SharelifeMarketCatalogView || null
   }
 
+  function marketCompareHelpers() {
+    return globalScope.SharelifeMarketCompareHelpers || null
+  }
+
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
   }
@@ -2959,6 +2963,10 @@
   }
 
   function resolveCompareChangeSummary(row) {
+    const helper = marketCompareHelpers()
+    if (helper && typeof helper.resolveCompareChangeSummary === "function") {
+      return helper.resolveCompareChangeSummary(row, { i18nMessage, i18nFormat })
+    }
     const filePath = String((row && row.file_path) || "").trim()
     if (filePath) return filePath
     const section = String((row && row.section) || "").trim()
@@ -2984,10 +2992,15 @@
 
   function compareSizeCell(row) {
     const td = document.createElement("td")
+    const helper = marketCompareHelpers()
+    if (helper && typeof helper.formatCompareSize === "function") {
+      td.textContent = helper.formatCompareSize(row, { i18nMessage, i18nFormat })
+      return td
+    }
     const bytesLabel = i18nMessage("market.compare.bytes", "bytes")
-    const beforeSize = Number(row.before_size || 0)
-    const afterSize = Number(row.after_size || 0)
-    const delta = Number(row.delta_size || 0)
+    const beforeSize = Number(row && row.before_size || 0)
+    const afterSize = Number(row && row.after_size || 0)
+    const delta = Number(row && row.delta_size || 0)
     const deltaLabel = delta >= 0 ? `+${delta}` : `${delta}`
     td.textContent = i18nFormat(
       "market.compare.size_compact",
@@ -3009,6 +3022,17 @@
     const before = byId("marketCompareDetailBefore")
     const after = byId("marketCompareDetailAfter")
     if (!pane || !meta || !diff || !before || !after) return
+    const helper = marketCompareHelpers()
+    if (helper && typeof helper.buildCompareDetailContent === "function") {
+      const detail = helper.buildCompareDetailContent(row, { i18nMessage, i18nFormat })
+      state.compareDetailKey = String(detail.detailKey || "").trim()
+      pane.classList.remove("hidden")
+      meta.textContent = String(detail.metaText || "")
+      diff.textContent = String(detail.diffText || "")
+      before.textContent = String(detail.beforeText || "")
+      after.textContent = String(detail.afterText || "")
+      return
+    }
     state.compareDetailKey = String((row && row.section) || "").trim()
     pane.classList.remove("hidden")
     meta.textContent = i18nFormat(
@@ -3066,10 +3090,13 @@
     const after = byId("marketCompareDetailAfter")
     if (pane) pane.classList.add("hidden")
     if (meta) {
-      meta.textContent = i18nMessage(
-        "market.compare.detail.empty_meta",
-        'Select one changed row and click "Expand Detail".',
-      )
+      const helper = marketCompareHelpers()
+      meta.textContent = helper && typeof helper.emptyDetailMeta === "function"
+        ? helper.emptyDetailMeta({ i18nMessage, i18nFormat })
+        : i18nMessage(
+          "market.compare.detail.empty_meta",
+          'Select one changed row and click "Expand Detail".',
+        )
     }
     if (diff) diff.textContent = ""
     if (before) before.textContent = ""
