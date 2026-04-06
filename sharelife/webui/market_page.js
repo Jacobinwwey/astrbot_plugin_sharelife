@@ -1,6 +1,7 @@
 (function bootstrapMarketPage(globalScope) {
   const UI_LOCALE_STORAGE_KEY = "sharelife.uiLocale"
   const MARKET_PAGE_INSTANCE_ID = `sharelife-market-${Math.random().toString(36).slice(2)}`
+  const marketFilterApi = globalScope.SharelifeMarketFilters || null
   const LOCAL_SORT_OPTIONS = Object.freeze({
     TRENDING: "trending",
     DOWNLOADS: "downloads",
