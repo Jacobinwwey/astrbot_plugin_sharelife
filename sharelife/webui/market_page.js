@@ -141,6 +141,10 @@
     return globalScope.SharelifeMarketEventBindings || null
   }
 
+  function marketStatusViewHelpers() {
+    return globalScope.SharelifeMarketStatusView || null
+  }
+
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
   }
@@ -1319,54 +1323,30 @@
     const detailsNode = byId("marketDetails")
     if (!data || typeof data !== "object") {
       state.lastSummary = null
-      summaryNode.textContent = i18nMessage("market.summary.idle", "No operation yet.")
+      const statusView = marketStatusViewHelpers()
+      if (statusView && typeof statusView.buildSummaryText === "function") {
+        summaryNode.textContent = statusView.buildSummaryText(null, { i18nMessage, i18nFormat })
+      } else {
+        summaryNode.textContent = i18nMessage("market.summary.idle", "No operation yet.")
+      }
       detailsNode.textContent = ""
       renderEvidence(null)
       return
     }
     state.lastSummary = data
-    const status = String(data.status || "updated")
-    const parts = [
-      i18nFormat("market.summary.part.status", "status={value}", {
-        value: enumLabel("status", status),
-      }),
-    ]
-    if (data.pack_id) {
-      parts.push(i18nFormat("market.summary.part.pack", "pack={value}", {
-        value: localizedPackLabel(data.pack_id),
-      }))
+    const statusView = marketStatusViewHelpers()
+    if (statusView && typeof statusView.buildSummaryText === "function") {
+      summaryNode.textContent = statusView.buildSummaryText(data, {
+        i18nMessage,
+        i18nFormat,
+        enumLabel,
+        localizedPackLabel,
+      })
+    } else {
+      summaryNode.textContent = i18nFormat("market.summary.part.status", "status={value}", {
+        value: enumLabel("status", String(data.status || "updated")),
+      })
     }
-    if (data.template_id) {
-      parts.push(i18nFormat("market.summary.part.template", "template={value}", {
-        value: String(data.template_id || ""),
-      }))
-    }
-    if (data.submission_id) {
-      parts.push(i18nFormat("market.summary.part.submission", "submission={value}", {
-        value: String(data.submission_id || ""),
-      }))
-    }
-    if (data.version) {
-      parts.push(i18nFormat("market.summary.part.version", "version={value}", { value: data.version }))
-    }
-    if (typeof data.featured === "boolean") {
-      parts.push(i18nFormat("market.summary.part.featured", "featured={value}", {
-        value: data.featured
-          ? i18nMessage("option.featured_toggle.true", "featured")
-          : i18nMessage("option.featured_toggle.false", "normal"),
-      }))
-    }
-    if (data.risk_level) {
-      parts.push(i18nFormat("market.summary.part.risk", "risk={value}", {
-        value: enumLabel("risk", data.risk_level),
-      }))
-    }
-    if (Number.isFinite(Number(data.changed_sections_count))) {
-      parts.push(i18nFormat("market.summary.part.changed", "changed={value}", {
-        value: Number(data.changed_sections_count),
-      }))
-    }
-    summaryNode.textContent = parts.join(" | ")
     renderEvidence(data)
     detailsNode.textContent = JSON.stringify(data, null, 2)
   }
@@ -1376,99 +1356,36 @@
     if (!node) return
     node.innerHTML = ""
     if (!data || typeof data !== "object") return
-    const capabilitySummary = data.capability_summary || {}
-    const reviewEvidence = data.review_evidence || {}
-    const pluginInstall = data.plugin_install && typeof data.plugin_install === "object" ? data.plugin_install : {}
-    const latestExecution = pluginInstall.latest_execution && typeof pluginInstall.latest_execution === "object"
-      ? pluginInstall.latest_execution
-      : null
-    const executionSummary = latestExecution && compareViewHelper && typeof compareViewHelper.summarizePluginInstallExecution === "function"
-      ? compareViewHelper.summarizePluginInstallExecution(latestExecution)
-      : null
-    const executionGroups = []
-    if (executionSummary && executionSummary.groups) {
-      if (Array.isArray(executionSummary.groups.policy_blocked) && executionSummary.groups.policy_blocked.length) {
-        executionGroups.push(
-          i18nFormat("market.evidence.plugin_install_failure_group", "{group}: {items}", {
-            group: i18nMessage("profile_pack.review.group.policy_blocked", "policy"),
-            items: executionSummary.groups.policy_blocked.join("|"),
-          }),
-        )
-      }
-      if (Array.isArray(executionSummary.groups.command_failed) && executionSummary.groups.command_failed.length) {
-        executionGroups.push(
-          i18nFormat("market.evidence.plugin_install_failure_group", "{group}: {items}", {
-            group: i18nMessage("profile_pack.review.group.command_failed", "failed"),
-            items: executionSummary.groups.command_failed.join("|"),
-          }),
-        )
-      }
-      if (Array.isArray(executionSummary.groups.timed_out) && executionSummary.groups.timed_out.length) {
-        executionGroups.push(
-          i18nFormat("market.evidence.plugin_install_failure_group", "{group}: {items}", {
-            group: i18nMessage("profile_pack.review.group.timed_out", "timeout"),
-            items: executionSummary.groups.timed_out.join("|"),
-          }),
-        )
+    const statusView = marketStatusViewHelpers()
+    if (statusView && typeof statusView.buildEvidenceRows === "function") {
+      const rows = statusView.buildEvidenceRows(data, {
+        i18nMessage,
+        i18nFormat,
+        enumLabel,
+        localizedPackFeaturedNote,
+        localizedList,
+        summarizePluginInstallExecution:
+          compareViewHelper && typeof compareViewHelper.summarizePluginInstallExecution === "function"
+            ? (execution) => compareViewHelper.summarizePluginInstallExecution(execution)
+            : null,
+      })
+      if (typeof statusView.renderDetailCards === "function") {
+        statusView.renderDetailCards(node, rows, { document })
+        return
       }
     }
-    const rows = [
-      {
-        label: i18nMessage("market.evidence.featured_note", "featured note"),
-        value: localizedPackFeaturedNote(data.pack_id, String(data.featured_note || "-")),
-      },
-      {
-        label: i18nMessage("market.evidence.compatibility", "compatibility"),
-        value: enumLabel("compatibility", String(data.compatibility || "unknown")),
-      },
-      {
-        label: i18nMessage("market.evidence.declared_capabilities", "declared capabilities"),
-        value: Array.isArray(capabilitySummary.declared) ? capabilitySummary.declared.join(", ") || "-" : "-",
-      },
-      {
-        label: i18nMessage("market.evidence.review_labels", "review labels"),
-        value: localizedList("review_label", reviewEvidence.review_labels),
-      },
-      {
-        label: i18nMessage("market.evidence.plugin_install_status", "plugin install status"),
-        value: enumLabel("plugin_install_status", String(pluginInstall.status || "unknown")),
-      },
-      {
-        label: i18nMessage("market.evidence.plugin_install_execution", "plugin install execution"),
-        value: executionSummary
-          ? i18nFormat(
-            "market.evidence.plugin_install_execution_counts",
-            "{status} (installed={installed}, failed={failed}, blocked={blocked})",
-            {
-              status: enumLabel("plugin_install_status", executionSummary.status),
-              installed: executionSummary.installed_count,
-              failed: executionSummary.failed_count,
-              blocked: executionSummary.blocked_count,
-            },
-          )
-          : "-",
-      },
-      {
-        label: i18nMessage(
-          "market.evidence.plugin_install_failure_groups",
-          "plugin install failure groups",
-        ),
-        value: executionGroups.length ? executionGroups.join(" ; ") : "-",
-      },
-    ]
-    rows.forEach((item) => {
-      const card = document.createElement("div")
-      card.className = "detail-card"
-      const label = document.createElement("div")
-      label.className = "detail-card-label"
-      label.textContent = item.label
-      card.appendChild(label)
-      const value = document.createElement("div")
-      value.className = "detail-card-value"
-      value.textContent = item.value
-      card.appendChild(value)
-      node.appendChild(card)
-    })
+
+    const fallback = document.createElement("div")
+    fallback.className = "detail-card"
+    const label = document.createElement("div")
+    label.className = "detail-card-label"
+    label.textContent = i18nMessage("market.evidence.plugin_install_status", "plugin install status")
+    fallback.appendChild(label)
+    const value = document.createElement("div")
+    value.className = "detail-card-value"
+    value.textContent = enumLabel("plugin_install_status", String(data.plugin_install && data.plugin_install.status || "unknown"))
+    fallback.appendChild(value)
+    node.appendChild(fallback)
   }
 
   function resetCompareView() {
