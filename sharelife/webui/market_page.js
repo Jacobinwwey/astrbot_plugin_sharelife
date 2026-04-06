@@ -149,6 +149,10 @@
     return globalScope.SharelifeMarketAuthView || null
   }
 
+  function marketCatalogInsightsHelpers() {
+    return globalScope.SharelifeMarketCatalogInsights || null
+  }
+
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
   }
@@ -2327,6 +2331,10 @@
   }
 
   function parseIsoDate(value) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.parseIsoDate === "function") {
+      return helper.parseIsoDate(value)
+    }
     const text = String(value || "").trim()
     if (!text) return 0
     const time = Date.parse(text)
@@ -2334,10 +2342,18 @@
   }
 
   function listLength(value) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.listLength === "function") {
+      return helper.listLength(value)
+    }
     return Array.isArray(value) ? value.length : 0
   }
 
   function packRiskScore(risk) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.packRiskScore === "function") {
+      return helper.packRiskScore(risk)
+    }
     const text = String(risk || "").trim().toLowerCase()
     if (text === "low") return 20
     if (text === "medium") return 12
@@ -2346,6 +2362,10 @@
   }
 
   function packCompatibilityScore(item) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.packCompatibilityScore === "function") {
+      return helper.packCompatibilityScore(item)
+    }
     const text = String((item && item.compatibility) || "").trim().toLowerCase()
     if (text === "compatible" || text === "ok") return 14
     if (text === "degraded") return 8
@@ -2354,6 +2374,10 @@
   }
 
   function catalogRankScore(item) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.catalogRankScore === "function") {
+      return helper.catalogRankScore(item)
+    }
     if (!item || typeof item !== "object") return 0
     const labels = listLength(item.review_labels)
     const warnings = listLength(item.warning_flags)
@@ -2373,6 +2397,10 @@
   }
 
   function catalogMetrics(rows) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.catalogMetrics === "function") {
+      return helper.catalogMetrics(rows)
+    }
     const items = Array.isArray(rows) ? rows : []
     let featured = 0
     let highRisk = 0
@@ -2399,6 +2427,10 @@
   }
 
   function catalogTrendScore(item) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.catalogTrendScore === "function") {
+      return helper.catalogTrendScore(item)
+    }
     if (!item || typeof item !== "object") return 0
     const explicit = Number(item.trend_score)
     if (Number.isFinite(explicit)) {
@@ -2474,6 +2506,10 @@
   }
 
   function sortedByTrend(rows) {
+    const helper = marketCatalogInsightsHelpers()
+    if (helper && typeof helper.sortedByTrend === "function") {
+      return helper.sortedByTrend(rows)
+    }
     const items = Array.isArray(rows) ? rows.slice() : []
     return items.sort((left, right) => {
       const scoreDiff = catalogRankScore(right) - catalogRankScore(left)
