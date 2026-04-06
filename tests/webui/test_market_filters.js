@@ -19,6 +19,7 @@ const {
   sortedFacetEntries,
   completeFacetBucket,
   computeFacetBuckets,
+  buildLocalCatalogView,
 } = require("../../sharelife/webui/market_filters.js")
 
 test("market filters expose deterministic sort options and query parsing helpers", () => {
@@ -166,4 +167,31 @@ test("market filters compute/complete/sort facet buckets", () => {
 
   const sorted = sortedFacetEntries(riskGroup, completed)
   assert.equal(sorted[0][0], "high")
+})
+
+test("market filters build local catalog view from search/facet/sort state", () => {
+  const rows = [
+    { pack_id: "profile/a", pack_type: "bot_profile_pack", risk_level: "low", rank_score: 10, featured: true },
+    { pack_id: "profile/b", pack_type: "extension_pack", risk_level: "medium", rank_score: 90, featured: false },
+    { pack_id: "profile/c", pack_type: "bot_profile_pack", risk_level: "high", rank_score: 80, featured: false },
+  ]
+  const facetSelection = createFacetSelectionMap(FACET_GROUPS)
+  facetSelection.pack_type.add("bot_profile_pack")
+  const view = buildLocalCatalogView(rows, {
+    localSearch: "profile",
+    localSort: SORT_OPTIONS.TRENDING,
+    localFacets: facetSelection,
+  }, {
+    groups: FACET_GROUPS,
+    catalogRankScore(item) {
+      return Number(item.rank_score || 0)
+    },
+    parseIsoDate() {
+      return 0
+    },
+  })
+  assert.equal(view.baseRows.length, 3)
+  assert.equal(view.searchedRows.length, 3)
+  assert.equal(view.filteredRows.length, 2)
+  assert.deepEqual(view.sortedRows.map((item) => item.pack_id), ["profile/c", "profile/a"])
 })

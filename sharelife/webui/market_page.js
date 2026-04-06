@@ -1179,9 +1179,21 @@
 
   function applyLocalCatalogView(options = {}) {
     const baseRows = Array.isArray(state.catalogRaw) ? state.catalogRaw : []
-    const searchedRows = baseRows.filter((item) => rowMatchesSearch(item, state.localSearch))
-    const filteredRows = searchedRows.filter((item) => rowMatchesFacets(item))
-    const sortedRows = sortCatalogRows(filteredRows)
+    let searchedRows = baseRows.filter((item) => rowMatchesSearch(item, state.localSearch))
+    let sortedRows = sortCatalogRows(searchedRows.filter((item) => rowMatchesFacets(item)))
+    if (marketFilterApi && typeof marketFilterApi.buildLocalCatalogView === "function") {
+      const computed = marketFilterApi.buildLocalCatalogView(baseRows, {
+        localSearch: state.localSearch,
+        localFacets: state.localFacets,
+        localSort: state.localSort,
+      }, {
+        groups: LOCAL_FACET_GROUPS,
+        catalogRankScore,
+        parseIsoDate,
+      })
+      searchedRows = computed.searchedRows
+      sortedRows = computed.sortedRows
+    }
     state.catalog = sortedRows
     updateCatalogTable(state.catalog, { skipFilterSync: true })
     updateCatalogCountChips(state.catalog, baseRows)

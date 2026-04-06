@@ -330,6 +330,22 @@
     return bucket
   }
 
+  function buildLocalCatalogView(baseRows, viewState, options = {}) {
+    const rows = Array.isArray(baseRows) ? baseRows : []
+    const state = viewState && typeof viewState === "object" ? viewState : {}
+    const groups = asGroups(options.groups)
+    const searchedRows = rows.filter((item) => rowMatchesSearch(item, state.localSearch))
+    const filteredRows = searchedRows.filter((item) =>
+      rowMatchesFacets(item, state.localFacets, { groups }))
+    const sortedRows = sortCatalogRows(filteredRows, state.localSort, options)
+    return {
+      baseRows: rows,
+      searchedRows,
+      filteredRows,
+      sortedRows,
+    }
+  }
+
   const api = {
     SORT_OPTIONS,
     FACET_GROUPS,
@@ -348,6 +364,7 @@
     sortedFacetEntries,
     completeFacetBucket,
     computeFacetBuckets,
+    buildLocalCatalogView,
   }
 
   if (typeof module !== "undefined" && module.exports) {
