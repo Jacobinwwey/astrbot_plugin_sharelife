@@ -474,7 +474,19 @@
 
   function loadQueryState() {
     if (!globalScope || !globalScope.location) return
-    const params = new URLSearchParams(globalScope.location.search || "")
+    const search = globalScope.location.search || ""
+    if (marketFilterApi && typeof marketFilterApi.parseQueryState === "function") {
+      const parsed = marketFilterApi.parseQueryState(search, {
+        groups: LOCAL_FACET_GROUPS,
+        sortOptions: LOCAL_SORT_OPTIONS,
+      })
+      state.localSearch = parsed.localSearch
+      state.localSort = parsed.localSort
+      state.selectedPackId = parsed.selectedPackId
+      state.localFacets = parsed.localFacets
+      return
+    }
+    const params = new URLSearchParams(search)
     state.localSearch = String(params.get("q") || "").trim()
     state.localSort = validSortOption(params.get("sort") || LOCAL_SORT_OPTIONS.TRENDING)
     state.selectedPackId = String(params.get("pack_id") || "").trim()
@@ -489,17 +501,25 @@
 
   function syncQueryState() {
     if (!globalScope || !globalScope.location || !globalScope.history) return
-    const next = new URLSearchParams()
-    const q = String(state.localSearch || "").trim()
-    const sort = validSortOption(state.localSort)
-    if (q) next.set("q", q)
-    if (sort && sort !== LOCAL_SORT_OPTIONS.TRENDING) next.set("sort", sort)
-    if (state.selectedPackId) next.set("pack_id", state.selectedPackId)
-    LOCAL_FACET_GROUPS.forEach((group) => {
-      const selected = state.localFacets[group.key]
-      if (!(selected instanceof Set) || selected.size === 0) return
-      next.set(`facet_${group.key}`, Array.from(selected).sort().join(","))
-    })
+    let next = null
+    if (marketFilterApi && typeof marketFilterApi.buildQueryStateParams === "function") {
+      next = marketFilterApi.buildQueryStateParams(state, {
+        groups: LOCAL_FACET_GROUPS,
+        sortOptions: LOCAL_SORT_OPTIONS,
+      })
+    } else {
+      next = new URLSearchParams()
+      const q = String(state.localSearch || "").trim()
+      const sort = validSortOption(state.localSort)
+      if (q) next.set("q", q)
+      if (sort && sort !== LOCAL_SORT_OPTIONS.TRENDING) next.set("sort", sort)
+      if (state.selectedPackId) next.set("pack_id", state.selectedPackId)
+      LOCAL_FACET_GROUPS.forEach((group) => {
+        const selected = state.localFacets[group.key]
+        if (!(selected instanceof Set) || selected.size === 0) return
+        next.set(`facet_${group.key}`, Array.from(selected).sort().join(","))
+      })
+    }
     const search = next.toString()
     const nextHref = `${globalScope.location.pathname}${search ? `?${search}` : ""}${globalScope.location.hash || ""}`
     const currentHref = `${globalScope.location.pathname}${globalScope.location.search || ""}${globalScope.location.hash || ""}`
