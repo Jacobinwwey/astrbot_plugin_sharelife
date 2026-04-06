@@ -153,6 +153,10 @@
     return globalScope.SharelifeMarketCatalogInsights || null
   }
 
+  function marketCatalogViewHelpers() {
+    return globalScope.SharelifeMarketCatalogView || null
+  }
+
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
   }
@@ -2453,41 +2457,44 @@
         botProfile: toSafeInt(metricOverride.botProfile),
       }
       : catalogMetrics(rows)
-    const cards = [
-      {
-        key: "market.metric.total",
-        fallback: "Total Packs",
-        value: String(metric.total),
-      },
-      {
-        key: "market.metric.featured",
-        fallback: "Featured",
-        value: String(metric.featured),
-        tone: "success",
-      },
-      {
-        key: "market.metric.safe",
-        fallback: "Low Risk",
-        value: String(metric.safe),
-        tone: "success",
-      },
-      {
-        key: "market.metric.high_risk",
-        fallback: "High Risk",
-        value: String(metric.highRisk),
-        tone: metric.highRisk > 0 ? "danger" : "",
-      },
-      {
-        key: "market.metric.extension",
-        fallback: "Extension Pack",
-        value: String(metric.extension),
-      },
-      {
-        key: "market.metric.bot_profile",
-        fallback: "Bot Profile Pack",
-        value: String(metric.botProfile),
-      },
-    ]
+    const viewHelper = marketCatalogViewHelpers()
+    const cards = viewHelper && typeof viewHelper.buildMetricCards === "function"
+      ? viewHelper.buildMetricCards(metric)
+      : [
+        {
+          key: "market.metric.total",
+          fallback: "Total Packs",
+          value: String(metric.total),
+        },
+        {
+          key: "market.metric.featured",
+          fallback: "Featured",
+          value: String(metric.featured),
+          tone: "success",
+        },
+        {
+          key: "market.metric.safe",
+          fallback: "Low Risk",
+          value: String(metric.safe),
+          tone: "success",
+        },
+        {
+          key: "market.metric.high_risk",
+          fallback: "High Risk",
+          value: String(metric.highRisk),
+          tone: metric.highRisk > 0 ? "danger" : "",
+        },
+        {
+          key: "market.metric.extension",
+          fallback: "Extension Pack",
+          value: String(metric.extension),
+        },
+        {
+          key: "market.metric.bot_profile",
+          fallback: "Bot Profile Pack",
+          value: String(metric.botProfile),
+        },
+      ]
     cards.forEach((entry) => {
       const card = document.createElement("div")
       card.className = "market-metric-card"
@@ -2536,11 +2543,16 @@
     const root = byId("marketFeaturedSpotlight")
     if (!root) return
     root.innerHTML = ""
-    const sorted = sortedByTrend(rows)
-    const featuredRows = sorted.filter((item) => Boolean(item && item.featured))
-    const candidate = (featuredOverride && typeof featuredOverride === "object")
-      ? featuredOverride
-      : (featuredRows[0] || sorted[0] || null)
+    const viewHelper = marketCatalogViewHelpers()
+    const candidate = viewHelper && typeof viewHelper.selectFeaturedCandidate === "function"
+      ? viewHelper.selectFeaturedCandidate(rows, featuredOverride, { sortedByTrend })
+      : (() => {
+        const sorted = sortedByTrend(rows)
+        const featuredRows = sorted.filter((item) => Boolean(item && item.featured))
+        return (featuredOverride && typeof featuredOverride === "object")
+          ? featuredOverride
+          : (featuredRows[0] || sorted[0] || null)
+      })()
     if (!candidate) {
       setInsightState(
         "marketFeaturedState",
@@ -2598,9 +2610,12 @@
     const root = byId("marketTrendingRack")
     if (!root) return
     root.innerHTML = ""
-    const ranked = Array.isArray(trendingOverride) && trendingOverride.length
-      ? trendingOverride.slice(0, 6)
-      : sortedByTrend(rows).slice(0, 6)
+    const viewHelper = marketCatalogViewHelpers()
+    const ranked = viewHelper && typeof viewHelper.selectTrendingRows === "function"
+      ? viewHelper.selectTrendingRows(rows, trendingOverride, { sortedByTrend, limit: 6 })
+      : (Array.isArray(trendingOverride) && trendingOverride.length
+        ? trendingOverride.slice(0, 6)
+        : sortedByTrend(rows).slice(0, 6))
     if (!ranked.length) {
       setInsightState(
         "marketTrendingState",
@@ -2678,6 +2693,10 @@
   }
 
   function resolvedUpdatedAt(item) {
+    const viewHelper = marketCatalogViewHelpers()
+    if (viewHelper && typeof viewHelper.resolveUpdatedAt === "function") {
+      return viewHelper.resolveUpdatedAt(item, state.uiLocale || "en-US")
+    }
     const raw = String((item && (item.featured_at || item.published_at)) || "").trim()
     if (!raw) return "-"
     const time = Date.parse(raw)
@@ -2694,6 +2713,10 @@
   }
 
   function engagementValue(item, key) {
+    const viewHelper = marketCatalogViewHelpers()
+    if (viewHelper && typeof viewHelper.engagementValue === "function") {
+      return viewHelper.engagementValue(item, key)
+    }
     if (!item || typeof item !== "object") return 0
     const raw = Number(item.engagement && item.engagement[key] || 0)
     if (!Number.isFinite(raw)) return 0
@@ -2708,6 +2731,13 @@
   }
 
   function cardSignalRows(item) {
+    const viewHelper = marketCatalogViewHelpers()
+    if (viewHelper && typeof viewHelper.buildCardSignalRows === "function") {
+      return viewHelper.buildCardSignalRows(item, {
+        i18nMessage,
+        enumLabel,
+      })
+    }
     const sections = Array.isArray(item && item.sections) ? item.sections.length : 0
     const labels = Array.isArray(item && item.review_labels) ? item.review_labels.length : 0
     const flags = Array.isArray(item && item.warning_flags) ? item.warning_flags.length : 0
@@ -2802,28 +2832,36 @@
 
       const meta = document.createElement("div")
       meta.className = "template-card-meta-line"
-      const metaEntries = [
-        {
-          key: "market.card.updated",
-          fallback: "Updated {value}",
-          value: resolvedUpdatedAt(item),
-        },
-        {
-          key: "market.card.downloads",
-          fallback: "Installs {value}",
-          value: String(engagementValue(item, "installs")),
-        },
-        {
-          key: "market.card.trials",
-          fallback: "Trials {value}",
-          value: String(engagementValue(item, "trial_requests")),
-        },
-        {
-          key: "market.card.score",
-          fallback: "Score {value}",
-          value: String(catalogRankScore(item)),
-        },
-      ]
+      const viewHelper = marketCatalogViewHelpers()
+      const metaEntries = viewHelper && typeof viewHelper.buildCardMetaEntries === "function"
+        ? viewHelper.buildCardMetaEntries(item, {
+          locale: state.uiLocale || "en-US",
+          resolveUpdatedAt: (entry) => resolvedUpdatedAt(entry),
+          engagementValue: (entry, key) => engagementValue(entry, key),
+          catalogRankScore,
+        })
+        : [
+          {
+            key: "market.card.updated",
+            fallback: "Updated {value}",
+            value: resolvedUpdatedAt(item),
+          },
+          {
+            key: "market.card.downloads",
+            fallback: "Installs {value}",
+            value: String(engagementValue(item, "installs")),
+          },
+          {
+            key: "market.card.trials",
+            fallback: "Trials {value}",
+            value: String(engagementValue(item, "trial_requests")),
+          },
+          {
+            key: "market.card.score",
+            fallback: "Score {value}",
+            value: String(catalogRankScore(item)),
+          },
+        ]
       metaEntries.forEach((entry) => {
         const cell = document.createElement("span")
         cell.className = "template-card-meta-item"
