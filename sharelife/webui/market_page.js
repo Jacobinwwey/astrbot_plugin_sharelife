@@ -133,6 +133,10 @@
     return globalScope.SharelifeMarketCards || null
   }
 
+  function marketFacetViewHelpers() {
+    return globalScope.SharelifeMarketFacetView || null
+  }
+
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
   }
@@ -1083,39 +1087,6 @@
     }
   }
 
-  function facetLabel(group, value) {
-    if (value === "unknown") {
-      return i18nMessage("market.filter.value.unknown", "unknown")
-    }
-    if (group.key === "pack_type") {
-      if (value === "bot_profile_pack") {
-        return i18nMessage("option.pack_type.bot_profile_pack", "Bot Profile Pack (Full Bot Setup)")
-      }
-      if (value === "extension_pack") {
-        return i18nMessage("option.pack_type.extension_pack", "Extension Pack (Skills/Personas/MCP/Plugins)")
-      }
-    }
-    if (group.key === "risk_level") {
-      if (value === "high") return i18nMessage("option.risk.high", "high")
-      if (value === "medium") return i18nMessage("option.risk.medium", "medium")
-      if (value === "low") return i18nMessage("option.risk.low", "low")
-    }
-    if (group.key === "featured") {
-      if (value === "true") return i18nMessage("option.featured_status.true", "featured only")
-      if (value === "false") return i18nMessage("option.featured_status.false", "non-featured only")
-    }
-    if (group.key === "compatibility") {
-      return enumLabel("compatibility", value)
-    }
-    if (group.key === "review_label") {
-      return enumLabel("review_label", value)
-    }
-    if (group.key === "warning_flag") {
-      return enumLabel("warning_flag", value)
-    }
-    return value
-  }
-
   function sortedFacetEntries(group, bucket) {
     const entries = Array.from(bucket.entries())
     const order = Array.isArray(group.ordered) ? group.ordered : []
@@ -1177,6 +1148,35 @@
     return bucket
   }
 
+  function buildFacetRenderModel(rows) {
+    const buckets = computeFacetBuckets(rows)
+    const facetView = marketFacetViewHelpers()
+    if (facetView && typeof facetView.buildFacetRenderModel === "function") {
+      return facetView.buildFacetRenderModel({
+        groups: LOCAL_FACET_GROUPS,
+        buckets,
+        facetSelection: state.localFacets,
+        completeFacetBucket: (group, bucket) => completeFacetBucket(group, bucket),
+        sortedFacetEntries: (group, bucket) => sortedFacetEntries(group, bucket),
+        i18nMessage,
+        enumLabel,
+      })
+    }
+    return LOCAL_FACET_GROUPS.map((group) => {
+      const entries = sortedFacetEntries(group, completeFacetBucket(group, buckets[group.key] || new Map()))
+      return {
+        key: group.key,
+        title: i18nMessage(group.titleKey, group.titleFallback),
+        entries: entries.map(([value, count]) => ({
+          value: String(value),
+          count: Number(count || 0),
+          checked: Boolean(state.localFacets[group.key] && state.localFacets[group.key].has(value)),
+          label: String(value),
+        })),
+      }
+    })
+  }
+
   function applyLocalCatalogView(options = {}) {
     const baseRows = Array.isArray(state.catalogRaw) ? state.catalogRaw : []
     const searchedRows = baseRows.filter((item) => rowMatchesSearch(item, state.localSearch))
@@ -1215,44 +1215,53 @@
   function renderFacetFilters(rows) {
     const root = byId("marketFacetFilters")
     if (!root) return
+    const model = buildFacetRenderModel(rows)
+    const facetView = marketFacetViewHelpers()
+    if (facetView && typeof facetView.renderFacetRenderModel === "function") {
+      facetView.renderFacetRenderModel(root, model, onFacetToggle, {
+        document,
+        emptyText: i18nMessage("market.filter.group_empty", "No values"),
+      })
+      return
+    }
+
     root.innerHTML = ""
-    const buckets = computeFacetBuckets(rows)
-    LOCAL_FACET_GROUPS.forEach((group) => {
+    model.forEach((group) => {
       const detail = document.createElement("details")
       detail.className = "market-facet-group"
       detail.open = true
       const summary = document.createElement("summary")
       summary.className = "market-facet-title"
-      summary.textContent = i18nMessage(group.titleKey, group.titleFallback)
+      summary.textContent = String(group.title || "")
       detail.appendChild(summary)
       const list = document.createElement("div")
       list.className = "market-facet-list"
-      const entries = sortedFacetEntries(group, completeFacetBucket(group, buckets[group.key] || new Map()))
+      const entries = Array.isArray(group.entries) ? group.entries : []
       if (!entries.length) {
         const empty = document.createElement("div")
         empty.className = "market-facet-empty"
         empty.textContent = i18nMessage("market.filter.group_empty", "No values")
         list.appendChild(empty)
       } else {
-        entries.forEach(([value, count]) => {
+        entries.forEach((entry) => {
           const row = document.createElement("label")
           row.className = "market-facet-option"
           const checkbox = document.createElement("input")
           checkbox.type = "checkbox"
-          checkbox.checked = Boolean(state.localFacets[group.key] && state.localFacets[group.key].has(value))
-          checkbox.setAttribute("data-market-facet-group", group.key)
-          checkbox.setAttribute("data-market-facet-value", value)
+          checkbox.checked = Boolean(entry.checked)
+          checkbox.setAttribute("data-market-facet-group", String(group.key || ""))
+          checkbox.setAttribute("data-market-facet-value", String(entry.value || ""))
           checkbox.addEventListener("change", () => {
-            onFacetToggle(group.key, value, checkbox.checked)
+            onFacetToggle(String(group.key || ""), String(entry.value || ""), checkbox.checked)
           })
           row.appendChild(checkbox)
           const label = document.createElement("span")
           label.className = "market-facet-option-label"
-          label.textContent = facetLabel(group, value)
+          label.textContent = String(entry.label || entry.value || "")
           row.appendChild(label)
           const badge = document.createElement("span")
           badge.className = "market-facet-option-count"
-          badge.textContent = String(count)
+          badge.textContent = String(Number.isFinite(Number(entry.count)) ? Number(entry.count) : 0)
           row.appendChild(badge)
           list.appendChild(row)
         })

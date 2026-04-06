@@ -3,86 +3,107 @@ date: 2026-04-06
 topic: execution-direction-gap-closure
 ---
 
-# Execution Direction Gap-Closure (v1.1)
+# Execution Direction Gap-Closure (v1.2)
 
 ## Problem Frame
-Current delivery has reached a strong functional baseline: role-separated routes, reviewer lifecycle closure, user/market core workflows, storage backup APIs, and green test coverage (`360` collected tests). The remaining risk is no longer feature absence, but architectural drift and uneven hardening.
+Current delivery is no longer blocked by missing core features. The gap is now between:
+- what the roadmap says should be hard guarantees, and
+- what the running architecture can reliably guarantee under long-term iteration pressure.
 
-The current codebase has two dominant constraints:
-- WebUI orchestration is concentrated in a large runtime file (`sharelife/webui/app.js`) with cross-domain coupling.
-- Some roadmap-critical controls are only partially operationalized (owner-aware authorization consistency, device-granular reviewer sessions, storage encryption enforcement, and automated market publishing flow).
-
-Without a focused v1.1 closure pass, additional features will increase maintenance load faster than capability value.
+Evidence-based baseline from current code:
+- Authorization semantics are mostly deterministic and test-covered (`401` unauthenticated, `403` denied) in WebUI API middleware and endpoint adapters.
+- Admin -> reviewer lifecycle has reached a functional closed loop (invite, redeem, device register/list/revoke/reset, token/session checks, audit trace).
+- Public market publish and backup pipelines exist end-to-end, with sanitization boundaries and CI workflows.
+- The frontend orchestration layer remains concentrated in large runtime files (`sharelife/webui/app.js`, `sharelife/webui/market_page.js`), creating coupling and slowing safe UI iteration.
 
 ```mermaid
 flowchart TB
-    M[Member / Market UI] --> API[WebUI Server + API V1]
-    API --> REV[Reviewer Lifecycle
-invite/device/session]
-    API --> ADM[Admin Governance
-apply/audit/storage]
-    REV --> AUD[Audit Events]
-    ADM --> AUD
-    ADM --> PUB[Public Market Publish Pipeline]
-    PUB --> SNAP[docs/public/market snapshot]
-    PUB --> BAK[Public Market Backup]
-    BAK --> REMOTE[Rclone Remote Cold Backup]
+    U[Member UI / Market UI] --> S[webui_server middleware]
+    S --> A[Role gates 401/403 + owner binding]
+    A --> API[SharelifeApiV1]
+    API --> REV[Reviewer lifecycle services]
+    API --> PM[Public market auto-publish]
+    API --> SB[Storage backup/restore services]
+    PM --> SNAP[docs/public/market snapshot]
+    SNAP --> BAK[public market backup workflow]
+    BAK --> RCLONE[rclone cold backup target]
 ```
 
 ## Requirements
 
-**Governance and Auth Hardening**
-- R1. Enforce owner-aware authorization across all user mutation paths where resources carry `user_id` ownership metadata, with deterministic deny semantics for non-owners.
-- R2. Replace reviewer global single-active session behavior with device-granular session invalidation while preserving admin revoke/reset control.
-- R3. Keep admin/reviewer auth behavior deterministic: invalid/absent configured credentials must never grant access, and role-based capability checks remain server-enforced.
+**Authorization Correctness and Boundary Integrity**
+- R1. Keep owner-aware authorization strict for upload and uploaded-resource management paths (template/profile-pack submit + member-owned submission detail/download surfaces).
+- R2. Keep reviewer sessions device-granular: allow multi-device coexistence, revoke by device, and support admin global reset of reviewer devices/sessions.
+- R3. Keep admin/reviewer auth fail-closed: invalid configured credentials must never degrade the system into permissive/no-auth behavior.
 
-**WebUI Architecture and UX Consistency**
-- R4. Split WebUI orchestration into bounded modules by domain (`member`, `market`, `reviewer`, `admin`, `storage`, `shared auth/i18n`) while preserving existing runtime IDs and capability map contracts.
-- R5. Normalize button/color token usage in member and market surfaces to eliminate readability regressions caused by overlapping style overrides.
-- R6. Keep `/member` and `/market` options parity strict (`install_options`, `upload_options`, `submit_options`), including upload-size guard behavior and i18n parity.
+**Frontend Architecture and UX Stability**
+- R4. Decompose WebUI orchestration into bounded modules so member, market, reviewer, admin, and shared auth/i18n logic can evolve independently without cross-breakage.
+- R5. Normalize visual tokens (button, text, panel, emphasis) so readability and interaction consistency do not regress under theme/locale changes.
+- R6. Keep `/member` and `/market` workflow parity for install/upload/submit options and member-owned management surfaces.
 
-**Market Publish and Distribution Pipeline**
-- R7. Introduce an automated path from approved sanitized artifacts to public market entries/snapshot generation, instead of relying only on manual script invocation.
-- R8. Ensure public-market backup sync remains scheduled and verifiable with auditable artifacts and manifest checksums.
-- R9. Preserve strict boundary: only sanitized market artifacts are publishable/downloadable in public channels; auth secrets and operator materials remain excluded.
+**Market Distribution and Backup Reliability**
+- R7. Keep approved profile-pack -> public market publication automated and auditable, with sanitized-only publishing guards.
+- R8. Keep public market backup scheduled and verifiable with artifact+manifest checksum traces.
+- R9. Keep strict public/private boundary: only sanitized market artifacts are downloadable publicly; auth secrets and private ops materials remain private.
 
-**Storage Cold-Backup Reliability**
-- R10. Enforce `encryption_required` as an effective runtime gate when remote sync is enabled; non-compliant remote sync attempts must fail predictably.
-- R11. Add concrete retention execution for remote artifacts (or an explicit managed policy adapter), not policy fields alone.
-- R12. Keep restore lifecycle deterministic (`prepare -> commit|cancel`) with explicit validation evidence persisted and auditable.
+**Storage Cold-Backup Correctness**
+- R10. Enforce remote encryption gate when remote sync is enabled; non-compliant remote sync must fail predictably.
+- R11. Keep retention behavior effective (local snapshot pruning + remote retention execution), not policy-only.
+- R12. Keep restore lifecycle deterministic (`prepare -> commit|cancel`) with persisted validation evidence.
 
-**Docs and CI Contract Alignment**
-- R13. Keep public docs interface-focused and private docs runbook-focused, with CI checks preventing sensitive SOP leakage into public surfaces.
-- R14. Keep tri-lingual API and roadmap docs synchronized with actual route/method/error behavior for reviewer lifecycle and auth badges.
+**Docs and Contract Synchronization**
+- R13. Keep public docs interface-focused and private docs SOP-focused, with CI guardrails against private-surface leakage.
+- R14. Keep tri-lingual docs and API/auth badge surfaces aligned with actual route/method/error behavior.
+
+## Progress vs Requirements (Evidence Matrix)
+
+| Requirement | Status | Evidence (Code/Test/Docs) | Gap / Risk |
+| --- | --- | --- | --- |
+| R1 | Completed (scoped) | `sharelife/interfaces/webui_server.py` (`_request_member_user_id`), `tests/interfaces/test_webui_server.py` owner-scope cases, `tests/interfaces/test_web_api_v1.py` owner-scoped submission tests | Scope is intentionally limited to upload/uploaded-resource management; non-upload endpoints may still accept cross-user targets when authenticated member mode is used. |
+| R2 | Completed | `sharelife/interfaces/webui_server.py` (`_session_key`, `_issue_token`, reviewer device revoke/reset paths), `sharelife/application/services_reviewer_auth.py`, reviewer auth flow tests in `tests/interfaces/test_webui_server.py` | Reviewer device key material is state-store plaintext today (acceptable for local fallback, but not ideal for stronger threat models). |
+| R3 | Completed | Admin password normalization in `sharelife/interfaces/webui_server.py` (`min_length=12`), invalid role fail-closed path, `tests/interfaces/test_webui_server.py` invalid admin password tests | Auth relies on runtime secret distribution quality (ops discipline still required). |
+| R4 | Partial (advancing) | Shared runtime helpers (`sharelife/webui/runtime_helpers.js`), market filter helpers (`sharelife/webui/market_filters.js`), and facet view helper (`sharelife/webui/market_facet_view.js`) now back `market_page.js`; coverage in `tests/webui/test_runtime_helpers.js`, `tests/webui/test_market_filters.js`, `tests/webui/test_market_facet_view.js`, and meta wiring tests | Primary orchestration files are still large (`sharelife/webui/app.js`, `sharelife/webui/market_page.js`), so further extraction remains needed for lower coupling. |
+| R5 | Partial | Shared tokens in `sharelife/webui/style.css`, multiple UI iterations landed | No contrast/readability automated guard; regressions still possible in specific cards/panels. |
+| R6 | Completed (functional parity) | Member+market option surfaces and APIs in `sharelife/interfaces/webui_server.py`, tests in WebUI E2E and interface suites | UX consistency may still drift without token/layout contract tests. |
+| R7 | Completed | Auto-publish on approved profile-pack in `sharelife/interfaces/api_v1.py` (`_auto_publish_profile_pack_submission`), runtime flags wired in `scripts/run_sharelife_webui_standalone.py` | Runtime and CI publish paths both exist; policy on enabling auto-publish per env must remain explicit. |
+| R8 | Completed | Workflow `.github/workflows/public-market-backup.yml`, backup tooling in `scripts/backup_public_market.py`, `sharelife/infrastructure/public_market_backup.py` | Remote target health and quota failures are external; need routine operator drills. |
+| R9 | Completed | Sanitization checks in `scripts/publish_public_market_pack.py`, private docs API gates in `sharelife/interfaces/webui_server.py`, docs separation tests | Depends on strict review discipline before publish. |
+| R10 | Completed | Encryption gate in `sharelife/application/services_storage_backup.py` now probes `rclone backend features` before fallback heuristics; tested in `tests/application/test_storage_backup_service.py` | Fallback heuristic still exists for constrained environments where backend probe is unavailable; operators should keep crypt remotes explicitly named/configured. |
+| R11 | Completed | Local retention (`_apply_local_retention`) + remote retention (`_apply_remote_retention`) in `sharelife/application/services_storage_backup.py` | Remote retention command failure surfaces correctly, but can still fail due to remote/provider runtime behavior. |
+| R12 | Completed | Restore lifecycle methods (`restore_prepare`, `restore_commit`, `restore_cancel`) in `sharelife/application/services_storage_backup.py` | Commit stage is metadata-driven (`manual_followup_required`), not a full automated restore executor. |
+| R13 | Completed | Public/private docs boundary assertions in `tests/meta/test_docs_command_surface.py`, `.gitignore` excludes `docs-private/` | Requires continued CI coverage as docs tree evolves. |
+| R14 | Partial/Stable | Tri-lingual docs exist and are CI-checked across multiple meta tests | Ongoing churn risk: contract drift can reappear without targeted route-doc generation discipline. |
 
 ## Success Criteria
-- Full test suite remains green, including WebUI E2E and reviewer lifecycle regression tests.
-- Owner-aware enforcement tests exist for representative user mutation paths and fail correctly for non-owners.
-- Reviewer multi-device sessions can coexist without unintended cross-device logout, while device revoke immediately invalidates only affected sessions.
-- Public market publish flow can be executed end-to-end from approved sanitized artifact to downloadable catalog entry with checksum trace.
-- Remote backup rejects encryption-noncompliant runs when `encryption_required=true` and records explicit failure reason.
-- Public/private docs separation and tri-lingual route coverage pass CI checks.
+- Full test suite remains green with auth, owner-scope, reviewer lifecycle, and WebUI E2E coverage.
+- No unauthorized fallback appears when configured credentials are invalid or missing.
+- Reviewer multi-device sessions work concurrently; device revoke/admin reset semantics remain deterministic.
+- Public market publish and backup pipelines are continuously reproducible with artifact traces.
+- Docs privacy boundary remains enforced by CI and no private SOP appears in public docs surfaces.
 
 ## Scope Boundaries
-- No introduction of a new runtime `Creator` login role.
-- No immediate migration to external IdP (`OIDC/OAuth2`) in this closure pass.
-- No full frontend framework rewrite; runtime IDs and existing test anchors remain stable.
-- No exposure of private operator runbooks in public documentation.
+- No introduction of a standalone runtime `Creator` role.
+- No immediate migration to external IdP (`OIDC` / `OAuth2`) in this closure pass.
+- No full frontend framework rewrite in this pass (preserve current runtime ID/test anchors).
+- No publication of private operator SOP in public docs.
 
 ## Key Decisions
-- Decision: Treat v1.1 as a hardening and decomposition release, not a feature-expansion release.
-- Rationale: Current risk profile is dominated by coupling and policy drift, not missing core endpoints.
+- Decision: Treat next phase as architecture-hardening and drift-control, not net-new feature expansion.
+  Rationale: Core functional surfaces exist; current risk is coupling and policy drift.
 
-- Decision: Prioritize owner-aware and reviewer session semantics before new role/features.
-- Rationale: These directly affect authorization correctness and blast radius.
+- Decision: Keep owner-aware policy limited to upload/uploaded-resource management for now.
+  Rationale: Matches current product boundary while avoiding accidental role/model explosion.
 
-- Decision: Keep market publish and storage backup as auditable pipelines with deterministic artifacts.
-- Rationale: Operational trust depends on reproducibility and post-failure diagnosability.
+- Decision: Prioritize WebUI decomposition and visual token enforcement next.
+  Rationale: This is now the highest regression surface for daily iteration.
+
+- Decision: Keep automated public-market publish and backup as auditable pipelines with explicit sanitization boundaries.
+  Rationale: Distribution trust is now an operational requirement, not an optional convenience.
 
 ## Dependencies / Assumptions
-- Existing route/capability contracts in `sharelife/interfaces/webui_server.py` remain backward-compatible during refactor.
-- Existing scripts and workflows (`scripts/build_market_snapshot.py`, `scripts/publish_public_market_pack.py`, `.github/workflows/public-market-backup.yml`) are the baseline automation surfaces.
-- Private docs stay outside public docs publishing roots.
+- Runtime contracts in `sharelife/interfaces/webui_server.py` and existing DOM IDs remain stable during refactor.
+- CI remains the mandatory gate for auth semantics, docs boundary checks, and API surface expectations.
+- Private runbooks remain outside public docs tree and are accessed only through authenticated private channels.
 
 ## Outstanding Questions
 
@@ -90,10 +111,10 @@ apply/audit/storage]
 - None.
 
 ### Deferred to Planning
-- [Affects R2][Technical] Define session storage model for device-granular reviewer tokens (in-memory map extension vs state-store persistence).
-- [Affects R7][Technical] Decide whether publish automation is triggered inside admin decision flow or via post-approval job queue.
-- [Affects R10][Needs research] Define enforceable crypt-remote detection strategy for `rclone` targets under current deployment constraints.
-- [Affects R11][Technical] Choose remote retention implementation mode (native remote prune adapter vs manifest-index lifecycle manager).
+- [Affects R4][Technical] Define module cut-lines inside `sharelife/webui/app.js` and `sharelife/webui/market_page.js` with a no-ID-break migration sequence.
+- [Affects R5][Technical] Decide how to enforce contrast/readability regressions (token linting, screenshot diff baselines, or targeted DOM color assertions).
+- [Affects R10][Needs research] Replace encrypted-remote heuristic with stronger runtime validation for `rclone` crypt backend capability.
+- [Affects R14][Technical] Decide whether to generate auth badge docs from route metadata instead of manual sync.
 
 ## Next Steps
 -> /prompts:ce-plan for structured implementation planning
