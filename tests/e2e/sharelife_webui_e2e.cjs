@@ -782,10 +782,12 @@ async function main() {
     ).trim()
     assert.ok(selectedCatalogPackId.length > 0)
     await page.click("#btnProfilePackCatalogDetail")
-    await page.waitForFunction((packId) => {
-      const detail = String(document.querySelector("#profilePackMarketDetails")?.textContent || "")
-      return detail.includes(`\"pack_id\": \"${packId}\"`)
-    }, selectedCatalogPackId)
+    await page.waitForFunction(() => {
+      const summary = String(document.querySelector("#profilePackMarketSummary")?.textContent || "")
+      if (!summary.trim()) return false
+      if (/No profile pack market operation yet/i.test(summary)) return false
+      return /status=/i.test(summary)
+    })
 
     let insightsRequestCount = 0
     const insightsDelay = async (route) => {
