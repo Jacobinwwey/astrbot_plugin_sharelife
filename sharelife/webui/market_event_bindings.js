@@ -28,6 +28,13 @@
     const bindUploadDropZone = typeof options.bindUploadDropZone === "function" ? options.bindUploadDropZone : noop
     const sortFallback = String(options.sortFallback || "trending")
     const doc = options.document || globalScope.document
+    const pickNode = (...ids) => {
+      for (const id of ids) {
+        const node = byId(id)
+        if (node) return node
+      }
+      return null
+    }
 
     const localeNode = byId("marketUiLocale")
     if (localeNode) {
@@ -128,7 +135,10 @@
       })
     }
 
-    const refreshInstallationsBtn = byId("btnMarketRefreshInstallations")
+    const refreshInstallationsBtn = pickNode(
+      "btnMarketDetailRefreshInstallations",
+      "btnMarketRefreshInstallations"
+    )
     if (refreshInstallationsBtn) {
       refreshInstallationsBtn.addEventListener("click", () => {
         void loadMarketInstallations({ refresh: true })
@@ -156,28 +166,31 @@
       })
     }
 
-    const templateTrialBtn = byId("btnMarketTemplateTrial")
+    const templateTrialBtn = pickNode("btnMarketDetailTrial", "btnMarketTemplateTrial")
     if (templateTrialBtn) {
       templateTrialBtn.addEventListener("click", () => {
         void runMarketTemplateTrial()
       })
     }
 
-    const templateInstallBtn = byId("btnMarketTemplateInstall")
+    const templateInstallBtn = pickNode("btnMarketDetailInstall", "btnMarketTemplateInstall")
     if (templateInstallBtn) {
       templateInstallBtn.addEventListener("click", () => {
         void runMarketTemplateInstall()
       })
     }
 
-    const templateSubmitBtn = byId("btnMarketTemplateSubmit")
+    const templateSubmitBtn = pickNode("btnMarketDetailSubmitTemplate", "btnMarketTemplateSubmit")
     if (templateSubmitBtn) {
       templateSubmitBtn.addEventListener("click", () => {
         void runMarketTemplateSubmit()
       })
     }
 
-    const profilePackSubmitBtn = byId("btnMarketProfilePackSubmit")
+    const profilePackSubmitBtn = pickNode(
+      "btnMarketDetailSubmitProfilePack",
+      "btnMarketProfilePackSubmit"
+    )
     if (profilePackSubmitBtn) {
       profilePackSubmitBtn.addEventListener("click", () => {
         void runMarketProfilePackSubmit()
