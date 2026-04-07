@@ -2195,7 +2195,6 @@ class SharelifeWebUIServer:
             normalized_user_id, denied = self._request_member_user_id(
                 request,
                 payload=payload,
-                enforce_owner_binding=False,
             )
             if denied is not None or normalized_user_id is None:
                 return denied
@@ -2217,7 +2216,6 @@ class SharelifeWebUIServer:
             normalized_user_id, denied = self._request_member_user_id(
                 request,
                 query_user_id=user_id,
-                enforce_owner_binding=False,
             )
             if denied is not None or normalized_user_id is None:
                 return denied
@@ -2238,7 +2236,6 @@ class SharelifeWebUIServer:
             normalized_user_id, denied = self._request_member_user_id(
                 request,
                 query_user_id=user_id,
-                enforce_owner_binding=False,
             )
             if denied is not None or normalized_user_id is None:
                 return denied
@@ -2254,7 +2251,6 @@ class SharelifeWebUIServer:
             normalized_user_id, denied = self._request_member_user_id(
                 request,
                 payload=payload,
-                enforce_owner_binding=False,
             )
             if denied is not None or normalized_user_id is None:
                 return denied
@@ -2359,7 +2355,6 @@ class SharelifeWebUIServer:
             normalized_user_id, denied = self._request_member_user_id(
                 request,
                 payload=payload,
-                enforce_owner_binding=False,
             )
             if denied is not None or normalized_user_id is None:
                 return denied

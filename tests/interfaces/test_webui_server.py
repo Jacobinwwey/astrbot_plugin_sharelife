@@ -2177,7 +2177,7 @@ def test_webui_role_tokens_gate_admin_routes_and_override_payload_role(tmp_path)
     assert approved.json()["data"]["status"] == "approved"
 
 
-def test_webui_member_owner_binding_applies_to_upload_and_submission_management_surfaces(tmp_path):
+def test_webui_member_owner_binding_applies_to_upload_submission_and_installation_surfaces(tmp_path):
     server = build_server(
         tmp_path,
         config={
@@ -2218,6 +2218,70 @@ def test_webui_member_owner_binding_applies_to_upload_and_submission_management_
     )
     assert cross_profile_pack_submit.status_code == 403
     assert cross_profile_pack_submit.json()["error"]["code"] == "permission_denied"
+
+    cross_trial = client.post(
+        "/api/trial",
+        json={"user_id": "owner-u2", "session_id": "s-owner-u2", "template_id": "community/basic"},
+        headers=member_headers,
+    )
+    assert cross_trial.status_code == 403
+    assert cross_trial.json()["error"]["code"] == "permission_denied"
+
+    own_trial = client.post(
+        "/api/trial",
+        json={"user_id": "owner-u1", "session_id": "s-owner-u1", "template_id": "community/basic"},
+        headers=member_headers,
+    )
+    assert own_trial.status_code == 200
+    assert own_trial.json()["data"]["status"] == "trial_started"
+
+    cross_trial_status = client.get(
+        "/api/trial/status",
+        params={"user_id": "owner-u2", "session_id": "s-owner-u2", "template_id": "community/basic"},
+        headers=member_headers,
+    )
+    assert cross_trial_status.status_code == 403
+    assert cross_trial_status.json()["error"]["code"] == "permission_denied"
+
+    own_trial_status = client.get(
+        "/api/trial/status",
+        params={"user_id": "owner-u1", "session_id": "s-owner-u1", "template_id": "community/basic"},
+        headers=member_headers,
+    )
+    assert own_trial_status.status_code == 200
+    assert own_trial_status.json()["data"]["status"] == "active"
+
+    cross_install = client.post(
+        "/api/templates/install",
+        json={"user_id": "owner-u2", "session_id": "s-owner-u2", "template_id": "community/basic"},
+        headers=member_headers,
+    )
+    assert cross_install.status_code == 403
+    assert cross_install.json()["error"]["code"] == "permission_denied"
+
+    own_installations = client.get(
+        "/api/member/installations",
+        params={"user_id": "owner-u1", "limit": 10},
+        headers=member_headers,
+    )
+    assert own_installations.status_code == 200
+    assert own_installations.json()["data"]["user_id"] == "owner-u1"
+
+    cross_installations = client.get(
+        "/api/member/installations",
+        params={"user_id": "owner-u2", "limit": 10},
+        headers=member_headers,
+    )
+    assert cross_installations.status_code == 403
+    assert cross_installations.json()["error"]["code"] == "permission_denied"
+
+    cross_refresh_installations = client.post(
+        "/api/member/installations/refresh",
+        json={"user_id": "owner-u2", "limit": 10},
+        headers=member_headers,
+    )
+    assert cross_refresh_installations.status_code == 403
+    assert cross_refresh_installations.json()["error"]["code"] == "permission_denied"
 
     own_submit = client.post(
         "/api/templates/submit",
@@ -2269,7 +2333,7 @@ def test_webui_member_owner_binding_applies_to_upload_and_submission_management_
     assert cross_detail.status_code == 403
     assert cross_detail.json()["error"]["code"] == "permission_denied"
 
-    # non-upload surfaces keep existing behavior and do not require owner binding
+    # preference surfaces keep existing behavior and do not require owner binding
     preferences = client.get(
         "/api/preferences",
         params={"user_id": "owner-u2"},
