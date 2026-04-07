@@ -1565,7 +1565,13 @@
         role: state.authRole || i18nMessage("market.role.not_logged_in", "not logged in"),
       },
     )
-    byId("marketAuthPanel").classList.toggle("hidden", !state.authRequired)
+    const authPanel = byId("marketAuthPanel")
+    if (authPanel) {
+      const shouldShowAuthPanel = state.authRequired
+      authPanel.classList.toggle("hidden", !shouldShowAuthPanel)
+      authPanel.toggleAttribute("hidden", !shouldShowAuthPanel)
+      authPanel.setAttribute("aria-hidden", shouldShowAuthPanel ? "false" : "true")
+    }
     const authUserIdNode = byId("marketAuthUserId")
     if (authUserIdNode) {
       authUserIdNode.value = String(state.memberUserId || "webui-user").trim() || "webui-user"

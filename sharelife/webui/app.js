@@ -1194,11 +1194,14 @@ function updateAuthUi() {
     role: state.authRole || i18nMessage("auth.role.not_logged_in", "not logged in"),
   })
   if (authPanel) {
+    const shouldShowAuthPanel = state.pageMode !== "reviewer" && state.authRequired
     if (state.pageMode === "reviewer") {
       authPanel.classList.add("hidden")
     } else {
-      authPanel.classList.toggle("hidden", !state.authRequired)
+      authPanel.classList.toggle("hidden", !shouldShowAuthPanel)
     }
+    authPanel.toggleAttribute("hidden", !shouldShowAuthPanel)
+    authPanel.setAttribute("aria-hidden", shouldShowAuthPanel ? "false" : "true")
   }
   if (authHelp) {
     if (state.pageMode === "reviewer") {
