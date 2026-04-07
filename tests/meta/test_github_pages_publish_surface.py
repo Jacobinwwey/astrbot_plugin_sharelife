@@ -51,11 +51,11 @@ def test_github_pages_workflow_push_paths_include_market_snapshot_sources():
     assert "scripts/build_market_snapshot.py" in paths
 
 
-def test_localized_docs_point_to_github_pages_publish_guides():
+def test_localized_public_docs_no_longer_expose_github_pages_publish_guides():
     config_text = (REPO_ROOT / "docs" / ".vitepress" / "config.ts").read_text(encoding="utf-8")
-    assert "/zh/how-to/github-pages-publish" in config_text
-    assert "/en/how-to/github-pages-publish" in config_text
-    assert "/ja/how-to/github-pages-publish" in config_text
+    assert "/zh/how-to/github-pages-publish" not in config_text
+    assert "/en/how-to/github-pages-publish" not in config_text
+    assert "/ja/how-to/github-pages-publish" not in config_text
 
 
 def test_readme_names_the_github_pages_url():
@@ -64,14 +64,22 @@ def test_readme_names_the_github_pages_url():
     assert "EdgeOne Fallback Publishing" not in text
 
 
-def test_public_publish_docs_no_longer_reference_edgeone():
-    localized_pages = [
+def test_github_pages_publish_guides_are_private_only():
+    public_pages = [
         REPO_ROOT / "docs" / "en" / "how-to" / "github-pages-publish.md",
         REPO_ROOT / "docs" / "zh" / "how-to" / "github-pages-publish.md",
         REPO_ROOT / "docs" / "ja" / "how-to" / "github-pages-publish.md",
     ]
+    private_pages = [
+        REPO_ROOT / "docs" / "en" / "private" / "github-pages-publish.md",
+        REPO_ROOT / "docs" / "zh" / "private" / "github-pages-publish.md",
+        REPO_ROOT / "docs" / "ja" / "private" / "github-pages-publish.md",
+    ]
 
-    for page_path in localized_pages:
-        text = page_path.read_text(encoding="utf-8")
-        assert "EdgeOne" not in text
-        assert "edgeone" not in text
+    for page_path in public_pages:
+        assert not page_path.exists()
+
+    for page_path in private_pages:
+        if page_path.exists():
+            text = page_path.read_text(encoding="utf-8")
+            assert "edgeone" not in text.lower()

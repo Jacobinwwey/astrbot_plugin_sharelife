@@ -26,6 +26,9 @@
 2. Market submission storage now persists `upload_options` in SQLite (including auto-migration for older tables missing `upload_options_json`).
 3. WebUI status vocabulary was aligned to the execution contract by adding localized labels for `queued/running/succeeded/failed/cancelled/stale`, reducing raw status leakage in member/reviewer/admin surfaces.
 4. `profile-pack` submit flow now also supports behavioral `replace_existing`: previous pending submissions (same user + same pack) are retired to `replaced`, with audit and response fields (`replaced_submission_ids`, `replaced_submission_count`).
+5. Template submit now supports idempotent replay with `upload_options.idempotency_key` (or `Idempotency-Key` header at WebUI route level): retried requests return the existing submission instead of duplicating records.
+6. Idempotency scope conflicts are now rejected deterministically (`idempotency_key_conflict`) when the same key is reused for a different template/version scope.
+7. `profile-pack` submit now has the same idempotency model (`submit_options.idempotency_key` + header pass-through) with replay and conflict audit events.
 
 ## 2. Cross-Plan Decisions
 

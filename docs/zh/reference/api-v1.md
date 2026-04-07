@@ -144,10 +144,11 @@ Phase 3 新增 `sharelife/interfaces/web_api_v1.py` 与 `sharelife/interfaces/we
 14. `GET /api/profile-pack/catalog/detail?pack_id=...`
 15. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
 16. `GET /api/profile-pack/catalog/insights`
-17. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
-18. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
-19. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
-20. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
+17. `POST /api/profile-pack/submit`
+18. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
+19. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
+20. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
+21. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
 
 审核员侧：
 
@@ -236,6 +237,7 @@ Phase 3 新增 `sharelife/interfaces/web_api_v1.py` 与 `sharelife/interfaces/we
 | `GET /api/profile-pack/catalog/compare` | `public`（只读市场能力） | 不适用 |
 | `GET /api/profile-pack/catalog/insights` | `public`（只读市场能力） | 不适用 |
 | `POST /api/templates/submit` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 提交他人 `user_id` 时 `403 permission_denied` |
+| `POST /api/profile-pack/submit` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 提交他人 `user_id` 时 `403 permission_denied` |
 | `GET /api/member/submissions` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询他人 `user_id` 时 `403 permission_denied` |
 | `GET /api/member/submissions/detail` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询非本人 `submission_id` 时 `403 permission_denied` |
 | `GET /api/member/profile-pack/submissions` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询他人 `user_id` 时 `403 permission_denied` |
@@ -272,3 +274,6 @@ Phase 3 新增 `sharelife/interfaces/web_api_v1.py` 与 `sharelife/interfaces/we
 18. 即便开启鉴权，市场目录只读接口仍保持公开（`GET /api/templates*`、`GET /api/profile-pack/catalog*`），所有写接口继续要求 token。
 19. 当 `webui.public_market.auto_publish_profile_pack_approve=true` 时，审核通过 profile-pack 提交后，决策响应会附带 `public_market_publish` 字段，返回发布状态与生成产物路径。
 20. 公共市场自动发布相关运行时配置键：`webui.public_market.auto_publish_profile_pack_approve`、`webui.public_market.root`、`webui.public_market.rebuild_snapshot_on_publish`。
+21. `POST /api/templates/submit` 现支持 `upload_options.idempotency_key` 或 `Idempotency-Key` 请求头的幂等重放；同一范围重试返回已有 submission。
+22. `POST /api/profile-pack/submit` 同样支持 `submit_options.idempotency_key` 或 `Idempotency-Key` 请求头幂等重放。
+23. 当幂等键跨不同提交流程范围复用时，会返回 `idempotency_key_conflict`，用于阻断误重放。

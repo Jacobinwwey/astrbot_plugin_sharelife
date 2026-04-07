@@ -35,6 +35,7 @@
 - reviewer 招待、端末、セッションのバックエンド基礎実装。
 - reviewer/device/action 集計監査。
 - 公開 docs と私有 docs の分離。operator/auth レベルの runbook は公開サイトから外した。
+- template submit / profile-pack submit の双方に、冪等リプレイと競合拒否（`idempotency_key_conflict`）を実装し、再送時の重複書き込みリスクを低減。
 
 ### 3.2 残るギャップ
 - owner-aware は「アップロード + アップロード済みリソース管理」経路で適用済みです。
@@ -48,6 +49,8 @@
   - reviewer アカウント/デバイス可視化
   - デバイス失効/リセットと監査トレース
   - 公開 docs はインターフェース情報に限定し、運用 SOP は私有文書で管理
+- member 側のアイデンティティ永続化はまだ config-first です。
+  - `users/credentials/sessions` の独立ストア化は次段階で実施します。
 
 ## 4. 公開向け実行方針
 

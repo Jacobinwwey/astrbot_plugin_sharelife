@@ -26,6 +26,9 @@
 2. SQLite の market submission 永続化で `upload_options` を保持し、`upload_options_json` 列がない旧テーブルは自動マイグレーションされます。
 3. 実行契約に合わせて WebUI の状態語彙を三言語で補完し、`queued/running/succeeded/failed/cancelled/stale` を追加しました。member/reviewer/admin 画面での生ステータス表示を減らします。
 4. `profile-pack` の submit フローにも `replace_existing` を実動作で追加しました。同一 user + 同一 pack の既存 `pending` submission は `replaced` に退役され、`replaced_submission_ids` / `replaced_submission_count` と監査イベントが出力されます。
+5. template submit には `upload_options.idempotency_key`（および WebUI ルートの `Idempotency-Key` ヘッダー透過）による冪等リプレイを追加し、再送で重複 submission を作らないようにしました。
+6. 同一 idempotency key を別 template/version スコープで再利用した場合は、`idempotency_key_conflict` で決定論的に拒否します。
+7. `profile-pack` submit も同じ冪等モデル（`submit_options.idempotency_key` + ヘッダー透過）へ拡張し、リプレイ/競合の監査イベントを追加しました。
 
 ## 2. 交差分析での決定
 

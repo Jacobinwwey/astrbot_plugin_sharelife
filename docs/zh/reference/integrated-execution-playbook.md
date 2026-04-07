@@ -26,6 +26,9 @@
 2. 市场提交通道在 SQLite 下已持久化 `upload_options`，并补齐了旧表缺少 `upload_options_json` 字段时的自动迁移。
 3. WebUI 状态词汇已按执行契约补齐并三语化：新增 `queued/running/succeeded/failed/cancelled/stale`，减少 member/reviewer/admin 面板中原始状态值直出。
 4. `profile-pack` 提交流程也已支持行为化 `replace_existing`：同一用户同一 pack 的旧 `pending` 提交会被回收为 `replaced`，并返回 `replaced_submission_ids` 与 `replaced_submission_count`，同时写入审计事件。
+5. 模板提交流程新增幂等重放能力：支持 `upload_options.idempotency_key`（以及 WebUI 路由层 `Idempotency-Key` header 透传），重试不再重复写入 submission。
+6. 同一幂等键跨模板/版本范围复用会触发确定性冲突拒绝（`idempotency_key_conflict`），避免错误重放污染。
+7. `profile-pack` 提交也已接入同样的幂等模型（`submit_options.idempotency_key` + header 透传），并补齐重放/冲突审计事件。
 
 ## 2. 两大方案交叉决策
 

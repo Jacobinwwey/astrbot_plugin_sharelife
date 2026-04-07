@@ -35,6 +35,7 @@
 - reviewer 邀请、设备、会话的后端基础能力。
 - reviewer/device/action 聚合审计摘要。
 - 公开文档与私有文档已拆分，operator/auth 级 runbook 不再纳入公开站点。
+- 模板与 profile-pack 提交流程已具备幂等重放与冲突拒绝（`idempotency_key_conflict`），降低网络重试导致重复写入的风险。
 
 ### 3.2 仍待收敛
 - owner-aware 已在“上传 + 已上传资源管理”路径落地。
@@ -48,6 +49,8 @@
   - reviewer 账户/设备可视化
   - 设备吊销与重置、审计追踪
   - 公开文档仅保留接口层信息，运维 SOP 继续留在私有文档
+- member 身份持久化模型仍待独立化：
+  - `users/credentials/sessions` 结构化落库仍是下一阶段目标。
 
 ## 4. 公开执行方向
 

@@ -50,7 +50,6 @@ export default defineConfig({
             { text: '初始化向导与配置模板', link: '/zh/how-to/init-wizard-and-config-template' },
             { text: 'Bot Profile Pack 操作', link: '/zh/how-to/bot-profile-pack' },
             { text: '独立 WebUI 使用', link: '/zh/how-to/webui-page' },
-            { text: 'GitHub Pages 发布', link: '/zh/how-to/github-pages-publish' },
             { text: '市场只读公开页', link: '/zh/how-to/market-public-hub' },
             { text: '市场目录原型页', link: '/zh/how-to/market-catalog-prototype' },
             { text: '为什么社区优先', link: '/zh/explanation/community-first' }
@@ -80,7 +79,6 @@ export default defineConfig({
             { text: 'Init Wizard + Config Template', link: '/en/how-to/init-wizard-and-config-template' },
             { text: 'Bot Profile Pack Operations', link: '/en/how-to/bot-profile-pack' },
             { text: 'Standalone WebUI', link: '/en/how-to/webui-page' },
-            { text: 'GitHub Pages Publish', link: '/en/how-to/github-pages-publish' },
             { text: 'Public Market Read-Only Hub', link: '/en/how-to/market-public-hub' },
             { text: 'Market Catalog Prototype', link: '/en/how-to/market-catalog-prototype' },
             { text: 'Why Community-First', link: '/en/explanation/community-first' }
@@ -110,7 +108,6 @@ export default defineConfig({
             { text: '初期化ウィザードと設定テンプレート', link: '/ja/how-to/init-wizard-and-config-template' },
             { text: 'Bot Profile Pack 運用', link: '/ja/how-to/bot-profile-pack' },
             { text: 'スタンドアロン WebUI', link: '/ja/how-to/webui-page' },
-            { text: 'GitHub Pages 公開', link: '/ja/how-to/github-pages-publish' },
             { text: '公開マーケット（読み取り専用）', link: '/ja/how-to/market-public-hub' },
             { text: 'マーケットカタログ試作ページ', link: '/ja/how-to/market-catalog-prototype' },
             { text: 'コミュニティ優先の理由', link: '/ja/explanation/community-first' }

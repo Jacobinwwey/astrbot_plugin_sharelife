@@ -133,10 +133,11 @@
 14. `GET /api/profile-pack/catalog/detail?pack_id=...`
 15. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
 16. `GET /api/profile-pack/catalog/insights`
-17. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
-18. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
-19. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
-20. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
+17. `POST /api/profile-pack/submit`
+18. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
+19. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
+20. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
+21. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
 
 Reviewer 側:
 
@@ -225,6 +226,7 @@ Reviewer 側:
 | `GET /api/profile-pack/catalog/compare` | `public`（読み取り専用マーケット面） | 該当なし |
 | `GET /api/profile-pack/catalog/insights` | `public`（読み取り専用マーケット面） | 該当なし |
 | `POST /api/templates/submit` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
+| `POST /api/profile-pack/submit` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
 | `GET /api/member/submissions` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
 | `GET /api/member/submissions/detail` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member が他者 `submission_id` を参照すると `403 permission_denied` |
 | `GET /api/member/profile-pack/submissions` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
@@ -255,3 +257,6 @@ Reviewer 側:
 12. 認証有効時でも、マーケット読み取り API（`GET /api/templates*`、`GET /api/profile-pack/catalog*`）は公開し、更新系 API は引き続き token 必須です。
 13. `webui.public_market.auto_publish_profile_pack_approve=true` の場合、profile-pack 審査承認レスポンスに `public_market_publish` が追加され、公開化ステータスと生成物パスが返ります。
 14. 公開マーケット自動公開の実行設定キーは `webui.public_market.auto_publish_profile_pack_approve`、`webui.public_market.root`、`webui.public_market.rebuild_snapshot_on_publish` です。
+15. `POST /api/templates/submit` は `upload_options.idempotency_key` または `Idempotency-Key` ヘッダーで冪等リプレイに対応しました。同一スコープの再送は既存 submission を返します。
+16. `POST /api/profile-pack/submit` も `submit_options.idempotency_key` または `Idempotency-Key` ヘッダーで同じ冪等リプレイに対応します。
+17. 異なる投稿スコープで同一 idempotency key を再利用した場合は `idempotency_key_conflict` を返し、誤リプレイを防止します。

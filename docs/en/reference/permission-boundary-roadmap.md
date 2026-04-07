@@ -35,6 +35,7 @@ Notes:
 - Reviewer invite/device/session primitives exist in the backend.
 - Aggregated audit summary exists for reviewer/device/action visibility.
 - Public docs and private docs have been separated: detailed operator/auth runbooks are no longer part of the public site.
+- Upload pipelines now have idempotent replay + conflict guard (`idempotency_key_conflict`) for both template submit and profile-pack submit, reducing duplicate-write risk during retries.
 
 ### 3.2 Remaining gaps
 - Owner-aware policy has been enforced for upload and uploaded-resource management surfaces.
@@ -48,6 +49,8 @@ Notes:
   - reviewer account/device visibility
   - device revoke/reset and audit trace
   - public docs remain interface-level only; operator SOP stays private
+- Identity persistence is still config-first on member side.
+  - A dedicated identity store (`users/credentials/sessions`) is still a next-step target.
 
 ## 4. Public-Facing Execution Direction
 

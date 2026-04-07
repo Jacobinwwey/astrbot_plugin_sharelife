@@ -146,12 +146,13 @@ User routes:
 14. `GET /api/profile-pack/catalog/detail?pack_id=...`
 15. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
 16. `GET /api/profile-pack/catalog/insights`
-17. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
-18. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
-19. `GET /api/member/submissions/package/download?user_id=...&submission_id=...`
-20. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
-21. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
-22. `GET /api/member/profile-pack/submissions/export/download?user_id=...&submission_id=...`
+17. `POST /api/profile-pack/submit`
+18. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
+19. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
+20. `GET /api/member/submissions/package/download?user_id=...&submission_id=...`
+21. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
+22. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
+23. `GET /api/member/profile-pack/submissions/export/download?user_id=...&submission_id=...`
 
 Reviewer routes:
 
@@ -240,6 +241,7 @@ Utility routes:
 | `GET /api/profile-pack/catalog/compare` | `public` (read-only market surface) | N/A |
 | `GET /api/profile-pack/catalog/insights` | `public` (read-only market surface) | N/A |
 | `POST /api/templates/submit` | `member|reviewer|admin` | `401 unauthorized` (no token), `403 permission_denied` (member owner mismatch) |
+| `POST /api/profile-pack/submit` | `member|reviewer|admin` | `401 unauthorized` (no token), `403 permission_denied` (member owner mismatch) |
 | `GET /api/member/submissions` | `member|reviewer|admin` | `401 unauthorized` (no token), `403 permission_denied` (member owner mismatch) |
 | `GET /api/member/submissions/detail` | `member|reviewer|admin` | `401 unauthorized` (no token), `403 permission_denied` (member owner mismatch) |
 | `GET /api/member/submissions/package/download` | `member|reviewer|admin` | `401 unauthorized` (no token), `403 permission_denied` (member owner mismatch) |
@@ -280,3 +282,6 @@ All role-deny responses are expected to return `error.code=permission_denied`.
 20. Public-market auto-publish runtime knobs: `webui.public_market.auto_publish_profile_pack_approve`, `webui.public_market.root`, and `webui.public_market.rebuild_snapshot_on_publish`.
 21. Member download endpoints are owner-scoped by design: both template submission package download and profile-pack submission export download require `user_id` to match the authenticated member subject when auth is enabled.
 22. `market.html` login now forwards member `user_id` explicitly, and the market-page member actor binds to the login-returned `user_id` instead of a hardcoded identifier, preventing owner-scope false `403` responses.
+23. `POST /api/templates/submit` supports idempotent replay via `upload_options.idempotency_key` or `Idempotency-Key` request header; retries in the same scope return the existing submission.
+24. `POST /api/profile-pack/submit` supports the same idempotent replay model via `submit_options.idempotency_key` or `Idempotency-Key` header.
+25. Reusing an idempotency key across different submission scope now returns `idempotency_key_conflict` to avoid accidental cross-request replay.
