@@ -123,6 +123,7 @@ export default defineConfig({
             { text: 'ユーザーパネル + マーケット再設計 実行計画', link: '/ja/reference/user-panel-stitch-execution-plan' },
             { text: 'ストレージ永続化 + 冷備 実行計画', link: '/ja/reference/storage-cold-backup-execution-plan' },
             { text: '統合実行プレイブック', link: '/ja/reference/integrated-execution-playbook' },
+            { text: 'Sharelife v1 Freeze', link: '/ja/reference/sharelife-v1-freeze' },
             { text: 'API v1', link: '/ja/reference/api-v1' },
             { text: 'Bot 設定移行スコープ', link: '/ja/how-to/profile-pack-migration-scope' },
             { text: 'プラグインエコシステム Round 2 基線', link: '/ja/how-to/plugin-ecosystem-round2-baseline' },
