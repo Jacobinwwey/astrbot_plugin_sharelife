@@ -727,6 +727,29 @@ class SharelifeWebApiV1:
         )
         return self._from_api_error_or_ok(response, default_message="reviewer devices reset")
 
+    def admin_record_reviewer_session_revoke(
+        self,
+        role: str,
+        reviewer_id: str,
+        admin_id: str,
+        revoked_sessions: int,
+        device_id: str = "",
+    ) -> WebApiResult:
+        if not reviewer_id:
+            return self._error(
+                code="reviewer_id_required",
+                message="reviewer_id is required",
+                status_code=400,
+            )
+        response = self.api.admin_record_reviewer_session_revoke(
+            role=role,
+            reviewer_id=reviewer_id,
+            admin_id=admin_id,
+            revoked_sessions=max(0, int(revoked_sessions or 0)),
+            device_id=device_id,
+        )
+        return self._from_api_error_or_ok(response, default_message="reviewer sessions revoked")
+
     def admin_list_profile_pack_submissions(
         self,
         role: str,

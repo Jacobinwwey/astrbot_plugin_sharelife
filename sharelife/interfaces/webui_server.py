@@ -1380,6 +1380,53 @@ class SharelifeWebUIServer:
                     device_id=str(session.get("device_id", "") or "").strip(),
                 )
 
+    def _revoke_reviewer_sessions(
+        self,
+        reviewer_id: str,
+        *,
+        device_id: str = "",
+        exclude_token: str = "",
+    ) -> dict[str, Any]:
+        uid = str(reviewer_id or "").strip()
+        target_device_id = str(device_id or "").strip()
+        keep = str(exclude_token or "").strip()
+        revoked_sessions = 0
+        revoked_device_ids: set[str] = set()
+        if not uid:
+            return {
+                "reviewer_id": "",
+                "device_id": target_device_id,
+                "revoked_sessions": 0,
+                "revoked_device_ids": [],
+            }
+        for token, session in list(self._auth_tokens.items()):
+            if keep and token == keep:
+                continue
+            if not isinstance(session, dict):
+                continue
+            role = self._normalize_role(str(session.get("role", "") or ""))
+            subject = str(session.get("subject", "") or "").strip()
+            if role != "reviewer" or subject != uid:
+                continue
+            session_device_id = str(session.get("device_id", "") or "").strip()
+            if target_device_id and session_device_id != target_device_id:
+                continue
+            self._revoke_token(
+                token,
+                role=role,
+                subject=subject,
+                device_id=session_device_id,
+            )
+            revoked_sessions += 1
+            if session_device_id:
+                revoked_device_ids.add(session_device_id)
+        return {
+            "reviewer_id": uid,
+            "device_id": target_device_id,
+            "revoked_sessions": revoked_sessions,
+            "revoked_device_ids": sorted(revoked_device_ids),
+        }
+
     def _request_role(self, request: Request, payload: dict[str, Any] | None = None) -> str:
         if self._auth_enabled:
             role = str(getattr(request.state, "sharelife_auth_role", "member") or "member").strip().lower()
@@ -1859,6 +1906,31 @@ class SharelifeWebUIServer:
             )
             if result.ok:
                 self._revoke_reviewer_tokens(reviewer_id=reviewer_id)
+            return self._response(result)
+
+        @self.app.post("/api/admin/reviewer/sessions/revoke")
+        async def admin_reviewer_sessions_revoke(request: Request, payload: dict[str, Any]):
+            reviewer_id = str(payload.get("reviewer_id", "") or "").strip()
+            if not reviewer_id:
+                return self._error_response(
+                    code="reviewer_id_required",
+                    message="reviewer_id is required",
+                    status_code=400,
+                )
+            device_id = str(payload.get("device_id", "") or "").strip()
+            summary = self._revoke_reviewer_sessions(
+                reviewer_id=reviewer_id,
+                device_id=device_id,
+            )
+            result = self.api.admin_record_reviewer_session_revoke(
+                role=self._request_role(request, payload),
+                reviewer_id=reviewer_id,
+                admin_id=self._admin_id(payload),
+                revoked_sessions=int(summary.get("revoked_sessions", 0) or 0),
+                device_id=device_id,
+            )
+            if isinstance(result.data, dict):
+                result.data["revoked_device_ids"] = list(summary.get("revoked_device_ids", []))
             return self._response(result)
 
         @self.app.get("/api/reviewer/session")

@@ -123,6 +123,7 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnReviewerAccountList: "admin.reviewer.lifecycle.manage",
   btnReviewerDeviceList: "admin.reviewer.lifecycle.manage",
   btnReviewerDeviceReset: "admin.reviewer.lifecycle.manage",
+  btnReviewerSessionRevoke: "admin.reviewer.lifecycle.manage",
   btnNotice: "notifications.read",
   btnStorageSummary: "admin.storage.local_summary.read",
   btnStoragePoliciesGet: "admin.storage.policies.read",
@@ -5835,6 +5836,71 @@ async function resetReviewerDevices() {
   return response
 }
 
+async function revokeReviewerSessions() {
+  const a = actor()
+  const reviewerId = reviewerLifecycleSelectedReviewerId()
+  const deviceId = readTextField("reviewerSessionDeviceId")
+  if (!reviewerId) {
+    setReviewerLifecycleState(
+      "reviewerSessionState",
+      "danger",
+      "reviewer.lifecycle.sessions.target_required",
+      "Reviewer ID is required before revoking sessions.",
+    )
+    return buildClientErrorResponse("reviewer_id_required", "reviewer_id is required", 400)
+  }
+  setReviewerLifecycleState(
+    "reviewerSessionState",
+    "warning",
+    "reviewer.lifecycle.sessions.revoking",
+    "Revoking reviewer sessions...",
+  )
+  const response = await api("/api/admin/reviewer/sessions/revoke", {
+    method: "POST",
+    body: {
+      role: a.role,
+      admin_id: a.admin_id,
+      reviewer_id: reviewerId,
+      device_id: deviceId,
+    },
+  })
+  render("reviewer_session_revoke", response)
+  if (!response.data || !response.data.ok) {
+    setReviewerLifecycleState(
+      "reviewerSessionState",
+      "danger",
+      "reviewer.lifecycle.sessions.revoke_failed",
+      "Failed to revoke reviewer sessions.",
+    )
+    return response
+  }
+  const data = apiData(response)
+  const count = Number(data.revoked_sessions || 0)
+  if (count > 0) {
+    setReviewerLifecycleState(
+      "reviewerSessionState",
+      "success",
+      deviceId ? "reviewer.lifecycle.sessions.revoked_device" : "reviewer.lifecycle.sessions.revoked",
+      deviceId
+        ? "Revoked {count} sessions for {reviewer_id} on device {device_id}."
+        : "Revoked {count} sessions for {reviewer_id}.",
+      {
+        count,
+        reviewer_id: reviewerId,
+        device_id: deviceId,
+      },
+    )
+  } else {
+    setReviewerLifecycleState(
+      "reviewerSessionState",
+      "neutral",
+      "reviewer.lifecycle.sessions.noop",
+      "No active reviewer sessions matched the current filter.",
+    )
+  }
+  return response
+}
+
 function updateTemplatesTable(rows) {
   state.templates = Array.isArray(rows) ? rows : []
   const tbody = byId("templatesTable").querySelector("tbody")
@@ -6982,6 +7048,12 @@ function bindButtons() {
   if (reviewerDeviceResetButton) {
     reviewerDeviceResetButton.addEventListener("click", () => {
       void resetReviewerDevices()
+    })
+  }
+  const reviewerSessionRevokeButton = byId("btnReviewerSessionRevoke")
+  if (reviewerSessionRevokeButton) {
+    reviewerSessionRevokeButton.addEventListener("click", () => {
+      void revokeReviewerSessions()
     })
   }
   const reviewerDeviceTargetNode = byId("reviewerDeviceTargetId")

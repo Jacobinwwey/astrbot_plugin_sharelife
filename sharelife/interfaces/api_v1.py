@@ -1267,6 +1267,42 @@ class SharelifeApiV1:
             "revoked_devices": revoked,
         }
 
+    def admin_record_reviewer_session_revoke(
+        self,
+        role: str,
+        reviewer_id: str,
+        admin_id: str,
+        revoked_sessions: int,
+        device_id: str = "",
+    ) -> dict:
+        if not self._is_admin_role(role):
+            return {"error": "permission_denied"}
+        uid = str(reviewer_id or "").strip()
+        if not uid:
+            return {"error": "reviewer_id_required"}
+        normalized_device_id = str(device_id or "").strip()
+        count = max(0, int(revoked_sessions or 0))
+        detail: dict[str, Any] = {
+            "reviewer_id": uid,
+            "revoked_sessions": count,
+        }
+        if normalized_device_id:
+            detail["device_id"] = normalized_device_id
+        self._audit(
+            action="reviewer.session_force_revoke",
+            actor_id=str(admin_id or "admin"),
+            actor_role="admin",
+            target_id=uid,
+            status="revoked" if count else "noop",
+            detail=detail,
+        )
+        return {
+            "status": "revoked" if count else "noop",
+            "reviewer_id": uid,
+            "device_id": normalized_device_id,
+            "revoked_sessions": count,
+        }
+
     def admin_list_profile_pack_submissions(
         self,
         role: str,

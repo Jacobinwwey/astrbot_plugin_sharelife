@@ -206,12 +206,18 @@
               <span data-i18n-key="field.reviewer_target_id">Reviewer ID</span>
               <input id="reviewerDeviceTargetId" type="text" data-i18n-placeholder-key="placeholder.reviewer_target_id" placeholder="reviewer_id" />
             </label>
+            <label>
+              <span data-i18n-key="field.reviewer_session_device_id">Session Device ID (Optional)</span>
+              <input id="reviewerSessionDeviceId" type="text" data-i18n-placeholder-key="placeholder.reviewer_session_device_id" placeholder="device_id (optional)" />
+            </label>
           </div>
           <div class="inline-form wrap">
             <button id="btnReviewerDeviceList" class="btn-primary" type="button" data-i18n-key="button.reviewer_device_list">Load Devices</button>
             <button id="btnReviewerDeviceReset" type="button" data-i18n-key="button.reviewer_device_reset">Reset All Devices</button>
+            <button id="btnReviewerSessionRevoke" type="button" data-i18n-key="button.reviewer_session_revoke">Revoke Sessions</button>
           </div>
           <div id="reviewerDeviceState" class="collection-state is-neutral" data-i18n-key="reviewer.lifecycle.devices.idle">Pick a reviewer account to inspect or revoke device keys.</div>
+          <div id="reviewerSessionState" class="collection-state is-neutral" data-i18n-key="reviewer.lifecycle.sessions.idle">Revoke active reviewer sessions by reviewer_id, optionally scoped to one device.</div>
           <div class="table-wrap">
             <table id="reviewerDeviceTable">
               <thead>

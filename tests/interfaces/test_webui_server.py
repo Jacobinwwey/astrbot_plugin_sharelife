@@ -1049,6 +1049,58 @@ def test_admin_reviewer_lifecycle_routes_cover_invites_accounts_and_devices(tmp_
     assert devices.json()["data"]["max_devices"] == 3
     assert len(devices.json()["data"]["devices"]) == 2
 
+    reviewer_login_first = client.post(
+        "/api/login",
+        json={
+            "role": "reviewer",
+            "password": "reviewer-secret",
+            "reviewer_id": "reviewer-3",
+            "reviewer_device_key": first_device.json()["data"]["device_key"],
+        },
+    )
+    reviewer_login_second = client.post(
+        "/api/login",
+        json={
+            "role": "reviewer",
+            "password": "reviewer-secret",
+            "reviewer_id": "reviewer-3",
+            "reviewer_device_key": second_device.json()["data"]["device_key"],
+        },
+    )
+    assert reviewer_login_first.status_code == 200
+    assert reviewer_login_second.status_code == 200
+    first_session_headers = {"Authorization": f"Bearer {reviewer_login_first.json()['token']}"}
+    second_session_headers = {"Authorization": f"Bearer {reviewer_login_second.json()['token']}"}
+
+    revoke_second_session = client.post(
+        "/api/admin/reviewer/sessions/revoke",
+        json={
+            "admin_id": "admin-1",
+            "reviewer_id": "reviewer-3",
+            "device_id": second_device.json()["data"]["device_id"],
+        },
+        headers=admin_headers,
+    )
+    assert revoke_second_session.status_code == 200
+    assert revoke_second_session.json()["data"]["status"] == "revoked"
+    assert revoke_second_session.json()["data"]["reviewer_id"] == "reviewer-3"
+    assert revoke_second_session.json()["data"]["device_id"] == second_device.json()["data"]["device_id"]
+    assert revoke_second_session.json()["data"]["revoked_sessions"] == 1
+
+    second_session_after_revoke = client.get("/api/reviewer/session", headers=second_session_headers)
+    assert second_session_after_revoke.status_code == 401
+
+    first_session_still_active = client.get("/api/reviewer/session", headers=first_session_headers)
+    assert first_session_still_active.status_code == 200
+
+    revoke_missing_reviewer = client.post(
+        "/api/admin/reviewer/sessions/revoke",
+        json={"admin_id": "admin-1", "reviewer_id": ""},
+        headers=admin_headers,
+    )
+    assert revoke_missing_reviewer.status_code == 400
+    assert revoke_missing_reviewer.json()["error"]["code"] == "reviewer_id_required"
+
     revoke_device = client.delete(
         f"/api/reviewer/devices/{first_device.json()['data']['device_id']}",
         params={"reviewer_id": "reviewer-3"},
@@ -1232,9 +1284,11 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert 'id="btnReviewerAccountList"' in admin_page.text
     assert 'id="btnReviewerDeviceList"' in admin_page.text
     assert 'id="btnReviewerDeviceReset"' in admin_page.text
+    assert 'id="btnReviewerSessionRevoke"' in admin_page.text
     assert 'id="reviewerInviteTable"' in admin_page.text
     assert 'id="reviewerAccountTable"' in admin_page.text
     assert 'id="reviewerDeviceTable"' in admin_page.text
+    assert 'id="reviewerSessionState"' in admin_page.text
     assert 'src="/console_scope.js"' in admin_page.text
 
     reviewer_page = client.get("/reviewer")
