@@ -92,6 +92,18 @@ test("getMessage returns locale-specific translation with fallback", () => {
     "Developer Mode: OFF",
   )
   assert.equal(
+    getMessage("en-US", "enum.status.replaced", ""),
+    "replaced",
+  )
+  assert.equal(
+    getMessage("zh-CN", "enum.status.replaced", ""),
+    "已替换",
+  )
+  assert.equal(
+    getMessage("ja-JP", "enum.status.replaced", ""),
+    "差し替え済み",
+  )
+  assert.equal(
     getMessage("zh-CN", "developer_mode.status.on", ""),
     "开发者模式：已开启",
   )
