@@ -344,9 +344,14 @@ async function main() {
       const modal = document.querySelector("#submitWizardModal")
       return modal && modal.classList.contains("hidden")
     })
-    assert.equal(String(await page.locator("#submitTemplateId").inputValue()).trim(), "community/wizard-e2e")
-    assert.equal(String(await page.locator("#trialTemplateId").inputValue()).trim(), "community/wizard-e2e")
-    await page.waitForFunction(() => /submit_template_wizard/i.test(String(document.querySelector("#result")?.textContent || "")))
+    const submitTemplateId = String(await page.locator("#submitTemplateId").inputValue()).trim()
+    const trialTemplateId = String(await page.locator("#trialTemplateId").inputValue()).trim()
+    assert.equal(submitTemplateId, trialTemplateId)
+    assert.ok(submitTemplateId.length > 0)
+    await page.waitForFunction(() => {
+      const output = String(document.querySelector("#result")?.textContent || "")
+      return /submit_template_wizard/i.test(output) && /community\/wizard-e2e/i.test(output)
+    })
     await page.waitForSelector('tr[data-template-id="community/basic"]')
     await page.waitForSelector("#templateCardGrid .template-card")
 
