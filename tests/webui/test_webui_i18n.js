@@ -96,12 +96,36 @@ test("getMessage returns locale-specific translation with fallback", () => {
     "replaced",
   )
   assert.equal(
+    getMessage("en-US", "enum.status.running", ""),
+    "running",
+  )
+  assert.equal(
+    getMessage("en-US", "enum.status.stale", ""),
+    "stale",
+  )
+  assert.equal(
     getMessage("zh-CN", "enum.status.replaced", ""),
     "已替换",
   )
   assert.equal(
+    getMessage("zh-CN", "enum.status.running", ""),
+    "执行中",
+  )
+  assert.equal(
+    getMessage("zh-CN", "enum.status.stale", ""),
+    "已过旧",
+  )
+  assert.equal(
     getMessage("ja-JP", "enum.status.replaced", ""),
     "差し替え済み",
+  )
+  assert.equal(
+    getMessage("ja-JP", "enum.status.running", ""),
+    "実行中",
+  )
+  assert.equal(
+    getMessage("ja-JP", "enum.status.stale", ""),
+    "期限切れ",
   )
   assert.equal(
     getMessage("zh-CN", "developer_mode.status.on", ""),

@@ -24,6 +24,7 @@
 
 1. `upload_options.replace_existing` is now behaviorally effective: a new submission can retire previous pending submissions for the same user/template.
 2. Market submission storage now persists `upload_options` in SQLite (including auto-migration for older tables missing `upload_options_json`).
+3. WebUI status vocabulary was aligned to the execution contract by adding localized labels for `queued/running/succeeded/failed/cancelled/stale`, reducing raw status leakage in member/reviewer/admin surfaces.
 
 ## 2. Cross-Plan Decisions
 

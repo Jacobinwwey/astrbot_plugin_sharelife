@@ -24,6 +24,7 @@
 
 1. `upload_options.replace_existing` 已具备真实行为：同一用户同一模板的新提交可回收此前仍处于 `pending` 的旧提交。
 2. 市场提交通道在 SQLite 下已持久化 `upload_options`，并补齐了旧表缺少 `upload_options_json` 字段时的自动迁移。
+3. WebUI 状态词汇已按执行契约补齐并三语化：新增 `queued/running/succeeded/failed/cancelled/stale`，减少 member/reviewer/admin 面板中原始状态值直出。
 
 ## 2. 两大方案交叉决策
 
