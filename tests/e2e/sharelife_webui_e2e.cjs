@@ -841,11 +841,18 @@ async function main() {
       return rows.length >= 1
     })
     await page.locator("#marketProfilePackSubmissionsList .member-task-item").first().click()
-    await page.click("#btnMarketDownloadProfilePackSubmission")
     await page.waitForFunction(() => {
-      const details = String(document.querySelector("#marketDetails")?.textContent || "")
-      return /"status":\s*"downloaded"/.test(details) && /"submission_id":\s*"/.test(details)
+      const button = document.querySelector("#btnMarketDownloadProfilePackSubmission")
+      return Boolean(button) && button.disabled === false
     })
+    await page.click("#btnMarketDownloadProfilePackSubmission")
+    await page.waitForFunction(
+      () => {
+        const details = String(document.querySelector("#marketDetails")?.textContent || "")
+        return /"status":\s*"downloaded"/.test(details) && /"submission_id":\s*"/.test(details)
+      },
+      { timeout: 60000 },
+    )
     await page.waitForFunction(() => {
       const panel = document.querySelector("#marketDetailPanel")
       return Boolean(panel) && panel.open === false
