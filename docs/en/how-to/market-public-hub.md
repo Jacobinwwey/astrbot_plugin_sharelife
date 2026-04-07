@@ -51,6 +51,12 @@ Optional fallback:
 2. Import in local Sharelife WebUI.
 3. Run dry-run and selective apply locally.
 
+## Runtime notes (updated 2026-04-07)
+
+1. When WebUI auth is disabled, login panels on `/member` and `/market` stay hidden by default.
+2. In the user panel, local installation action buttons are kept clickable; server-side auth still decides final allow/deny.
+3. Public pages remain read-only. Reviewer/Admin execution paths are still local-only.
+
 ## Approved community publish
 
 1. Only sanitized profile-pack archives may be published publicly.
