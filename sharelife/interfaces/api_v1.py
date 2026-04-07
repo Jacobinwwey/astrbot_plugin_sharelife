@@ -156,6 +156,25 @@ class SharelifeApiV1:
         upload_options: dict | None = None,
     ) -> dict:
         normalized_upload_options = self._normalize_upload_options(upload_options)
+        replaced_submission_ids: list[str] = []
+        if normalized_upload_options.get("replace_existing"):
+            replaced_submission_ids = self.market_service.replace_pending_submissions(
+                user_id=user_id,
+                template_id=template_id,
+            )
+            if replaced_submission_ids:
+                self._audit(
+                    action="submission.pending_replaced",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=template_id,
+                    status="replaced",
+                    detail={
+                        "template_id": template_id,
+                        "replaced_submission_ids": list(replaced_submission_ids),
+                        "replace_existing": True,
+                    },
+                )
         sub = self.market_service.submit_template(
             user_id=user_id,
             template_id=template_id,
@@ -172,9 +191,14 @@ class SharelifeApiV1:
                 "template_id": template_id,
                 "version": version,
                 "upload_options": normalized_upload_options,
+                "replaced_submission_ids": list(replaced_submission_ids),
+                "replaced_submission_count": len(replaced_submission_ids),
             },
         )
-        return self._submission_payload(sub)
+        payload = self._submission_payload(sub)
+        payload["replaced_submission_ids"] = list(replaced_submission_ids)
+        payload["replaced_submission_count"] = len(replaced_submission_ids)
+        return payload
 
     def submit_template_package(
         self,
@@ -224,6 +248,25 @@ class SharelifeApiV1:
                     "estimated_size_bytes": len(content),
                 }
             raise
+        replaced_submission_ids: list[str] = []
+        if normalized_upload_options.get("replace_existing"):
+            replaced_submission_ids = self.market_service.replace_pending_submissions(
+                user_id=user_id,
+                template_id=template_id,
+            )
+            if replaced_submission_ids:
+                self._audit(
+                    action="submission.pending_replaced",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=template_id,
+                    status="replaced",
+                    detail={
+                        "template_id": template_id,
+                        "replaced_submission_ids": list(replaced_submission_ids),
+                        "replace_existing": True,
+                    },
+                )
         sub = self.market_service.submit_template(
             user_id=user_id,
             template_id=template_id,
@@ -253,9 +296,14 @@ class SharelifeApiV1:
                 "version": version,
                 "filename": uploaded.filename,
                 "upload_options": normalized_upload_options,
+                "replaced_submission_ids": list(replaced_submission_ids),
+                "replaced_submission_count": len(replaced_submission_ids),
             },
         )
-        return self._submission_payload(sub)
+        payload = self._submission_payload(sub)
+        payload["replaced_submission_ids"] = list(replaced_submission_ids)
+        payload["replaced_submission_count"] = len(replaced_submission_ids)
+        return payload
 
     def request_trial(self, user_id: str, session_id: str, template_id: str) -> dict:
         result = self._request_trial_with_preference(

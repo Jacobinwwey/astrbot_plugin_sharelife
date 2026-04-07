@@ -23,6 +23,11 @@ def _sample_payload() -> dict:
                 "prompt_template": "prompt",
                 "package_artifact": {"path": "bundle.zip"},
                 "scan_summary": {"risk": "low"},
+                "upload_options": {
+                    "scan_mode": "strict",
+                    "visibility": "private",
+                    "replace_existing": True,
+                },
                 "review_labels": ["manual_reviewed"],
                 "warning_flags": [],
                 "risk_level": "low",
@@ -113,6 +118,68 @@ def test_sqlite_market_repository_creates_required_indexes(tmp_path: Path) -> No
     assert "idx_market_submissions_status" in index_names
     assert "idx_market_submissions_risk_level" in index_names
     assert "idx_market_submissions_created_at" in index_names
+
+
+def test_sqlite_market_repository_migrates_missing_upload_options_column(tmp_path: Path) -> None:
+    sqlite_file = tmp_path / "sharelife_state.sqlite3"
+    with sqlite3.connect(str(sqlite_file)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE sharelife_market_submissions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                template_id TEXT NOT NULL,
+                version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                reviewer_id TEXT,
+                review_note TEXT NOT NULL,
+                prompt_template TEXT NOT NULL,
+                package_artifact_json TEXT,
+                scan_summary_json TEXT,
+                review_labels_json TEXT NOT NULL,
+                warning_flags_json TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                category TEXT NOT NULL,
+                tags_json TEXT NOT NULL,
+                maintainer TEXT NOT NULL,
+                source_channel TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE sharelife_market_published (
+                template_id TEXT PRIMARY KEY,
+                version TEXT NOT NULL,
+                source_submission_id TEXT NOT NULL,
+                prompt_template TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                review_note TEXT NOT NULL,
+                package_artifact_json TEXT,
+                scan_summary_json TEXT,
+                review_labels_json TEXT NOT NULL,
+                warning_flags_json TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                category TEXT NOT NULL,
+                tags_json TEXT NOT NULL,
+                maintainer TEXT NOT NULL,
+                source_channel TEXT NOT NULL,
+                engagement_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+    repo = SqliteMarketRepository(sqlite_file)
+    repo.save_state(_sample_payload())
+    loaded = repo.load_state()
+    assert loaded == _sample_payload()
+
+    with sqlite3.connect(str(sqlite_file)) as conn:
+        rows = conn.execute("PRAGMA table_info('sharelife_market_submissions')").fetchall()
+    assert any(str(row[1]) == "upload_options_json" for row in rows)
 
 
 def test_sqlite_market_repository_concurrent_writes_keep_valid_state(tmp_path: Path) -> None:

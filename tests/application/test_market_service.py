@@ -40,6 +40,21 @@ def test_admin_approve_publishes_template():
     assert published.version == "1.0.0"
 
 
+def test_replace_pending_submissions_marks_previous_rows_as_replaced():
+    service = MarketService(clock=FrozenClock(datetime(2026, 3, 25, 10, 0, tzinfo=UTC)))
+    first = service.submit_template(user_id="u1", template_id="community/basic", version="1.0.0")
+    service.submit_template(user_id="u2", template_id="community/basic", version="1.0.0")
+    service.submit_template(user_id="u1", template_id="community/other", version="1.0.0")
+
+    replaced = service.replace_pending_submissions(user_id="u1", template_id="community/basic")
+    assert replaced == [first.id]
+    assert service.get_submission(first.id).status == "replaced"
+
+    # repeated replacement should be idempotent after status transition
+    replaced_again = service.replace_pending_submissions(user_id="u1", template_id="community/basic")
+    assert replaced_again == []
+
+
 def test_prompt_bundle_is_generated_for_published_template():
     service = MarketService(clock=FrozenClock(datetime(2026, 3, 25, 10, 0, tzinfo=UTC)))
     sub = service.submit_template(user_id="u1", template_id="community/basic", version="1.0.0")

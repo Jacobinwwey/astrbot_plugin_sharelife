@@ -20,6 +20,11 @@
 3. install/upload のオプション契約が画面横断で未正規化。
 4. 容量制約下での長期保持・復旧戦略が薄い。
 
+### 1.3 増分進捗（`2026-04-07`）
+
+1. `upload_options.replace_existing` は実動作化され、同一 user/template の既存 `pending` submission を新規 submission で退役できるようになりました。
+2. SQLite の market submission 永続化で `upload_options` を保持し、`upload_options_json` 列がない旧テーブルは自動マイグレーションされます。
+
 ## 2. 交差分析での決定
 
 ### 2.1 状態語彙の統一

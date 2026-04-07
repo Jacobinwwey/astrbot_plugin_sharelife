@@ -15,6 +15,7 @@ from ..infrastructure.system_clock import SystemClock
 SUBMISSION_PENDING = "pending"
 SUBMISSION_APPROVED = "approved"
 SUBMISSION_REJECTED = "rejected"
+SUBMISSION_REPLACED = "replaced"
 
 
 def _default_engagement() -> dict[str, int | str]:
@@ -148,6 +149,25 @@ class MarketService:
         self._refresh_submission_counts(template_id)
         self._flush_state()
         return submission
+
+    def replace_pending_submissions(self, *, user_id: str, template_id: str) -> list[str]:
+        normalized_user = str(user_id or "").strip()
+        normalized_template = str(template_id or "").strip()
+        if not normalized_user or not normalized_template:
+            return []
+        now = self.clock.utcnow()
+        replaced_ids: list[str] = []
+        for item in self._submissions.values():
+            if item.user_id != normalized_user or item.template_id != normalized_template:
+                continue
+            if item.status != SUBMISSION_PENDING:
+                continue
+            item.status = SUBMISSION_REPLACED
+            item.updated_at = now
+            replaced_ids.append(item.id)
+        if replaced_ids:
+            self._flush_state()
+        return replaced_ids
 
     def get_submission(self, submission_id: str) -> CommunitySubmission:
         return self._submissions[submission_id]

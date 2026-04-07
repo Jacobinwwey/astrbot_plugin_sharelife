@@ -20,6 +20,11 @@
 3. Install/upload options are partially implicit and not normalized cross-page.
 4. Long-retention persistence strategy is still thin under constrained local disk.
 
+### 1.3 Incremental progress (`2026-04-07`)
+
+1. `upload_options.replace_existing` is now behaviorally effective: a new submission can retire previous pending submissions for the same user/template.
+2. Market submission storage now persists `upload_options` in SQLite (including auto-migration for older tables missing `upload_options_json`).
+
 ## 2. Cross-Plan Decisions
 
 ### 2.1 Unified state vocabulary

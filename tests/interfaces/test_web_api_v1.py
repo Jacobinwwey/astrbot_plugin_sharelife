@@ -181,6 +181,32 @@ def test_web_api_install_preflight_and_member_installation_endpoints(tmp_path):
     assert refreshed.data["count"] == 1
 
 
+def test_web_api_upload_replace_existing_retires_previous_pending_submission(tmp_path):
+    web_api = build_web_api(tmp_path)
+
+    first = web_api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+    )
+    assert first.ok is True
+    first_submission_id = first.data["submission_id"]
+
+    second = web_api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.1",
+        upload_options={"replace_existing": True},
+    )
+    assert second.ok is True
+    assert second.data["replaced_submission_count"] == 1
+    assert second.data["replaced_submission_ids"] == [first_submission_id]
+
+    replaced = web_api.member_get_submission_detail(user_id="u1", submission_id=first_submission_id)
+    assert replaced.ok is True
+    assert replaced.data["status"] == "replaced"
+
+
 def test_web_api_denies_member_admin_submission_decision(tmp_path):
     web_api = build_web_api(tmp_path)
     submit = web_api.submit_template(

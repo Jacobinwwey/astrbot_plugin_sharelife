@@ -169,6 +169,40 @@ def test_api_install_preflight_and_member_installations_surface(tmp_path):
     assert any(item["action"] == "member.installations.refreshed" for item in events["events"])
 
 
+def test_api_upload_replace_existing_retires_previous_pending_submission(tmp_path):
+    api = build_api(tmp_path)
+
+    first = api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+    )
+    assert first["status"] == "pending"
+    first_submission_id = first["submission_id"]
+
+    second = api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.1",
+        upload_options={"replace_existing": True},
+    )
+    assert second["status"] == "pending"
+    assert second["replaced_submission_count"] == 1
+    assert second["replaced_submission_ids"] == [first_submission_id]
+
+    first_detail = api.member_get_submission_detail(user_id="u1", submission_id=first_submission_id)
+    assert first_detail["status"] == "replaced"
+
+    pending_rows = api.member_list_submissions(user_id="u1", status="pending")
+    assert [item["submission_id"] for item in pending_rows["submissions"]] == [second["submission_id"]]
+
+    replaced_rows = api.member_list_submissions(user_id="u1", status="replaced")
+    assert [item["submission_id"] for item in replaced_rows["submissions"]] == [first_submission_id]
+
+    audit = api.admin_list_audit(role="admin", limit=20)
+    assert any(item["action"] == "submission.pending_replaced" for item in audit["events"])
+
+
 def test_api_rejects_non_admin_decision(tmp_path):
     api = build_api(tmp_path)
     submit = api.submit_template(user_id="u1", template_id="community/basic", version="1.0.0")

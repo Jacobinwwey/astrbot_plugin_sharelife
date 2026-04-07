@@ -1554,6 +1554,51 @@ def test_webui_member_installation_routes_support_refresh_and_install_options(tm
     assert refreshed.json()["data"]["count"] == 1
 
 
+def test_webui_template_submit_replace_existing_retires_previous_pending_submission(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    first = client.post(
+        "/api/templates/submit",
+        json={
+            "user_id": "u1",
+            "template_id": "community/basic",
+            "version": "1.0.0",
+        },
+    )
+    assert first.status_code == 200
+    first_submission_id = first.json()["data"]["submission_id"]
+
+    second = client.post(
+        "/api/templates/submit",
+        json={
+            "user_id": "u1",
+            "template_id": "community/basic",
+            "version": "1.0.1",
+            "upload_options": {"replace_existing": True},
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["data"]["replaced_submission_count"] == 1
+    assert second.json()["data"]["replaced_submission_ids"] == [first_submission_id]
+
+    replaced_detail = client.get(
+        "/api/member/submissions/detail",
+        params={"user_id": "u1", "submission_id": first_submission_id},
+    )
+    assert replaced_detail.status_code == 200
+    assert replaced_detail.json()["data"]["status"] == "replaced"
+
+    pending_rows = client.get(
+        "/api/member/submissions",
+        params={"user_id": "u1", "status": "pending"},
+    )
+    assert pending_rows.status_code == 200
+    assert [item["submission_id"] for item in pending_rows.json()["data"]["submissions"]] == [
+        second.json()["data"]["submission_id"]
+    ]
+
+
 def test_webui_template_submit_rejects_payload_over_limit(tmp_path):
     server = build_server(tmp_path)
     assert server.api.api.package_service is not None

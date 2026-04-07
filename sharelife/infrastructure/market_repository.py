@@ -97,6 +97,7 @@ class SqliteMarketRepository:
                     prompt_template TEXT NOT NULL,
                     package_artifact_json TEXT,
                     scan_summary_json TEXT,
+                    upload_options_json TEXT,
                     review_labels_json TEXT NOT NULL,
                     warning_flags_json TEXT NOT NULL,
                     risk_level TEXT NOT NULL,
@@ -147,7 +148,14 @@ class SqliteMarketRepository:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_market_published_published_at ON sharelife_market_published(published_at)"
             )
+            self._ensure_submission_schema(conn)
             conn.commit()
+
+    def _ensure_submission_schema(self, conn: sqlite3.Connection) -> None:
+        columns = conn.execute("PRAGMA table_info('sharelife_market_submissions')").fetchall()
+        names = {str(row["name"]) for row in columns}
+        if "upload_options_json" not in names:
+            conn.execute("ALTER TABLE sharelife_market_submissions ADD COLUMN upload_options_json TEXT")
 
     def _decode_json(self, raw: str | None, default: Any) -> Any:
         if raw in (None, ""):
@@ -197,7 +205,7 @@ class SqliteMarketRepository:
                 SELECT
                     id, user_id, template_id, version, status, created_at, updated_at,
                     reviewer_id, review_note, prompt_template,
-                    package_artifact_json, scan_summary_json, review_labels_json,
+                    package_artifact_json, scan_summary_json, upload_options_json, review_labels_json,
                     warning_flags_json, risk_level, category, tags_json, maintainer,
                     source_channel
                 FROM sharelife_market_submissions
@@ -233,6 +241,7 @@ class SqliteMarketRepository:
                     "prompt_template": row["prompt_template"],
                     "package_artifact": self._decode_json(row["package_artifact_json"], None),
                     "scan_summary": self._decode_json(row["scan_summary_json"], None),
+                    "upload_options": self._decode_json(row["upload_options_json"], None),
                     "review_labels": self._decode_json(row["review_labels_json"], []),
                     "warning_flags": self._decode_json(row["warning_flags_json"], []),
                     "risk_level": row["risk_level"],
@@ -292,10 +301,10 @@ class SqliteMarketRepository:
             INSERT INTO sharelife_market_submissions(
                 id, user_id, template_id, version, status, created_at, updated_at,
                 reviewer_id, review_note, prompt_template, package_artifact_json,
-                scan_summary_json, review_labels_json, warning_flags_json,
+                scan_summary_json, upload_options_json, review_labels_json, warning_flags_json,
                 risk_level, category, tags_json, maintainer, source_channel
             ) VALUES(
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             [
@@ -312,6 +321,7 @@ class SqliteMarketRepository:
                     str(item.get("prompt_template", "") or ""),
                     self._encode_json(item.get("package_artifact")),
                     self._encode_json(item.get("scan_summary")),
+                    self._encode_json(item.get("upload_options")),
                     self._encode_json(list(item.get("review_labels", []) or [])),
                     self._encode_json(list(item.get("warning_flags", []) or [])),
                     str(item.get("risk_level", "low") or "low"),
