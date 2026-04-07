@@ -734,6 +734,7 @@ class SharelifeWebApiV1:
         admin_id: str,
         revoked_sessions: int,
         device_id: str = "",
+        session_id: str = "",
     ) -> WebApiResult:
         if not reviewer_id:
             return self._error(
@@ -747,6 +748,7 @@ class SharelifeWebApiV1:
             admin_id=admin_id,
             revoked_sessions=max(0, int(revoked_sessions or 0)),
             device_id=device_id,
+            session_id=session_id,
         )
         return self._from_api_error_or_ok(response, default_message="reviewer sessions revoked")
 

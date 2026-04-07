@@ -210,10 +210,15 @@
               <span data-i18n-key="field.reviewer_session_device_id">Session Device ID (Optional)</span>
               <input id="reviewerSessionDeviceId" type="text" data-i18n-placeholder-key="placeholder.reviewer_session_device_id" placeholder="device_id (optional)" />
             </label>
+            <label>
+              <span data-i18n-key="field.reviewer_session_id">Session ID (Optional)</span>
+              <input id="reviewerSessionId" type="text" data-i18n-placeholder-key="placeholder.reviewer_session_id" placeholder="session_id (optional)" />
+            </label>
           </div>
           <div class="inline-form wrap">
             <button id="btnReviewerDeviceList" class="btn-primary" type="button" data-i18n-key="button.reviewer_device_list">Load Devices</button>
             <button id="btnReviewerDeviceReset" type="button" data-i18n-key="button.reviewer_device_reset">Reset All Devices</button>
+            <button id="btnReviewerSessionList" type="button" data-i18n-key="button.reviewer_session_list">Load Sessions</button>
             <button id="btnReviewerSessionRevoke" type="button" data-i18n-key="button.reviewer_session_revoke">Revoke Sessions</button>
           </div>
           <div id="reviewerDeviceState" class="collection-state is-neutral" data-i18n-key="reviewer.lifecycle.devices.idle">Pick a reviewer account to inspect or revoke device keys.</div>
@@ -226,6 +231,20 @@
                   <th data-i18n-key="table.header.label">Label</th>
                   <th data-i18n-key="table.header.registered_at">Registered</th>
                   <th data-i18n-key="table.header.last_used_at">Last Used</th>
+                  <th data-i18n-key="table.header.actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="table-wrap">
+            <table id="reviewerSessionTable">
+              <thead>
+                <tr>
+                  <th data-i18n-key="table.header.session_id">Session ID</th>
+                  <th data-i18n-key="table.header.device_id">Device ID</th>
+                  <th data-i18n-key="table.header.issued_at">Issued</th>
+                  <th data-i18n-key="table.header.expires_at">Expires</th>
                   <th data-i18n-key="table.header.actions">Actions</th>
                 </tr>
               </thead>

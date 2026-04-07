@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import secrets
 import time
 from pathlib import Path
@@ -1385,19 +1386,24 @@ class SharelifeWebUIServer:
         reviewer_id: str,
         *,
         device_id: str = "",
+        session_id: str = "",
         exclude_token: str = "",
     ) -> dict[str, Any]:
         uid = str(reviewer_id or "").strip()
         target_device_id = str(device_id or "").strip()
+        target_session_id = str(session_id or "").strip()
         keep = str(exclude_token or "").strip()
         revoked_sessions = 0
         revoked_device_ids: set[str] = set()
+        revoked_session_ids: set[str] = set()
         if not uid:
             return {
                 "reviewer_id": "",
                 "device_id": target_device_id,
+                "session_id": target_session_id,
                 "revoked_sessions": 0,
                 "revoked_device_ids": [],
+                "revoked_session_ids": [],
             }
         for token, session in list(self._auth_tokens.items()):
             if keep and token == keep:
@@ -1409,7 +1415,10 @@ class SharelifeWebUIServer:
             if role != "reviewer" or subject != uid:
                 continue
             session_device_id = str(session.get("device_id", "") or "").strip()
+            token_session_id = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:16]
             if target_device_id and session_device_id != target_device_id:
+                continue
+            if target_session_id and token_session_id != target_session_id:
                 continue
             self._revoke_token(
                 token,
@@ -1420,12 +1429,54 @@ class SharelifeWebUIServer:
             revoked_sessions += 1
             if session_device_id:
                 revoked_device_ids.add(session_device_id)
+            revoked_session_ids.add(token_session_id)
         return {
             "reviewer_id": uid,
             "device_id": target_device_id,
+            "session_id": target_session_id,
             "revoked_sessions": revoked_sessions,
             "revoked_device_ids": sorted(revoked_device_ids),
+            "revoked_session_ids": sorted(revoked_session_ids),
         }
+
+    def _list_reviewer_sessions(
+        self,
+        reviewer_id: str,
+        *,
+        device_id: str = "",
+    ) -> list[dict[str, Any]]:
+        uid = str(reviewer_id or "").strip()
+        target_device_id = str(device_id or "").strip()
+        rows: list[dict[str, Any]] = []
+        if not uid:
+            return rows
+        now = time.time()
+        for token, session in list(self._auth_tokens.items()):
+            if not isinstance(session, dict):
+                continue
+            role = self._normalize_role(str(session.get("role", "") or ""))
+            subject = str(session.get("subject", "") or "").strip()
+            if role != "reviewer" or subject != uid:
+                continue
+            session_device_id = str(session.get("device_id", "") or "").strip()
+            if target_device_id and session_device_id != target_device_id:
+                continue
+            issued_at = float(session.get("issued_at", 0.0) or 0.0)
+            expires_at = float(session.get("expires_at", 0.0) or 0.0)
+            if expires_at <= now:
+                continue
+            rows.append(
+                {
+                    "session_id": hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:16],
+                    "reviewer_id": subject,
+                    "device_id": session_device_id,
+                    "issued_at": issued_at,
+                    "expires_at": expires_at,
+                    "remaining_seconds": max(0, int(expires_at - now)),
+                }
+            )
+        rows.sort(key=lambda item: float(item.get("issued_at", 0.0) or 0.0), reverse=True)
+        return rows
 
     def _request_role(self, request: Request, payload: dict[str, Any] | None = None) -> str:
         if self._auth_enabled:
@@ -1918,9 +1969,11 @@ class SharelifeWebUIServer:
                     status_code=400,
                 )
             device_id = str(payload.get("device_id", "") or "").strip()
+            session_id = str(payload.get("session_id", "") or "").strip()
             summary = self._revoke_reviewer_sessions(
                 reviewer_id=reviewer_id,
                 device_id=device_id,
+                session_id=session_id,
             )
             result = self.api.admin_record_reviewer_session_revoke(
                 role=self._request_role(request, payload),
@@ -1928,10 +1981,47 @@ class SharelifeWebUIServer:
                 admin_id=self._admin_id(payload),
                 revoked_sessions=int(summary.get("revoked_sessions", 0) or 0),
                 device_id=device_id,
+                session_id=session_id,
             )
             if isinstance(result.data, dict):
                 result.data["revoked_device_ids"] = list(summary.get("revoked_device_ids", []))
+                result.data["revoked_session_ids"] = list(summary.get("revoked_session_ids", []))
             return self._response(result)
+
+        @self.app.get("/api/admin/reviewer/sessions")
+        async def admin_reviewer_sessions(request: Request, reviewer_id: str = "", device_id: str = ""):
+            role = self._request_role(request)
+            if role != "admin":
+                return self._error_response(
+                    code="permission_denied",
+                    message="permission denied",
+                    status_code=403,
+                    data={"error": "permission_denied"},
+                )
+            normalized_reviewer_id = str(reviewer_id or "").strip()
+            if not normalized_reviewer_id:
+                return self._error_response(
+                    code="reviewer_id_required",
+                    message="reviewer_id is required",
+                    status_code=400,
+                )
+            normalized_device_id = str(device_id or "").strip()
+            sessions = self._list_reviewer_sessions(
+                normalized_reviewer_id,
+                device_id=normalized_device_id,
+            )
+            return self._response(
+                WebApiResult(
+                    ok=True,
+                    message="reviewer sessions listed",
+                    data={
+                        "reviewer_id": normalized_reviewer_id,
+                        "device_id": normalized_device_id,
+                        "sessions": sessions,
+                        "count": len(sessions),
+                    },
+                )
+            )
 
         @self.app.get("/api/reviewer/session")
         async def reviewer_session(request: Request):

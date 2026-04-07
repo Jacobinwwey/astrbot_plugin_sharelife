@@ -72,6 +72,7 @@ const state = {
     invites: [],
     accounts: [],
     devices: [],
+    sessions: [],
     maxDevices: 0,
     selectedReviewerId: "",
   },
@@ -123,6 +124,7 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnReviewerAccountList: "admin.reviewer.lifecycle.manage",
   btnReviewerDeviceList: "admin.reviewer.lifecycle.manage",
   btnReviewerDeviceReset: "admin.reviewer.lifecycle.manage",
+  btnReviewerSessionList: "admin.reviewer.lifecycle.manage",
   btnReviewerSessionRevoke: "admin.reviewer.lifecycle.manage",
   btnNotice: "notifications.read",
   btnStorageSummary: "admin.storage.local_summary.read",
@@ -5489,6 +5491,7 @@ function updateReviewerInviteTable(rows) {
       if (redeemedBy) {
         setReviewerLifecycleSelectedReviewer(redeemedBy)
         await listReviewerDevices({ reviewerId: redeemedBy })
+        await listReviewerSessions({ reviewerId: redeemedBy })
       }
     })
     tbody.appendChild(tr)
@@ -5513,6 +5516,7 @@ function updateReviewerAccountTable(rows) {
     bindInteractiveRow(tr, async () => {
       setReviewerLifecycleSelectedReviewer(reviewerId)
       await listReviewerDevices({ reviewerId })
+      await listReviewerSessions({ reviewerId })
     })
     tbody.appendChild(tr)
   })
@@ -5545,6 +5549,49 @@ function updateReviewerDeviceTable(rows) {
     actionRow.appendChild(revokeButton)
     actions.appendChild(actionRow)
     tr.appendChild(actions)
+    tbody.appendChild(tr)
+  })
+}
+
+function updateReviewerSessionTable(rows) {
+  state.reviewerLifecycle.sessions = Array.isArray(rows) ? rows : []
+  const table = byId("reviewerSessionTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
+  tbody.innerHTML = ""
+  state.reviewerLifecycle.sessions.forEach((item) => {
+    const tr = document.createElement("tr")
+    const sessionId = String(item.session_id || "").trim()
+    const reviewerId = String(item.reviewer_id || "").trim()
+    const deviceId = String(item.device_id || "").trim()
+    tr.appendChild(cell(sessionId || "-"))
+    tr.appendChild(cell(deviceId || "-"))
+    tr.appendChild(cell(formatEpochTimestamp(item.issued_at)))
+    tr.appendChild(cell(formatEpochTimestamp(item.expires_at)))
+
+    const actions = document.createElement("td")
+    const actionRow = document.createElement("div")
+    actionRow.className = "inline-form wrap"
+    const revokeButton = reviewerLifecycleActionButton(reviewerLifecycleRevokeLabel())
+    revokeButton.disabled = !hasCapability("admin.reviewer.lifecycle.manage")
+    revokeButton.addEventListener("click", (event) => {
+      event.stopPropagation()
+      void revokeReviewerSessions({ reviewerId, sessionId, deviceId })
+    })
+    actionRow.appendChild(revokeButton)
+    actions.appendChild(actionRow)
+    tr.appendChild(actions)
+    bindInteractiveRow(tr, () => {
+      const sessionNode = byId("reviewerSessionId")
+      if (sessionNode) {
+        sessionNode.value = sessionId
+      }
+      const deviceNode = byId("reviewerSessionDeviceId")
+      if (deviceNode && deviceId) {
+        deviceNode.value = deviceId
+      }
+    })
     tbody.appendChild(tr)
   })
 }
@@ -5739,6 +5786,57 @@ async function listReviewerDevices(options = {}) {
   return response
 }
 
+async function listReviewerSessions(options = {}) {
+  const a = actor()
+  const reviewerId = String(options.reviewerId || reviewerLifecycleSelectedReviewerId()).trim()
+  const deviceId = String(options.deviceId !== undefined ? options.deviceId : readTextField("reviewerSessionDeviceId")).trim()
+  if (!reviewerId) {
+    setReviewerLifecycleState(
+      "reviewerSessionState",
+      "danger",
+      "reviewer.lifecycle.sessions.target_required",
+      "Reviewer ID is required before listing sessions.",
+    )
+    return buildClientErrorResponse("reviewer_id_required", "reviewer_id is required", 400)
+  }
+  setReviewerLifecycleSelectedReviewer(reviewerId)
+  setReviewerLifecycleState(
+    "reviewerSessionState",
+    "warning",
+    "reviewer.lifecycle.sessions.loading",
+    "Loading reviewer sessions...",
+  )
+  const response = await api(
+    `/api/admin/reviewer/sessions${queryString({ role: a.role, reviewer_id: reviewerId, device_id: deviceId })}`,
+  )
+  render("reviewer_session_list", response)
+  if (!response.data || !response.data.ok) {
+    updateReviewerSessionTable([])
+    setReviewerLifecycleState(
+      "reviewerSessionState",
+      "danger",
+      "reviewer.lifecycle.sessions.load_failed",
+      "Failed to load reviewer sessions.",
+    )
+    return response
+  }
+  const sessions = Array.isArray(apiData(response).sessions) ? apiData(response).sessions : []
+  updateReviewerSessionTable(sessions)
+  setReviewerLifecycleState(
+    "reviewerSessionState",
+    sessions.length ? "success" : "neutral",
+    sessions.length ? "reviewer.lifecycle.sessions.loaded" : "reviewer.lifecycle.sessions.empty",
+    sessions.length
+      ? "Loaded {count} sessions for {reviewer_id}."
+      : "No active reviewer sessions matched the current filter.",
+    {
+      count: sessions.length,
+      reviewer_id: reviewerId,
+    },
+  )
+  return response
+}
+
 async function revokeReviewerDevice(deviceId) {
   const a = actor()
   const reviewerId = reviewerLifecycleSelectedReviewerId()
@@ -5836,10 +5934,11 @@ async function resetReviewerDevices() {
   return response
 }
 
-async function revokeReviewerSessions() {
+async function revokeReviewerSessions(options = {}) {
   const a = actor()
-  const reviewerId = reviewerLifecycleSelectedReviewerId()
-  const deviceId = readTextField("reviewerSessionDeviceId")
+  const reviewerId = String(options.reviewerId || reviewerLifecycleSelectedReviewerId()).trim()
+  const deviceId = String(options.deviceId !== undefined ? options.deviceId : readTextField("reviewerSessionDeviceId")).trim()
+  const sessionId = String(options.sessionId !== undefined ? options.sessionId : readTextField("reviewerSessionId")).trim()
   if (!reviewerId) {
     setReviewerLifecycleState(
       "reviewerSessionState",
@@ -5849,6 +5948,7 @@ async function revokeReviewerSessions() {
     )
     return buildClientErrorResponse("reviewer_id_required", "reviewer_id is required", 400)
   }
+  setReviewerLifecycleSelectedReviewer(reviewerId)
   setReviewerLifecycleState(
     "reviewerSessionState",
     "warning",
@@ -5862,6 +5962,7 @@ async function revokeReviewerSessions() {
       admin_id: a.admin_id,
       reviewer_id: reviewerId,
       device_id: deviceId,
+      session_id: sessionId,
     },
   })
   render("reviewer_session_revoke", response)
@@ -5876,18 +5977,26 @@ async function revokeReviewerSessions() {
   }
   const data = apiData(response)
   const count = Number(data.revoked_sessions || 0)
+  await listReviewerSessions({ reviewerId, deviceId })
   if (count > 0) {
     setReviewerLifecycleState(
       "reviewerSessionState",
       "success",
-      deviceId ? "reviewer.lifecycle.sessions.revoked_device" : "reviewer.lifecycle.sessions.revoked",
-      deviceId
-        ? "Revoked {count} sessions for {reviewer_id} on device {device_id}."
-        : "Revoked {count} sessions for {reviewer_id}.",
+      sessionId
+        ? "reviewer.lifecycle.sessions.revoked_session"
+        : deviceId
+          ? "reviewer.lifecycle.sessions.revoked_device"
+          : "reviewer.lifecycle.sessions.revoked",
+      sessionId
+        ? "Revoked session {session_id} for {reviewer_id}."
+        : deviceId
+          ? "Revoked {count} sessions for {reviewer_id} on device {device_id}."
+          : "Revoked {count} sessions for {reviewer_id}.",
       {
         count,
         reviewer_id: reviewerId,
         device_id: deviceId,
+        session_id: sessionId,
       },
     )
   } else {
@@ -7048,6 +7157,12 @@ function bindButtons() {
   if (reviewerDeviceResetButton) {
     reviewerDeviceResetButton.addEventListener("click", () => {
       void resetReviewerDevices()
+    })
+  }
+  const reviewerSessionListButton = byId("btnReviewerSessionList")
+  if (reviewerSessionListButton) {
+    reviewerSessionListButton.addEventListener("click", () => {
+      void listReviewerSessions()
     })
   }
   const reviewerSessionRevokeButton = byId("btnReviewerSessionRevoke")

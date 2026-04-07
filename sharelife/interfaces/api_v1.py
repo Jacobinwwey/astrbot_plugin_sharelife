@@ -1274,6 +1274,7 @@ class SharelifeApiV1:
         admin_id: str,
         revoked_sessions: int,
         device_id: str = "",
+        session_id: str = "",
     ) -> dict:
         if not self._is_admin_role(role):
             return {"error": "permission_denied"}
@@ -1281,6 +1282,7 @@ class SharelifeApiV1:
         if not uid:
             return {"error": "reviewer_id_required"}
         normalized_device_id = str(device_id or "").strip()
+        normalized_session_id = str(session_id or "").strip()
         count = max(0, int(revoked_sessions or 0))
         detail: dict[str, Any] = {
             "reviewer_id": uid,
@@ -1288,6 +1290,8 @@ class SharelifeApiV1:
         }
         if normalized_device_id:
             detail["device_id"] = normalized_device_id
+        if normalized_session_id:
+            detail["session_id"] = normalized_session_id
         self._audit(
             action="reviewer.session_force_revoke",
             actor_id=str(admin_id or "admin"),
@@ -1300,6 +1304,7 @@ class SharelifeApiV1:
             "status": "revoked" if count else "noop",
             "reviewer_id": uid,
             "device_id": normalized_device_id,
+            "session_id": normalized_session_id,
             "revoked_sessions": count,
         }
 
