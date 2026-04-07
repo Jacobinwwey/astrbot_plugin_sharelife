@@ -25,6 +25,7 @@
 1. `upload_options.replace_existing` は実動作化され、同一 user/template の既存 `pending` submission を新規 submission で退役できるようになりました。
 2. SQLite の market submission 永続化で `upload_options` を保持し、`upload_options_json` 列がない旧テーブルは自動マイグレーションされます。
 3. 実行契約に合わせて WebUI の状態語彙を三言語で補完し、`queued/running/succeeded/failed/cancelled/stale` を追加しました。member/reviewer/admin 画面での生ステータス表示を減らします。
+4. `profile-pack` の submit フローにも `replace_existing` を実動作で追加しました。同一 user + 同一 pack の既存 `pending` submission は `replaced` に退役され、`replaced_submission_ids` / `replaced_submission_count` と監査イベントが出力されます。
 
 ## 2. 交差分析での決定
 

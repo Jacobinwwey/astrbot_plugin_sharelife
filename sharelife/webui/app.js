@@ -6362,6 +6362,7 @@ function readProfilePackSubmitOptionsFromForm() {
         .map((item) => item.trim())
         .filter(Boolean)
       : [],
+    replace_existing: Boolean(byId("submitReplaceExisting") && byId("submitReplaceExisting").checked),
   }
 }
 

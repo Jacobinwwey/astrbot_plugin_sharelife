@@ -31,6 +31,7 @@ test("buildSubmitPayload includes normalized submit options when present", () =>
       pack_type: "extension_pack",
       selected_sections: ["plugins", "providers"],
       redaction_mode: "include_provider_no_key",
+      replace_existing: true,
     },
   })
   assert.deepEqual(payload, {
@@ -40,6 +41,7 @@ test("buildSubmitPayload includes normalized submit options when present", () =>
       pack_type: "extension_pack",
       selected_sections: ["plugins", "providers"],
       redaction_mode: "include_provider_no_key",
+      replace_existing: true,
     },
   })
 })

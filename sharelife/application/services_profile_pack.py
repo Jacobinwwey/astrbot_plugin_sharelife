@@ -42,6 +42,7 @@ from ..infrastructure.system_clock import SystemClock
 PROFILE_PACK_SUBMISSION_PENDING = "pending"
 PROFILE_PACK_SUBMISSION_APPROVED = "approved"
 PROFILE_PACK_SUBMISSION_REJECTED = "rejected"
+PROFILE_PACK_SUBMISSION_REPLACED = "replaced"
 
 
 @dataclass(slots=True)
@@ -98,6 +99,7 @@ class ProfilePackSubmission:
     capability_summary: dict[str, Any] = field(default_factory=dict)
     compatibility_matrix: dict[str, Any] = field(default_factory=dict)
     review_evidence: dict[str, Any] = field(default_factory=dict)
+    submit_options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -619,7 +621,13 @@ class ProfilePackService:
             )
         return out
 
-    def submit_export_artifact(self, user_id: str, artifact_id: str) -> ProfilePackSubmission:
+    def submit_export_artifact(
+        self,
+        user_id: str,
+        artifact_id: str,
+        *,
+        submit_options: dict[str, Any] | None = None,
+    ) -> ProfilePackSubmission:
         artifact = self.get_export_artifact(artifact_id=artifact_id)
         if not artifact.path.exists():
             raise ValueError("PROFILE_PACK_ARTIFACT_NOT_FOUND")
@@ -671,10 +679,39 @@ class ProfilePackService:
             capability_summary=capability_summary,
             compatibility_matrix=compatibility_matrix,
             review_evidence=review_evidence,
+            submit_options=dict(submit_options or {}),
         )
         self._submissions[submission.submission_id] = submission
         self._flush_state()
         return submission
+
+    def replace_pending_submissions(
+        self,
+        *,
+        user_id: str,
+        pack_id: str,
+        exclude_submission_id: str = "",
+    ) -> list[str]:
+        normalized_user_id = str(user_id or "").strip()
+        normalized_pack_id = str(pack_id or "").strip()
+        normalized_exclude = str(exclude_submission_id or "").strip()
+        if not normalized_user_id or not normalized_pack_id:
+            return []
+        now = self.clock.utcnow().isoformat()
+        replaced: list[str] = []
+        for item in self._submissions.values():
+            if item.submission_id == normalized_exclude:
+                continue
+            if item.user_id != normalized_user_id or item.pack_id != normalized_pack_id:
+                continue
+            if item.status != PROFILE_PACK_SUBMISSION_PENDING:
+                continue
+            item.status = PROFILE_PACK_SUBMISSION_REPLACED
+            item.updated_at = now
+            replaced.append(item.submission_id)
+        if replaced:
+            self._flush_state()
+        return replaced
 
     def get_submission(self, submission_id: str) -> ProfilePackSubmission:
         record = self._submissions.get(str(submission_id or "").strip())
@@ -1959,6 +1996,7 @@ class ProfilePackService:
                     capability_summary=dict(item.get("capability_summary", {}) or {}),
                     compatibility_matrix=dict(item.get("compatibility_matrix", {}) or {}),
                     review_evidence=dict(item.get("review_evidence", {}) or {}),
+                    submit_options=dict(item.get("submit_options", {}) or {}),
                 )
             except Exception:
                 continue
@@ -2092,6 +2130,7 @@ class ProfilePackService:
                     "capability_summary": dict(item.capability_summary),
                     "compatibility_matrix": dict(item.compatibility_matrix),
                     "review_evidence": dict(item.review_evidence),
+                    "submit_options": dict(item.submit_options),
                 }
             )
         published = []

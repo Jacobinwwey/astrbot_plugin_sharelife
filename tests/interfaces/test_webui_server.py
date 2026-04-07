@@ -1867,6 +1867,55 @@ def test_webui_profile_pack_market_routes_support_submission_and_catalog(tmp_pat
     assert insights.json()["data"]["metrics"]["total"] == 1
 
 
+def test_webui_profile_pack_submit_replace_existing_retires_previous_pending_submission(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/community-replace",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    first = client.post(
+        "/api/profile-pack/submit",
+        json={
+            "user_id": "member-1",
+            "artifact_id": artifact_id,
+        },
+    )
+    assert first.status_code == 200
+    first_submission_id = first.json()["data"]["submission_id"]
+
+    second = client.post(
+        "/api/profile-pack/submit",
+        json={
+            "user_id": "member-1",
+            "artifact_id": artifact_id,
+            "submit_options": {"replace_existing": True},
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["data"]["replaced_submission_count"] == 1
+    assert second.json()["data"]["replaced_submission_ids"] == [first_submission_id]
+
+    replaced_detail = client.get(
+        "/api/member/profile-pack/submissions/detail",
+        params={
+            "user_id": "member-1",
+            "submission_id": first_submission_id,
+        },
+    )
+    assert replaced_detail.status_code == 200
+    assert replaced_detail.json()["data"]["status"] == "replaced"
+
+
 def test_webui_profile_pack_decision_can_auto_publish_to_public_market(tmp_path):
     public_market_root = tmp_path / "public-market"
     server = build_server(

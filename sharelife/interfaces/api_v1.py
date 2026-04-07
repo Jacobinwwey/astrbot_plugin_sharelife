@@ -1113,9 +1113,30 @@ class SharelifeApiV1:
             submission = self.profile_pack_service.submit_export_artifact(
                 user_id=user_id,
                 artifact_id=normalized_artifact_id,
+                submit_options=normalized_submit_options,
             )
         except ValueError as exc:
             return self._profile_pack_error_payload(exc=exc, fallback_id=normalized_artifact_id)
+        replaced_submission_ids: list[str] = []
+        if normalized_submit_options.get("replace_existing"):
+            replaced_submission_ids = self.profile_pack_service.replace_pending_submissions(
+                user_id=user_id,
+                pack_id=submission.pack_id,
+                exclude_submission_id=submission.submission_id,
+            )
+            if replaced_submission_ids:
+                self._audit(
+                    action="profile_pack.submission.pending_replaced",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=submission.pack_id,
+                    status="replaced",
+                    detail={
+                        "pack_id": submission.pack_id,
+                        "replace_existing": True,
+                        "replaced_submission_ids": list(replaced_submission_ids),
+                    },
+                )
         self._audit(
             action="profile_pack.submission_created",
             actor_id=user_id,
@@ -1126,10 +1147,14 @@ class SharelifeApiV1:
                 "pack_id": submission.pack_id,
                 "version": submission.version,
                 "submit_options": normalized_submit_options,
+                "replaced_submission_ids": list(replaced_submission_ids),
+                "replaced_submission_count": len(replaced_submission_ids),
             },
         )
         payload = self._profile_pack_submission_payload(submission)
         payload["submit_options"] = normalized_submit_options
+        payload["replaced_submission_ids"] = list(replaced_submission_ids)
+        payload["replaced_submission_count"] = len(replaced_submission_ids)
         return payload
 
     def admin_create_reviewer_invite(
@@ -2252,6 +2277,7 @@ class SharelifeApiV1:
             "pack_type": pack_type,
             "selected_sections": selected_sections,
             "redaction_mode": redaction_mode,
+            "replace_existing": cls._as_bool(payload.get("replace_existing"), default=False),
         }
 
     def _member_installations_payload(self, user_id: str, limit: int) -> list[dict]:
@@ -2389,6 +2415,7 @@ class SharelifeApiV1:
             "capability_summary": dict(submission.capability_summary),
             "compatibility_matrix": dict(submission.compatibility_matrix),
             "review_evidence": dict(submission.review_evidence),
+            "submit_options": dict(submission.submit_options),
             "reviewer_id": submission.reviewer_id,
             "review_note": submission.review_note,
             "review_labels": list(submission.review_labels),

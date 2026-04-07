@@ -1754,6 +1754,9 @@
       pack_type: String(byId("marketSubmitPackType")?.value || "bot_profile_pack").trim() || "bot_profile_pack",
       selected_sections: normalizeList(byId("marketSubmitSelectedSections")?.value || ""),
       redaction_mode: String(byId("marketSubmitRedactionMode")?.value || "exclude_secrets").trim() || "exclude_secrets",
+      replace_existing: Boolean(
+        byId("marketSubmitReplaceExisting") && byId("marketSubmitReplaceExisting").checked
+      ),
     }
   }
 

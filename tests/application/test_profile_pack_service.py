@@ -788,3 +788,39 @@ def test_profile_pack_governance_metadata_and_featured_toggle(tmp_path):
     )
     assert featured.featured is True
     assert featured.featured_note.startswith("featured")
+
+
+def test_profile_pack_replace_pending_submissions_marks_previous_rows_as_replaced(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    artifact = service.export_bot_profile_pack(
+        pack_id="profile/community-replace",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    first = service.submit_export_artifact(
+        user_id="member-1",
+        artifact_id=artifact.artifact_id,
+    )
+    service.submit_export_artifact(
+        user_id="member-2",
+        artifact_id=artifact.artifact_id,
+    )
+    latest = service.submit_export_artifact(
+        user_id="member-1",
+        artifact_id=artifact.artifact_id,
+    )
+
+    replaced = service.replace_pending_submissions(
+        user_id="member-1",
+        pack_id="profile/community-replace",
+        exclude_submission_id=latest.submission_id,
+    )
+    assert replaced == [first.submission_id]
+    assert service.get_submission(first.submission_id).status == "replaced"
+
+    replaced_again = service.replace_pending_submissions(
+        user_id="member-1",
+        pack_id="profile/community-replace",
+        exclude_submission_id=latest.submission_id,
+    )
+    assert replaced_again == []

@@ -214,6 +214,7 @@ def test_api_submit_profile_pack_returns_normalized_submit_options(tmp_path):
             "pack_type": "extension_pack",
             "selected_sections": "plugins,providers",
             "redaction_mode": "include_provider_no_key",
+            "replace_existing": True,
         },
     )
 
@@ -221,7 +222,54 @@ def test_api_submit_profile_pack_returns_normalized_submit_options(tmp_path):
         "pack_type": "extension_pack",
         "selected_sections": ["plugins", "providers"],
         "redaction_mode": "include_provider_no_key",
+        "replace_existing": True,
     }
+
+
+def test_api_submit_profile_pack_replace_existing_retires_previous_pending_submission(tmp_path):
+    api, _ = build_interfaces(tmp_path)
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-safe-replace",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+
+    first = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported["artifact_id"],
+    )
+    assert first["status"] == "pending"
+
+    second = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported["artifact_id"],
+        submit_options={"replace_existing": True},
+    )
+    assert second["status"] == "pending"
+    assert second["replaced_submission_count"] == 1
+    assert second["replaced_submission_ids"] == [first["submission_id"]]
+
+    first_detail = api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=first["submission_id"],
+    )
+    assert first_detail["status"] == "replaced"
+
+    pending_rows = api.member_list_profile_pack_submissions(
+        user_id="member-1",
+        status="pending",
+    )
+    assert [item["submission_id"] for item in pending_rows["submissions"]] == [second["submission_id"]]
+
+    replaced_rows = api.member_list_profile_pack_submissions(
+        user_id="member-1",
+        status="replaced",
+    )
+    assert [item["submission_id"] for item in replaced_rows["submissions"]] == [first["submission_id"]]
+
+    audit = api.admin_list_audit(role="admin", limit=20)
+    assert any(item["action"] == "profile_pack.submission.pending_replaced" for item in audit["events"])
 
 
 def test_api_profile_pack_plugin_install_confirmation_flow(tmp_path):
@@ -768,6 +816,41 @@ def test_web_api_profile_pack_submission_review_publish_routes(tmp_path):
     assert isinstance(row["before_preview"], list)
     assert isinstance(row["after_preview"], list)
     assert isinstance(row["diff_preview"], list)
+
+
+def test_web_api_submit_profile_pack_replace_existing_retires_previous_pending_submission(tmp_path):
+    _, web_api = build_interfaces(tmp_path)
+    exported = web_api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-web-replace",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    assert exported.ok is True
+
+    first = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported.data["artifact_id"],
+    )
+    assert first.ok is True
+    assert first.data["status"] == "pending"
+
+    second = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported.data["artifact_id"],
+        submit_options={"replace_existing": True},
+    )
+    assert second.ok is True
+    assert second.data["status"] == "pending"
+    assert second.data["replaced_submission_count"] == 1
+    assert second.data["replaced_submission_ids"] == [first.data["submission_id"]]
+
+    replaced = web_api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=first.data["submission_id"],
+    )
+    assert replaced.ok is True
+    assert replaced.data["status"] == "replaced"
 
 
 def test_web_api_member_profile_pack_submission_views_are_owner_scoped(tmp_path):
