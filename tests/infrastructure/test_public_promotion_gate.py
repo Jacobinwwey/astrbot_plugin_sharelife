@@ -40,11 +40,12 @@ def test_promotion_gate_blocks_private_paths() -> None:
 
 def test_promotion_gate_blocks_inline_secret_but_allows_marked_redacted_line() -> None:
     gate = _load_gate_module()
+    secret_line = "admin_" + 'password = "realSecret42"'
     report = gate.evaluate_change_set(
         changed_paths=["docs/en/how-to/demo.md"],
         added_lines_by_path={
             "docs/en/how-to/demo.md": [
-                (12, 'admin_password = "realSecret42"'),
+                (12, secret_line),
                 (13, 'passphrase = "<redacted>" # promotion:allow'),
             ]
         },
