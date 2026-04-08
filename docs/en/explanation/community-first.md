@@ -4,14 +4,14 @@
 
 ## Practical trade-offs
 
-1. Prioritize trial safety, risk scanning, and admin apply/rollback.
+1. Prioritize trial safety, risk scanning, and the guarded promotion path.
 2. Keep enterprise governance hooks available, but not enabled as default workflow.
 3. Keep service boundaries clean now so SDK v4 migration is cheaper later.
 
 ## What users get today
 
 1. Members can trial templates without mutating global runtime state.
-2. Admins get a guarded path for risky changes.
+2. Risky changes stay behind guarded, privileged controls.
 3. Community packs can be adopted with strict mode and audit evidence.
 
 ## Why this scales later

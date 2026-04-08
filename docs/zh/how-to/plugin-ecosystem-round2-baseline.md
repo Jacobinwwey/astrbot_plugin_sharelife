@@ -19,7 +19,7 @@
 2. `M2` 完成：能力网关（`sharelife/application/services_capability_gateway.py`），未声明高风险能力默认拒绝
 3. `M3` 完成：DX 命令（`scripts/create-astrbot-plugin`、`scripts/sharelife-hot-reload`）和 SDK 契约（`sharelife/sdk/contracts.py`）
 4. `M4` 完成：流水线编排（`sharelife/application/services_pipeline.py`），支持 A->B 串联和 `retry/skip/abort`
-5. `M5` 完成：治理元数据（`capability_summary`、`compatibility_matrix`、`review_evidence`）和精选门禁（`/api/admin/profile-pack/catalog/featured`）
+5. `M5` 完成：治理元数据（`capability_summary`、`compatibility_matrix`、`review_evidence`）和私有精选门禁
 
 后续扩展：
 

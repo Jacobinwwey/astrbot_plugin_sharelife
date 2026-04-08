@@ -15,7 +15,7 @@
 > 我们很难定义记忆与怀念，也许它们就是生命的印迹。Sharelife 希望陪伴你体验每一段珍贵的生命，消融所有界限的枷锁。（无损接入任意 bot 与设置）
 
 `sharelife` is an AstrBot plugin for secure, high-fidelity Agent/Bot setup sharing.
-It gives you a practical workflow to trial community templates, run strict admin review, and replicate bot configurations with rollback safety.
+It gives you a practical workflow to trial community templates, use guarded review handoff, and replicate bot configurations with rollback safety.
 
 Language Switch:
 - English Docs: [GitHub Pages EN](https://jacobinwwey.github.io/astrbot_plugin_sharelife/en/)
@@ -28,8 +28,8 @@ Language Switch:
 - High-fidelity replication (`bot_profile_pack` / `extension_pack`) with section-level diff and rollback.
 - Optional stateful migration (`memory_store` / `conversation_history` / `knowledge_base`) with explicit environment reconfigure notices (`environment_manifest`).
 - Risk-aware governance with labels, warning flags, prompt-injection detection, and audit timeline.
-- Standalone WebUI (`/`, `/member`, `/admin`, `/market`) with i18n (`en-US` / `zh-CN` / `ja-JP`).
-- Plugin-install execution guard (`plan -> confirm -> execute`) with explicit admin control.
+- Standalone WebUI (`/`, `/member`, `/market`) with i18n (`en-US` / `zh-CN` / `ja-JP`).
+- Plugin-install execution guard (`plan -> confirm -> execute`) with explicit privileged control.
 
 ## 3-Minute Onboarding
 
@@ -41,20 +41,17 @@ bash scripts/sharelife-init-wizard --yes --output config.generated.yaml
 pytest -q && node --test tests/webui/*.js
 ```
 
-Human quick install (auth-enabled with optional anonymous member mode):
+Useful wizard flags for public/member deployment:
 
-```bash
-pip install -r requirements.txt
-bash scripts/sharelife-init-wizard --yes \
-  --webui-auth true \
-  --member-password "<member_password>" \
-  --admin-password "<admin_password_12plus>" \
-  --allow-anonymous-member true \
-  --anonymous-member-user-id "webui-user" \
-  --anonymous-member-allowlist "POST /api/trial,GET /api/trial/status,POST /api/templates/install,GET /api/member/installations,POST /api/member/installations/refresh,GET /api/preferences,POST /api/preferences/mode,POST /api/preferences/observe" \
-  --output config.generated.yaml
-pytest -q && node --test tests/webui/*.js
+```text
+--webui-auth true
+--member-password "<member_password>"
+--allow-anonymous-member true
+--anonymous-member-user-id "webui-user"
+--anonymous-member-allowlist "POST /api/trial,GET /api/trial/status,POST /api/templates/install,GET /api/member/installations,POST /api/member/installations/refresh,GET /api/preferences,POST /api/preferences/mode,POST /api/preferences/observe"
 ```
+
+Privileged auth bootstrap and secret-handling runbooks stay in private operator docs.
 
 Then verify in chat:
 
@@ -68,10 +65,10 @@ Then verify in chat:
 AI quick-install prompt (copy once):
 
 ```text
-Act as a terminal setup agent in repo root `astrbot_plugin_sharelife`. Run exactly: (1) `pip install -r requirements.txt`; (2) `bash scripts/sharelife-init-wizard --yes --webui-auth true --member-password "member-pass" --admin-password "admin-pass-1234" --allow-anonymous-member false --output config.generated.yaml`; (3) `pytest -q`; (4) `node --test tests/webui/*.js`. If any step fails, stop and print only: failed step + root cause + exact fix command. If all pass, output: `READY`, generated config path, and the four validation chat commands: `/sharelife_pref`, `/sharelife_market`, `/sharelife_trial community/basic`, `/sharelife_trial_status community/basic`.
+Act as a terminal setup agent in repo root `astrbot_plugin_sharelife`. Run exactly: (1) `pip install -r requirements.txt`; (2) `bash scripts/sharelife-init-wizard --yes --output config.generated.yaml`; (3) `pytest -q`; (4) `node --test tests/webui/*.js`. If any step fails, stop and print only: failed step + root cause + exact fix command. If all pass, output: `READY`, generated config path, and the four validation chat commands: `/sharelife_pref`, `/sharelife_market`, `/sharelife_trial community/basic`, `/sharelife_trial_status community/basic`.
 ```
 
-If this passes, continue with strict apply and profile-pack flow in [QUICKSTART.md](QUICKSTART.md) or the docs site.
+If this passes, continue with local install, upload, and profile-pack flow in [QUICKSTART.md](QUICKSTART.md) or the docs site.
 
 ## Init Wizard And Config Template
 
@@ -98,11 +95,6 @@ User-side:
 - `/sharelife_submit <template_id> <version>`
 - `/sharelife_webui`
 
-Admin-side core:
-- `/sharelife_dryrun <template_id> [version] [plan_id]`
-- `/sharelife_apply <plan_id>`
-- `/sharelife_rollback <plan_id>`
-
 <details>
 <summary><b>Advanced Profile-Pack Commands</b></summary>
 
@@ -120,22 +112,16 @@ Default local URL:
 - `http://127.0.0.1:8106`
 - Market page: `http://127.0.0.1:8106/market`
 
-Standalone admin-auth default:
-- Admin/reviewer auth procedures and secret-backup steps are intentionally excluded from the public README and docs site.
+Privileged auth boundary:
+- Privileged auth procedures and secret-backup steps are intentionally excluded from the public README and docs site.
 - Maintain those runbooks locally under `docs-private/` or in a separate internal repository.
 
 WebUI capability highlights:
 - Trial Status panel for TTL and remaining time.
-- Admin Apply Workflow panel for dry-run/apply/rollback.
-- Template and profile-pack market browsing, compare, moderation, and audit visibility.
+- Local installation management with reinstall/uninstall handoff.
+- Template and profile-pack market browsing, compare, upload, and owner-scoped submission visibility.
 - Built-in profile-pack reference sample: `profile/official-starter` (`bot_profile_pack`, featured).
 - Public downloadable market packs are published under `docs/public/market/` and served on GitHub Pages after push to `main`.
-- Approved community packs can be promoted into the public market with `python3 scripts/publish_public_market_pack.py ...`.
-- Optional runtime auto-publish on profile-pack approval can be enabled with:
-  - `sharelife.webui.public_market.auto_publish_profile_pack_approve=true`
-  - `sharelife.webui.public_market.root=/abs/path/to/docs/public` (optional)
-  - `sharelife.webui.public_market.rebuild_snapshot_on_publish=true`
-- Sanitized public-market cold backups can be archived or synced with `python3 scripts/backup_public_market.py ...`.
 
 Reference sample pack (for users/developers):
 - Exploded sample pack: `examples/profile-packs/official-starter/`
@@ -193,7 +179,7 @@ Quick links:
 Want to share your own setup?
 1. Build your template/package locally.
 2. Submit via `/sharelife_submit <template_id> <version>` (or WebUI submit flow).
-3. Let admins review with risk labels and strict apply gate.
+3. The submission enters the gated review queue.
 
 Reviewer access is invite-only.
 - If you want to become a reviewer, contact `Jacobinwwey` first.

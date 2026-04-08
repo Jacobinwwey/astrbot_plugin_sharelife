@@ -38,7 +38,7 @@
 1. AstrBot `data/cmd_config.json` のうち、上記 section に鏡像されていないキーは自動移行されません。
 2. AstrBot 設定スキーマに対するフィールド単位の変換層は未実装で、アダプタは `section_name -> state_key` の 1:1 です。
 3. プラグイン実体、システム依存、コンテナ状態、外部 DB/KB 生ファイルは profile pack には含まれません。`environment_manifest` は「再構成が必要」という宣言情報のみ保持します。
-4. プラグイン install 実行は既定で無効。install メタデータがあっても管理者確認と実行ゲート設定が必要です。
+4. プラグイン install 実行は既定で無効。install メタデータがあっても特権確認と実行ゲート設定が必要です。
 5. バージョン跨ぎ互換は宣言検証（`astrbot_version` / `plugin_compat`）中心で、自動意味移行は行いません。
 6. `environment_manifest` や KB 外部パス情報が含まれる場合、import 後は `compatibility_issues` に再構成通知を出し、運用者による後処理を必須化します（degraded）。
 

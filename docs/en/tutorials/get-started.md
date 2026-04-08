@@ -55,7 +55,7 @@ Run `/sharelife_pref` again and confirm the value changed.
 
 Run `/sharelife_pref` and verify `observe_task_details=on`.
 
-## Step 4: trial state and admin apply flow
+## Step 4: trial state and local install handoff
 
 Member actions:
 
@@ -65,52 +65,40 @@ Member actions:
 ```
 
 You should get one of `not_started`, `active`, `expired` plus TTL fields.
-Repeated trial on the same template enters the admin queue.
 
-Admin queue actions:
-
-```text
-/sharelife_retry_list
-/sharelife_retry_lock <request_id>
-/sharelife_retry_decide <request_id> approve <request_version> <lock_version>
-```
-
-Admin apply flow:
-
-```text
-/sharelife_dryrun community/basic 1.0.0
-/sharelife_apply <plan_id>
-/sharelife_rollback <plan_id>
-```
-
-If `plan_id` is omitted, Sharelife derives one like `plan-community-basic`.
-
-## Step 5: community submit and install
-
-Member submit:
-
-```text
-/sharelife_submit community/basic 1.0.0
-```
-
-Admin moderation:
-
-```text
-/sharelife_submission_list
-/sharelife_submission_decide <submission_id> approve
-```
-
-Member install path:
+Then continue with the local member install flow:
 
 ```text
 /sharelife_market
-/sharelife_install community/basic
 /sharelife_prompt community/basic
 /sharelife_package community/basic
 ```
 
-Admin audit check:
+Use `/member` or `/market` in the local WebUI for the actual install controls:
 
-```text
-/sharelife_audit 20
-```
+- `preflight`
+- `force_reinstall`
+- `source_preference=auto|uploaded_submission|generated`
+
+## Step 5: upload and community submission
+Template upload in the local WebUI:
+
+1. Open `/member` or `/market`.
+2. Choose a template package or generated package output.
+3. Direct package upload is capped at `20 MiB`.
+4. Available upload controls:
+   - `scan_mode=strict|balanced`
+   - `visibility=community|private`
+   - `replace_existing=true|false`
+5. Inspect the result from `My Submissions`.
+
+Profile-pack community submission:
+
+1. Prepare or export a local artifact and copy its `artifact_id`.
+2. Submit it from `/member` or `/market`.
+3. Available submit controls:
+   - `pack_type`
+   - `selected_sections`
+   - `redaction_mode`
+   - `replace_existing`
+4. Inspect owner-scoped status and export download from `My Profile-Pack Submissions`.

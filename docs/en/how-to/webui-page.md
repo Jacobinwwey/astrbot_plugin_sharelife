@@ -3,8 +3,14 @@
 ## Scope
 
 Sharelife WebUI runs standalone; you do not need AstrBot Dashboard embedding.
-Use it for trial, moderation, apply/rollback, profile-pack operations, and audit checks.
-Core panels include Trial Status and Admin Apply Workflow.
+This public page documents the public/member experience only:
+
+1. Spotlight-style market search
+2. local installation management
+3. template upload and profile-pack community submission
+4. task/result tracking on the member side
+
+Privileged moderation and operator workflows are intentionally documented in private docs only.
 
 ## Config
 
@@ -54,32 +60,27 @@ Core panels include Trial Status and Admin Apply Workflow.
 }
 ```
 
-Auth behavior:
+## Auth behavior
 
-1. Empty auth fields keep the public/member-only surface available.
-2. Any valid WebUI password enables API login gating.
-3. Admin API authorization uses token role, not request body `role`.
-4. Legacy `auth.password` still works as member-only compatibility.
-5. Query token auth is off by default; use `Authorization: Bearer <token>`.
-6. Login attempts are rate-limited by `login_rate_limit_*`.
-7. Token TTL is controlled by `token_ttl_seconds`.
-8. API requests are rate-limited by `api_rate_limit_*` (`client + role + path` scope).
-9. Metrics path cardinality is guarded by `observability.metrics_max_paths`; overflow paths are folded into `metrics_overflow_path_label`.
-10. `GET /api/ui/capabilities` stays readable before login and returns the effective role + operation list used by UI-level capability gating.
-11. Default WebUI responses include security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Content-Security-Policy`), configurable under `webui.security_headers`.
-12. Reviewer/admin auth procedures and secret-backup instructions are intentionally kept out of the public docs surface.
-13. If `allow_anonymous_member=true`, selected member endpoints (`trial/install/preferences/installations`) can run without login, but are still pinned to `anonymous_member_user_id` and cannot cross-access other `user_id`s.
-14. `anonymous_member_allowlist` lets operators override the anonymous endpoint set explicitly (`"METHOD /api/path"` entries). Missing field falls back to the secure default set above.
+1. Empty auth fields keep the public/member surface available.
+2. `member_password` enables login gating for protected member actions.
+3. `GET /api/ui/capabilities` stays readable before login so the UI can capability-gate controls.
+4. Query token auth is off by default; use `Authorization: Bearer <token>`.
+5. Login attempts are rate-limited by `login_rate_limit_*`.
+6. API requests are rate-limited by `api_rate_limit_*` (`client + role + path` scope).
+7. Default responses include `security_headers`, including `Content-Security-Policy`.
+8. If `allow_anonymous_member=true`, only the configured anonymous allowlist can run without login, and requests stay pinned to `anonymous_member_user_id`.
+9. Privileged auth procedures, secret material, and backup/restore runbooks stay in private docs.
 
 ## Start and routes
 
-1. Plugin tries to start WebUI on init.
-2. Run `/sharelife_webui` to get URL.
-3. Open one of these routes:
-   - `/` full console
+1. Plugin startup attempts to launch WebUI automatically.
+2. Run `/sharelife_webui` to get the URL.
+3. Public/member-facing routes:
+   - `/` integrated entry
    - `/member` member-focused console
-   - `/admin` admin-focused console
    - `/market` standalone market page
+4. Restricted operator routes exist, but they are intentionally not described in the public docs.
 
 ### Container quick start
 
@@ -91,42 +92,67 @@ Then open `http://127.0.0.1:8106`.
 Data is persisted under `./output/docker-data`.
 Compose defaults to `state_store.backend=sqlite` with `./output/docker-data/sharelife_state.sqlite3`.
 
-## Main capabilities
+## Member workflows
 
-1. Preference controls: execution mode + task detail observability.
-2. Trial Status panel: explicit trial state, TTL, and remaining seconds.
-3. Template market: list/submit/install/prompt/package/download.
-4. Admin Apply Workflow: dry-run -> apply -> rollback.
-5. Risk scan panel: `risk_level`, labels, warning flags, injection matches.
-6. Developer Mode toggle (top-right): enables localized risk evidence (`file/path/line/column`) for upload/import scan records.
-7. In non-developer mode, risk panel keeps only decision-level signals to reduce noise for regular operators.
-8. Admin moderation: review notes, labels, compare, queue lock/decision, audit timeline.
-9. Notifications: list notifier events.
-10. Server-backed filters for templates/submissions (`template_id`, `category`, `tag`, `source_channel`, `risk_level`, `status`, `review_label`, `warning_flag`).
-11. Profile-pack market section: submission/catalog/compare/featured controls plus server-driven catalog insights (`/api/profile-pack/catalog/insights`) for metrics/featured/trending data cards.
-12. Plugin install gate in profile-pack flow: plan -> confirm -> execute.
-13. Execution evidence cards with grouped failures (`policy_blocked`, `command_failed`, `timed_out`).
-14. UI locale (`en-US` / `zh-CN` / `ja-JP`) synced across `/`, `/member`, `/admin`, `/market` via `sharelife.uiLocale`.
-15. Top utility bar keeps locale quick-switch and console links always visible for faster mode/language changes.
-16. `/member` and `/admin` now use independent information-architecture templates (member-first vs admin-first) instead of a single mixed navigation surface.
-17. On role pages, auth-role selection is now page-locked (`/member` => `member`, `/admin` => `admin`) to reduce cross-role operation mistakes.
-18. Low-frequency controls are collapsed by default (`Workspace route actions`, `Plugin install execution controls`, `Risk Glossary`) to reduce noise in daily operations.
-19. API responses include `X-Request-ID` for traceability, and `/api/metrics` exposes Prometheus text metrics (`sharelife_webui_http_*`, `sharelife_webui_auth_events_total`, `sharelife_webui_rate_limit_total`).
-20. Reviewer/admin operations, observability runbooks, and auth-secret backup procedures are maintained in private operator docs, not the public docs site.
-21. Auth/rate-limit/internal failures return a unified error payload shape: `{"ok": false, "error": {"code": "...", "message": "..."}}`.
-22. Button-level operations are now capability-gated from backend policy (`/api/ui/capabilities`) so member/admin/public surfaces stay aligned with token role.
-23. Profile-pack panel now includes a dedicated Compatibility Guidance block (issue list + clickable action shortcuts). Mapped issues/actions can jump to target controls, and shortcuts can prefill `plugin_ids`/recommended sections when hints are available. Developer-only shortcuts can auto-resume after Developer Mode is enabled. Raw `compatibility_issues`/`action_codes` remain Developer Mode only.
-24. `/market` now uses a left-facet + top-search IA (Hugging Face-style), with compact card grid and responsive filter drawer on mobile.
-25. Market local view state is URL-synced (`q`, `sort`, `facet_*`, `pack_id`), so filtered/selected views are directly shareable.
-26. In desktop market layout, `Detail & Compare` is pinned as a dedicated right column; `Operation Log` is collapsed by default and can be expanded from a toggle button inside the profile-pack card.
-27. Admin Storage Backup panel now supports full local backup and restore lifecycle: summary, policy read/write, backup job run/list/detail, restore prepare/commit/cancel, and restore job observability.
-28. Storage output now defaults to operator-friendly summaries; raw JSON payload is appended only in Developer Mode.
+### 1. Store Search + Trial Status
+
+1. `/member` and `/market` both lead with a spotlight-style search surface.
+2. Search feeds catalog cards, detail, and compare.
+3. `Trial Status` shows `not_started|active|expired`, plus `ttl_seconds` and `remaining_seconds`.
+
+### 2. Manage Installations
+
+1. Load your local installation list.
+2. Use `Refresh Local Installations` to resync the visible state.
+3. Per-installation actions include:
+   - `Reinstall`
+   - `Uninstall`
+4. Install controls support:
+   - `preflight`
+   - `force_reinstall`
+   - `source_preference=auto|uploaded_submission|generated`
+
+### 3. Template Upload Chain
+
+1. Open the upload area in `/member`.
+2. Select a file or use generated package output.
+3. Direct package upload is capped at `20 MiB`.
+4. Upload options:
+   - `scan_mode=strict|balanced`
+   - `visibility=community|private`
+   - `replace_existing=true|false`
+5. After submit, open `My Submissions` to inspect detail and download your own original package.
+
+### 4. Profile-Pack Community Submission Chain
+
+1. Prepare a profile-pack artifact and copy its `artifact_id`.
+2. Submit it from `/member` or `/market`.
+3. Submit options:
+   - `pack_type`
+   - `selected_sections`
+   - `redaction_mode`
+   - `replace_existing`
+4. Open `My Profile-Pack Submissions` to inspect detail and download your own export.
+
+### 5. Capability Gating and Error Model
+
+1. Button-level operations are gated from backend policy via `/api/ui/capabilities`.
+2. Auth/rate-limit/internal failures return a unified shape:
+   `{"ok": false, "error": {"code": "...", "message": "..."}}`
+3. Owner mismatch returns `permission_denied`.
+4. Oversized template uploads return `package_too_large`.
+5. Risk scan hits such as `prompt_injection_detected` are surfaced as review signals, not silent deletion.
+
+## Public/private boundary
+
+1. Public docs cover search, install, upload, and member-scoped submission management.
+2. Public docs do not expose moderation actions, privileged apply/rollback, secret handling, or backup/restore SOP.
 
 ## Troubleshooting
 
-1. `permission_denied`: token is not admin.
-2. `review_lock_held`: another admin currently owns the lock.
-3. `401`: auth enabled, login required.
-4. `prompt_injection_detected`: package is marked high risk; current behavior is labeling + visualization, not auto-delete.
-5. Wrong locale after manual storage edits: delete `sharelife.uiLocale` from browser storage and refresh.
-6. Wrong developer-mode state after manual storage edits: delete `sharelife.developerMode` and refresh.
+1. `401`: auth is enabled and the protected member action requires login.
+2. `permission_denied`: the current token cannot access the requested `user_id` or action.
+3. `package_too_large`: uploaded template package exceeded the `20 MiB` limit.
+4. `prompt_injection_detected`: the package was flagged and escalated for review.
+5. Wrong locale after manual browser storage edits: remove `sharelife.uiLocale` and refresh.
+6. Wrong developer-mode state after manual browser storage edits: remove `sharelife.developerMode` and refresh.

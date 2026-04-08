@@ -57,7 +57,7 @@ bash scripts/sharelife-init-wizard --yes --output config.generated.yaml
 
 `/sharelife_pref` を再実行し、`observe_task_details=on` を確認します。
 
-## ステップ 4: トライアル状態確認と管理者適用フロー
+## ステップ 4: トライアル状態確認とローカル install への引き渡し
 
 まず一般ユーザーで試用を開始します。
 
@@ -68,42 +68,40 @@ bash scripts/sharelife-init-wizard --yes --output config.generated.yaml
 
 2 つ目のコマンドでは `not_started`・`active`・`expired` の状態と TTL / 残り秒数を確認できます。
 
-同一テンプレートで再試行すると管理者キューに入ります。
-
-管理者コマンド:
-
-```text
-/sharelife_retry_list
-/sharelife_retry_lock <request_id>
-/sharelife_retry_decide <request_id> approve <request_version> <lock_version>
-/sharelife_dryrun community/basic 1.0.0
-/sharelife_apply <plan_id>
-/sharelife_rollback <plan_id>
-```
-
-`plan_id` を省略すると `plan-community-basic` のような既定値が使われます。
-
-## ステップ 5: コミュニティ投稿とインストール
-
-ユーザー投稿:
-
-```text
-/sharelife_submit community/basic 1.0.0
-```
-
-管理者レビュー:
-
-```text
-/sharelife_submission_list
-/sharelife_submission_decide <submission_id> approve
-```
-
-公開後の利用:
+その後はローカル member install フローへ進みます:
 
 ```text
 /sharelife_market
-/sharelife_install community/basic
 /sharelife_prompt community/basic
 /sharelife_package community/basic
-/sharelife_audit 20
 ```
+
+実際の install 操作はローカル WebUI の `/member` または `/market` で行います。利用できる install オプション:
+
+- `preflight`
+- `force_reinstall`
+- `source_preference=auto|uploaded_submission|generated`
+
+## ステップ 5: upload とコミュニティ投稿
+
+template upload フロー:
+
+1. ローカル WebUI の `/member` または `/market` を開きます。
+2. template package を選択するか、生成済み package 出力を使います。
+3. 直接アップロード上限は `20 MiB` です。
+4. upload オプション:
+   - `scan_mode=strict|balanced`
+   - `visibility=community|private`
+   - `replace_existing=true|false`
+5. 投稿後は `My Submissions` で結果を確認します。
+
+profile-pack 投稿フロー:
+
+1. ローカル artifact を準備し、`artifact_id` を控えます。
+2. `/member` または `/market` から投稿します。
+3. submit オプション:
+   - `pack_type`
+   - `selected_sections`
+   - `redaction_mode`
+   - `replace_existing`
+4. `My Profile-Pack Submissions` で owner スコープの状態と export を確認します。

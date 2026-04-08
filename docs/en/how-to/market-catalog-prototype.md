@@ -17,7 +17,7 @@ Use this page as a read-only market prototype for UX checks.
 
 1. This prototype is read-only.
 2. Snapshot source is `docs/public/market/catalog.snapshot.json`.
-3. Admin moderation and apply/import actions stay in local WebUI.
+3. Moderation and privileged apply/import actions stay in local WebUI.
 4. Runtime compare cards are implemented in local WebUI (`/` + `/market`), not in this public prototype.
 5. Locale is route-driven (`locale` prop), not `sharelife.uiLocale`.
 6. Snapshot artifacts are generated from official examples plus approved public entry JSON by:

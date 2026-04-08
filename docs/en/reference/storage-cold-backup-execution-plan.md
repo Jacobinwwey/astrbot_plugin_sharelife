@@ -33,19 +33,14 @@
    - restore prepare/commit
    - audit/event logging
 
-## 4. Admin API Surface
+## 4. Private Control Surface
 
-1. `GET /api/admin/storage/local-summary`
-2. `GET /api/admin/storage/policies`
-3. `POST /api/admin/storage/policies`
-4. `POST /api/admin/storage/jobs/run`
-5. `GET /api/admin/storage/jobs`
-6. `GET /api/admin/storage/jobs/{job_id}`
-7. `POST /api/admin/storage/restore/prepare`
-8. `POST /api/admin/storage/restore/commit`
-9. `POST /api/admin/storage/restore/cancel`
+1. Local summary read
+2. Policy read/write
+3. Backup job run/list/detail
+4. Restore prepare/commit/cancel
 
-All routes are admin-gated and must emit audit events.
+Exact admin route names stay in the private operator docs. The public plan only documents the capability groups and audit requirements.
 
 ## 5. Data Model (MVP)
 
@@ -63,16 +58,6 @@ All routes are admin-gated and must emit audit events.
 4. Upload bandwidth cap: enabled by default
 5. Daily upload budget guard: enabled
 6. One active backup job lock: enabled
-
-## 6.1 Current implementation progress (`2026-04-07`)
-
-1. Storage backup service already enforces policy normalization and guards for:
-   - remote encryption requirement
-   - daily upload budget
-   - optional bandwidth cap
-   - single active backup lock
-2. Backup and restore jobs are persisted with deterministic state transitions, and are available via admin APIs.
-3. Upload surfaces (template/profile-pack submit) now include idempotency replay + conflict handling to reduce duplicate submissions before they enter backup scope.
 
 ## 7. Drive Constraints (Handled Explicitly)
 

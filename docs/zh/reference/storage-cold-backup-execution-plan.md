@@ -33,19 +33,14 @@
    - 恢复 prepare/commit
    - 审计事件日志
 
-## 4. 管理员接口
+## 4. 私有控制面
 
-1. `GET /api/admin/storage/local-summary`
-2. `GET /api/admin/storage/policies`
-3. `POST /api/admin/storage/policies`
-4. `POST /api/admin/storage/jobs/run`
-5. `GET /api/admin/storage/jobs`
-6. `GET /api/admin/storage/jobs/{job_id}`
-7. `POST /api/admin/storage/restore/prepare`
-8. `POST /api/admin/storage/restore/commit`
-9. `POST /api/admin/storage/restore/cancel`
+1. 本地摘要读取
+2. 策略读写
+3. 备份作业运行 / 列表 / 详情
+4. 恢复 prepare / commit / cancel
 
-全部接口要求管理员权限并写入审计事件。
+精确的 admin 路由名只保留在私有运维文档。公开方案只描述能力分组与审计要求。
 
 ## 5. 数据模型（MVP）
 
@@ -63,16 +58,6 @@
 4. 上传带宽上限：默认开启
 5. 每日上传预算保护：默认开启
 6. 单活备份作业锁：默认开启
-
-## 6.1 当前实现进展（`2026-04-07`）
-
-1. 存储冷备服务已落地策略归一化与关键保护：
-   - 远端加密要求
-   - 每日上传预算
-   - 可选带宽限制
-   - 单活备份作业锁
-2. 备份作业与恢复作业已持久化，具备确定状态转移，可通过管理员接口查询。
-3. 上传入口（template/profile-pack submit）已补齐幂等重放与冲突处理，减少重复提交进入备份链路前的噪声。
 
 ## 7. Drive 限制处理
 

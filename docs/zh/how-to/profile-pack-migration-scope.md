@@ -38,7 +38,7 @@
 1. AstrBot `data/cmd_config.json` 中、且**未映射到上述 section** 的键，不会自动迁移。
 2. 当前没有“按 AstrBot 配置 schema 的字段级转换器”；适配层是 `section_name -> state_key` 一对一回放。
 3. 插件二进制、系统依赖、容器环境、外部数据库/知识库原始文件不会随 profile pack 自动打包；`environment_manifest` 只承载“需要重配”的声明信息。
-4. 插件安装默认不执行命令；即使有安装元数据，也必须经过管理员确认和执行门禁配置。
+4. 插件安装默认不执行命令；即使有安装元数据，也必须经过特权确认和执行门禁配置。
 5. 跨大版本 AstrBot 的兼容只做声明校验（`astrbot_version` / `plugin_compat`），不做自动语义迁移。
 6. 若包内带有 `environment_manifest` 或知识库外部路径信息，导入后会进入 `compatibility_issues`（degraded），用于提醒迁移后需重配容器、依赖与插件二进制。
 

@@ -17,7 +17,7 @@ Sharelife is built to stay with those moments and make bot setup transfer practi
 1. Replication is section-based, hash-checked, and rollback-safe.
 2. Secrets are not exported in plaintext by default.
 3. High-risk capabilities are deny-by-default when declarations are missing.
-4. Plugin install execution is off by default and requires explicit admin confirmation.
+4. Plugin install execution is off by default and requires explicit privileged confirmation.
 5. CI gates push/deploy with protocol checks, Python/WebUI tests, and docs build verification.
 
 ## Suggested Reading Order
@@ -40,5 +40,5 @@ Sharelife is built to stay with those moments and make bot setup transfer practi
 
 ## Private Ops Boundary
 
-Reviewer onboarding, admin runbooks, observability operations, and local auth backup procedures are intentionally excluded from the public docs site and public repo docs surface.
-Maintain those materials locally under `docs-private/` or an internal repository.
+Invitation-only review onboarding, privileged runbooks, observability operations, and local auth backup procedures are intentionally excluded from the public docs site and public repo docs surface.
+Maintain those materials locally under `docs-private/` or an internal repository. If you need invitation-only review access, contact `Jacobinwwey`.

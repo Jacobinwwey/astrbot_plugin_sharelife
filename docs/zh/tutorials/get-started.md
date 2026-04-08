@@ -55,7 +55,7 @@ bash scripts/sharelife-init-wizard --yes --output config.generated.yaml
 
 再次执行 `/sharelife_pref`，确认 `observe_task_details=on`。
 
-## 第四步：试用与管理员应用
+## 第四步：试用与本地安装交接
 
 普通用户：
 
@@ -64,53 +64,42 @@ bash scripts/sharelife-init-wizard --yes --output config.generated.yaml
 /sharelife_trial_status community/basic
 ```
 
-状态会返回 `not_started`、`active` 或 `expired`，并带 TTL 信息。  
-同一模板重复试用会进入管理员队列。
+状态会返回 `not_started`、`active` 或 `expired`，并带 TTL 信息。
 
-管理员队列处理：
-
-```text
-/sharelife_retry_list
-/sharelife_retry_lock <request_id>
-/sharelife_retry_decide <request_id> approve <request_version> <lock_version>
-```
-
-管理员应用流程：
-
-```text
-/sharelife_dryrun community/basic 1.0.0
-/sharelife_apply <plan_id>
-/sharelife_rollback <plan_id>
-```
-
-未传 `plan_id` 时会自动推导，如 `plan-community-basic`。
-
-## 第五步：社区投稿与安装
-
-普通用户投稿：
-
-```text
-/sharelife_submit community/basic 1.0.0
-```
-
-管理员审核：
-
-```text
-/sharelife_submission_list
-/sharelife_submission_decide <submission_id> approve
-```
-
-用户安装路径：
+随后继续本地用户安装链路：
 
 ```text
 /sharelife_market
-/sharelife_install community/basic
 /sharelife_prompt community/basic
 /sharelife_package community/basic
 ```
 
-管理员审计：
+真正的安装控制在本地 WebUI 的 `/member` 或 `/market` 中完成，可选项包括：
 
-```text
-/sharelife_audit 20
-```
+- `preflight`
+- `force_reinstall`
+- `source_preference=auto|uploaded_submission|generated`
+
+## 第五步：上传与社区投稿
+
+模板上传链路：
+
+1. 打开本地 WebUI 的 `/member` 或 `/market`。
+2. 选择模板包文件，或使用已生成的 package 输出。
+3. 模板包直传上限为 `20 MiB`。
+4. 可选上传参数：
+   - `scan_mode=strict|balanced`
+   - `visibility=community|private`
+   - `replace_existing=true|false`
+5. 提交后通过 `我的投稿` 查看结果。
+
+Profile-pack 投稿链路：
+
+1. 准备或导出本地产物，复制其 `artifact_id`。
+2. 在 `/member` 或 `/market` 发起投稿。
+3. 可选提交参数：
+   - `pack_type`
+   - `selected_sections`
+   - `redaction_mode`
+   - `replace_existing`
+4. 通过 `我的 Profile-Pack 投稿` 查看属主范围内的状态与导出下载。

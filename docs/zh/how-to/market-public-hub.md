@@ -1,104 +1,68 @@
 # 市场只读公开页
 
-本页明确公开市场与本地高权限操作的边界。
+本页定义市场公开面的边界。
 
 ## 目标
 
-1. 对外提供可用的市场目录。
-2. 把管理员操作保留在本地。
+1. 提供可用的公开目录。
+2. 把高权限执行留在本地。
+3. 把用户平滑引导到本地 WebUI 完成安装或投稿。
 
-## 关联页面
+## 相关页面
 
 [市场目录原型页](/zh/how-to/market-catalog-prototype)
 
-## 发布基线
+## 公开页可以包含什么
 
-主路径：
+1. template/profile-pack 元数据
+2. 风险标签与兼容性说明
+3. 详情与对比视图
+4. 下载 / 导入引导
+5. 多语言文案（`zh` / `en` / `ja`）
+6. 已脱敏的官方 / 社区产物
 
-1. 分支：`main`
-2. 发布：GitHub Actions -> GitHub Pages
-3. 地址：`https://jacobinwwey.github.io/astrbot_plugin_sharelife/`
+## 公开页不能包含什么
 
-可选备用：
+1. 审核决策动作
+2. 特权 apply/rollback 动作
+3. 高权限鉴权或 secret 管理
+4. operator 级备份 / 恢复流程
+5. 精选运营控件
 
-1. 用归档分支保存历史快照。
-2. 归档分支不作为主站来源。
+## 当前公开面
 
-## 公开页面允许内容
+截至 `2026-04-07`，公开市场页应满足：
 
-1. 模板与 profile-pack 元数据
-2. 风险标签和兼容性说明
-3. 下载入口与导入指引
-4. 多语言文案（`en` / `zh` / `ja`）
-5. 仅限脱敏后的官方/社区 profile-pack 产物
+1. Spotlight 风格搜索是第一入口。
+2. 目录卡片保持公开只读。
+3. `详情与对比` 可用于选包与 section 级判断。
+4. 受保护的 member 动作必须留在本地 `/member` 或 `/market`，不能回流到公开首屏。
 
-## 公开页面禁止内容
+## 向本地 WebUI 交接
 
-1. 审核决策按钮
-2. apply/rollback 操作
-3. 管理员 token 或鉴权管理入口
-4. 硬编码导致的多语言混用
+1. 先在公开页浏览。
+2. 再打开本地 Sharelife WebUI。
+3. 进入 `/member` 或 `/market` 执行受保护动作。
+4. 若开启鉴权，则以 `member` 身份登录。
+5. 本地继续以下链路之一：
+   - 带 `preflight` / `force_reinstall` / `source_preference` 的安装
+   - 带 `scan_mode` / `visibility` / `replace_existing` 的模板上传
+   - 基于 `artifact_id` 与 `submit_options` 的 profile-pack 投稿
+6. 通过用户自己的投稿列表跟踪结果。
+
+## 上传链路说明
+
+1. 模板包上传上限为 `20 MiB`。
+2. 当前主线的 profile-pack 投稿仍是 `artifact_id` 模式。
+3. 公开页可以解释交接方式，但不能暴露高权限 operator 动作。
 
 ## 语言基线
 
-1. 文档页以路由 locale 作为唯一来源。
-2. 不绑定独立 WebUI 的 `sharelife.uiLocale`。
-3. 保持 `/en`、`/zh`、`/ja` 语义一致。
+1. 公开文档以当前路由语言为准。
+2. 不把公开页绑定到本地 operator 状态。
+3. `/zh`、`/en`、`/ja` 必须保持同一套边界语义。
 
-## 与本地 WebUI 的衔接
+## 邀请制角色
 
-1. 公网页浏览并下载。
-2. 本地 WebUI 导入。
-3. 本地执行 dry-run 与 selective apply。
-
-## 运行时说明（更新于 2026-04-07）
-
-1. 当 WebUI 关闭鉴权时，`/member` 与 `/market` 的登录面板默认保持隐藏。
-2. 用户面板中的本地安装操作按钮保持可点击；是否允许执行由后端鉴权最终判定。
-3. 公开页仍保持只读，Reviewer/Admin 的执行链路仍仅在本地开放。
-
-## 已审核社区包发布
-
-1. 公开市场只接收脱敏后的 profile-pack 压缩包。
-2. 审核通过后可执行：
-
-```bash
-python3 scripts/publish_public_market_pack.py \
-  --artifact /abs/path/to/sanitized-pack.zip \
-  --pack-id profile/community-example \
-  --version 1.0.0 \
-  --title "Community Example" \
-  --description "Approved community pack" \
-  --maintainer community \
-  --review-label approved \
-  --review-label risk_low
-```
-
-3. 脚本会写入 `docs/public/market/entries/*.json`，并自动重建 `catalog.snapshot.json`。
-
-## 可选：审核通过后自动发布
-
-1. 如需在 reviewer/admin 通过审核后自动发布到公开市场，可开启：
-   - `sharelife.webui.public_market.auto_publish_profile_pack_approve=true`
-   - `sharelife.webui.public_market.root=/abs/path/to/docs/public`（可选覆盖）
-   - `sharelife.webui.public_market.rebuild_snapshot_on_publish=true`
-2. 自动发布执行时，决策 API 响应会带 `public_market_publish` 字段。
-3. 自动发布采用 fail-safe：即便公开发布失败，审核通过结果仍保留。
-
-## 冷备与定时同步
-
-1. 冷备范围仅限 `docs/public/market/`。
-2. 本地或运维机可执行：
-
-```bash
-python3 scripts/backup_public_market.py \
-  --archive-output-dir output/public-market-backups \
-  --remote gdrive:/sharelife/public-market
-```
-
-3. 若仓库已配置 rclone secrets，GitHub Actions 的 `public-market-backup.yml` 会按计划归档并同步这些脱敏产物。
-
-## Reviewer 权限
-
-1. Reviewer 的执行权限不会在公开页开放。
-2. 如果你想成为 reviewer，请先联系 `Jacobinwwey` 获取邀请。
+1. 公开页不暴露审核或运维控制面。
+2. 若你需要邀请制的审核权限，请联系 `Jacobinwwey`。

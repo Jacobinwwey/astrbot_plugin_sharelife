@@ -1,6 +1,6 @@
 # 3 分钟快速跑通
 
-目标：先快速验证一条可用链路，再进入严格治理流程。
+目标：先快速验证用户侧链路可用，再进入本地 WebUI 的完整操作流。
 
 ## 0. 人类快速安装（最简）
 
@@ -33,13 +33,12 @@ bash scripts/sharelife-init-wizard --output config.generated.yaml
 
 预期结果：能看到明确 trial 状态，市场命令返回可用数据。
 
-## 3. 验证管理员严格流程
+## 3. 验证用户侧交接
 
-```text
-/sharelife_dryrun community/basic 1.0.0
-/sharelife_apply <plan_id>
-/sharelife_rollback <plan_id>
-```
+1. 通过 `/sharelife_webui` 打开本地 WebUI。
+2. 在 `/member` 或 `/market` 中执行受保护的用户动作。
+3. 继续完成安装、上传或 profile-pack 投稿。
+4. 高权限审核与恢复流程不在公开文档中展开。
 
 ## 4. 后续阅读
 

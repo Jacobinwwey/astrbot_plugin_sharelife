@@ -1,108 +1,68 @@
 # 公開マーケット（読み取り専用）
 
-このページでは、Sharelife の公開マーケットを提供しつつ、特権操作をローカルに限定する運用方針を定義します。
+このページはマーケット公開面の境界を定義します。
 
 ## 目的
 
-1. 公開カタログを読み取り専用で提供する。
-2. import/review/apply/rollback はローカル Sharelife WebUI のみに限定する。
+1. 利用可能な公開カタログを提供する。
+2. 特権実行はローカルに閉じる。
+3. ユーザーをローカル WebUI へ自然に引き渡し、導入や投稿を行わせる。
 
 ## 関連ページ
 
-1. インタラクティブな読み取り専用カタログ: [マーケットカタログ試作ページ](/ja/how-to/market-catalog-prototype)
+[マーケットカタログ試作ページ](/ja/how-to/market-catalog-prototype)
 
-## デプロイ基準
+## 公開ページに含めてよいもの
 
-主要経路：
+1. template/profile-pack のメタデータ
+2. リスクラベルと互換性メモ
+3. Detail + Compare 表示
+4. ダウンロード / 導入ガイダンス
+5. ロケール別テキスト（`ja` / `en` / `zh`）
+6. サニタイズ済みの公式 / コミュニティ artifact
 
-1. ソース: `main`
-2. 配信: GitHub Actions + GitHub Pages
-3. 公開 URL: `https://jacobinwwey.github.io/astrbot_plugin_sharelife/`
+## 公開ページに含めてはいけないもの
 
-補助経路（任意）：
+1. moderation の決裁操作
+2. 特権 apply/rollback 操作
+3. 特権認証や secret 管理
+4. operator 向け backup/restore 手順
+5. featured 運用コントロール
 
-1. ビルド成果物をアーカイブ用ブランチに保存する。
-2. そのブランチは本番配信元にはしない。
+## 現在の公開面
 
-## 公開ページの範囲（読み取り専用）
+`2026-04-07` 時点で、公開マーケットは次を満たす想定です。
 
-公開してよいもの：
+1. Spotlight 形式の検索が最初の操作になる。
+2. カタログカードは公開読み取り専用のままにする。
+3. `Detail & Compare` は pack 選定と section 判断のために表示できる。
+4. 保護された member 操作はローカル `/member` または `/market` に残し、公開ファーストビューには戻さない。
 
-1. テンプレート / bot profile pack のメタデータ
-2. リスクラベルと互換性情報
-3. ダウンロードリンクと導入ガイド
-4. `en` / `zh` / `ja` 辞書に基づく locale 別 UI 文言
-5. 秘密情報を除外した公式 / コミュニティ profile-pack 成果物
+## ローカル WebUI への受け渡し
 
-公開してはいけないもの：
+1. まず公開ハブで閲覧する。
+2. 次にローカル Sharelife WebUI を開く。
+3. 保護操作は `/member` または `/market` で行う。
+4. 認証が有効なら `member` としてログインする。
+5. ローカルでは次のいずれかへ進む。
+   - `preflight` / `force_reinstall` / `source_preference` 付きインストール
+   - `scan_mode` / `visibility` / `replace_existing` 付き template アップロード
+   - `artifact_id` と `submit_options` を使う profile-pack 投稿
+6. 結果は member スコープの投稿一覧で追跡する。
 
-1. 管理者レビュー操作
-2. apply/rollback 実行操作
-3. トークン管理などの特権 UI
-4. ハードコード由来の混在言語 UI 文言
+## アップロードチェーンのメモ
 
-## locale 運用基準
+1. template package アップロード上限は `20 MiB` です。
+2. profile-pack のコミュニティ投稿は、現行 main では `artifact_id` ベースです。
+3. 公開ページでは引き渡し方は説明できますが、特権 operator 操作は露出してはいけません。
 
-1. 公開ハブはルート/ページ locale を正準値として扱います。
-2. 公開ドキュメントをスタンドアロン WebUI の保存キー `sharelife.uiLocale` に結び付けません。
-3. `/en`、`/zh`、`/ja` の辞書内容は意味レベルで整合させます。
+## ロケール基線
 
-## ローカル WebUI への導線
+1. 公開 docs は現在のルートロケールを基準にします。
+2. 公開ページをローカル operator 状態に結び付けません。
+3. `/ja`、`/en`、`/zh` で同じ境界語彙を保ちます。
 
-推奨フロー：
+## 招待制ロール
 
-1. 公開ページでパッケージを選択しダウンロード
-2. ローカル Sharelife WebUI でインポート
-3. dry-run と選択適用をローカルで実行
-
-## 実行時メモ（2026-04-07 更新）
-
-1. WebUI 認証が無効な場合、`/member` と `/market` のログインパネルはデフォルトで非表示のままです。
-2. ユーザーパネルのローカルインストール操作ボタンはクリック可能なままにし、最終的な許可/拒否はサーバー側認証で判定します。
-3. 公開ページは引き続き読み取り専用で、Reviewer/Admin の実行フローはローカル限定です。
-
-## 承認済みコミュニティ pack の公開
-
-1. 公開マーケットへ載せられるのは、secret を除外した profile-pack zip のみです。
-2. 承認後は次の CLI で公開面へ昇格します。
-
-```bash
-python3 scripts/publish_public_market_pack.py \
-  --artifact /abs/path/to/sanitized-pack.zip \
-  --pack-id profile/community-example \
-  --version 1.0.0 \
-  --title "Community Example" \
-  --description "Approved community pack" \
-  --maintainer community \
-  --review-label approved \
-  --review-label risk_low
-```
-
-3. このスクリプトは `docs/public/market/entries/*.json` を書き込み、`catalog.snapshot.json` を再生成します。
-
-## 任意: 承認直後の自動公開
-
-1. reviewer/admin の承認後に自動公開する場合は以下を有効化します。
-   - `sharelife.webui.public_market.auto_publish_profile_pack_approve=true`
-   - `sharelife.webui.public_market.root=/abs/path/to/docs/public`（任意上書き）
-   - `sharelife.webui.public_market.rebuild_snapshot_on_publish=true`
-2. 自動公開が実行されると、決定 API のレスポンスに `public_market_publish` が含まれます。
-3. 自動公開は fail-safe 設計で、公開失敗時も承認結果自体は維持されます。
-
-## コールドバックアップ
-
-1. バックアップ対象は `docs/public/market/` のみです。
-2. ローカルまたは運用機で次を実行します。
-
-```bash
-python3 scripts/backup_public_market.py \
-  --archive-output-dir output/public-market-backups \
-  --remote gdrive:/sharelife/public-market
-```
-
-3. rclone secrets を GitHub Actions に設定すれば、`public-market-backup.yml` が定期的に脱敏済み成果物をアーカイブ / 同期します。
-
-## Reviewer 権限
-
-1. Reviewer の実行権限は公開ページでは提供しません。
-2. Reviewer になりたい場合は、先に `Jacobinwwey` へ連絡して招待を受けてください。
+1. 公開ページは review や運用コントロールを露出しません。
+2. 招待制の review 権限が必要な場合は `Jacobinwwey` に連絡してください。

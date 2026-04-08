@@ -4,12 +4,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_readme_lists_new_trial_and_apply_commands():
+def test_readme_lists_public_member_commands_and_private_boundary():
     text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "/sharelife_trial_status" in text
-    assert "/sharelife_dryrun" in text
-    assert "/sharelife_rollback" in text
+    assert "/sharelife_market" in text
+    assert "/sharelife_submit" in text
+    assert "/member" in text
+    assert "/admin" not in text
     assert "/sharelife_profile_import_dryrun" in text
     assert "/sharelife_profile_import_dryrun_latest" in text
     assert "/sharelife_profile_plugins" in text
@@ -17,33 +19,35 @@ def test_readme_lists_new_trial_and_apply_commands():
     assert "/sharelife_profile_plugins_install" in text
 
 
-def test_get_started_guides_cover_new_trial_and_apply_workflow_commands():
+def test_get_started_guides_cover_member_trial_install_and_upload_handoff():
     zh_text = (REPO_ROOT / "docs" / "zh" / "tutorials" / "get-started.md").read_text(encoding="utf-8")
     en_text = (REPO_ROOT / "docs" / "en" / "tutorials" / "get-started.md").read_text(encoding="utf-8")
     ja_text = (REPO_ROOT / "docs" / "ja" / "tutorials" / "get-started.md").read_text(encoding="utf-8")
 
     for text in (zh_text, en_text, ja_text):
         assert "/sharelife_trial_status" in text
-        assert "/sharelife_dryrun" in text
-        assert "/sharelife_rollback" in text
+        assert "/sharelife_market" in text
+        assert "20 MiB" in text
+        assert "artifact_id" in text
+        assert "/member" in text
+        assert "/sharelife_dryrun" not in text
+        assert "/sharelife_rollback" not in text
 
 
-def test_api_reference_lists_trial_status_and_apply_workflow_routes():
+def test_api_reference_lists_public_member_trial_upload_and_install_routes():
     zh_text = (REPO_ROOT / "docs" / "zh" / "reference" / "api-v1.md").read_text(encoding="utf-8")
     en_text = (REPO_ROOT / "docs" / "en" / "reference" / "api-v1.md").read_text(encoding="utf-8")
     ja_text = (REPO_ROOT / "docs" / "ja" / "reference" / "api-v1.md").read_text(encoding="utf-8")
 
     for text in (zh_text, en_text, ja_text):
         assert "get_trial_status" in text
-        assert "admin_dryrun" in text
-        assert "admin_rollback" in text
         assert "/api/trial/status" in text
-        assert "/api/admin/dryrun" in text
-        assert "/api/admin/rollback" in text
-        assert "/api/admin/audit" in text
-        assert "summary" in text
         assert "compare_profile_pack_catalog" in text
         assert "/api/profile-pack/catalog/compare" in text
+        assert "/api/profile-pack/submit" in text
+        assert "/api/member/installations" in text
+        assert "/api/admin/" not in text
+        assert "/api/reviewer/" not in text
 
 
 def test_japanese_docs_keep_public_reference_entries_without_private_workflow_links():
@@ -58,24 +62,31 @@ def test_japanese_docs_keep_public_reference_entries_without_private_workflow_li
     assert "/ja/how-to/community-first-workflow" not in index_text
 
 
-def test_webui_guides_mention_trial_status_and_apply_workflow_panels():
+def test_webui_guides_mention_trial_status_upload_chain_and_private_boundary():
     zh_text = (REPO_ROOT / "docs" / "zh" / "how-to" / "webui-page.md").read_text(encoding="utf-8")
     en_text = (REPO_ROOT / "docs" / "en" / "how-to" / "webui-page.md").read_text(encoding="utf-8")
     ja_text = (REPO_ROOT / "docs" / "ja" / "how-to" / "webui-page.md").read_text(encoding="utf-8")
 
     for text in (zh_text, en_text, ja_text):
         assert "Trial Status" in text or "试用状态" in text or "トライアル状態" in text
-        assert "Admin Apply Workflow" in text or "管理员应用流程" in text or "管理者適用ワークフロー" in text
+        assert "20 MiB" in text
+        assert "/member" in text
+        assert "private" in text.lower() or "私有" in text or "非公開" in text
+        assert "/api/admin/" not in text
+        assert "/api/reviewer/" not in text
 
 
-def test_bot_profile_guides_mention_import_dryrun_command():
+def test_bot_profile_guides_describe_member_submission_flow():
     zh_text = (REPO_ROOT / "docs" / "zh" / "how-to" / "bot-profile-pack.md").read_text(encoding="utf-8")
     en_text = (REPO_ROOT / "docs" / "en" / "how-to" / "bot-profile-pack.md").read_text(encoding="utf-8")
     ja_text = (REPO_ROOT / "docs" / "ja" / "how-to" / "bot-profile-pack.md").read_text(encoding="utf-8")
 
     for text in (zh_text, en_text, ja_text):
-        assert "/sharelife_profile_import_dryrun" in text
-        assert "/sharelife_profile_import_dryrun_latest" in text
+        assert "artifact_id" in text
+        assert "replace_existing" in text
+        assert "Profile-Pack" in text or "profile-pack" in text
+        assert "/api/admin/" not in text
+        assert "/api/reviewer/" not in text
 
 
 def test_private_ops_guides_are_not_published_in_public_navigation():

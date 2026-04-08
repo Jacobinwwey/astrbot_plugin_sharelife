@@ -1,8 +1,15 @@
-# Sharelife API v1
+# Sharelife API v1（公開 + member サーフェス）
 
-`sharelife/interfaces/api_v1.py` は、チャットコマンド、WebUI、HTTP ルートが共通で使うユースケース層です。
+このページでは、公開カタログ読み取り API と member 側の操作 API だけを扱います。
+reviewer/admin/operator 向けのエンドポイントは公開リファレンスから外し、非公開運用ドキュメントへ移しました。
 
-## ユーザー向けメソッド
+## 対象範囲
+
+1. 公開読み取り API: マーケット検索、詳細、比較、ヘルス、能力確認。
+2. member API: ログイン、トライアル、インストール、アップロード、profile-pack 投稿、ローカルインストール管理、自分の投稿一覧とダウンロード。
+3. owner バインディング: 認証有効時、member ルートは現在の認証 `user_id` に属するデータだけを操作できます。
+
+## 公開 + member アプリケーションメソッド
 
 1. `get_preferences(user_id)`
 2. `set_preference_mode(user_id, mode)`
@@ -19,244 +26,113 @@
 13. `list_profile_pack_catalog(pack_query="", pack_type="", risk_level="", review_label="", warning_flag="", featured="")`
 14. `get_profile_pack_catalog_detail(pack_id)`
 15. `compare_profile_pack_catalog(pack_id, selected_sections=None)`
-16. `member_list_submissions(user_id, status="", template_query="", risk_level="", review_label="", warning_flag="")`
-17. `member_get_submission_detail(user_id, submission_id)`
-18. `member_list_profile_pack_submissions(user_id, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
-19. `member_get_profile_pack_submission_detail(user_id, submission_id)`
+16. `submit_profile_pack(user_id, artifact_id, submit_options=None)`
+17. `list_member_installations(user_id, limit=50)`
+18. `refresh_member_installations(user_id, limit=50)`
+19. `uninstall_member_installation(user_id, template_id)`
+20. `member_list_submissions(user_id, status="", template_query="", risk_level="", review_label="", warning_flag="")`
+21. `member_get_submission_detail(user_id, submission_id)`
+22. `member_get_submission_package(user_id, submission_id)`
+23. `member_list_profile_pack_submissions(user_id, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
+24. `member_get_profile_pack_submission_detail(user_id, submission_id)`
+25. `member_get_profile_pack_submission_export(user_id, submission_id)`
 
-## 管理者向けメソッド
+## 公開 + member HTTP ルート
 
-1. `admin_list_submissions(role, status="")`
-2. `admin_get_submission_detail(role, submission_id)`
-3. `admin_update_submission_review(role, submission_id, review_note="", review_labels=None)`
-4. `admin_decide_submission(role, submission_id, decision, review_note="", review_labels=None)`
-5. `admin_list_retry_requests(role)`
-6. `admin_acquire_retry_lock(role, request_id, admin_id, force=False, reason="")`
-7. `admin_decide_retry_request(role, request_id, decision, admin_id=None, request_version=None, lock_version=None)`
-8. `admin_dryrun(role, plan_id, patch)`
-9. `admin_apply(role, plan_id)`
-10. `admin_rollback(role, plan_id)`
-11. `admin_list_audit(role, limit=100)`
-12. `admin_export_profile_pack(role, pack_id, version, pack_type="bot_profile_pack", redaction_mode="exclude_secrets", sections=None, mask_paths=None, drop_paths=None)`
-13. `admin_get_profile_pack_export(role, artifact_id)`
-14. `admin_list_profile_pack_exports(role, limit=50)`
-15. `admin_import_profile_pack(role, filename, content_base64)`
-16. `admin_import_profile_pack_from_export(role, artifact_id)`
-17. `admin_import_profile_pack_and_dryrun(role, plan_id, selected_sections=None, filename="", content_base64="", artifact_id="")`
-18. `admin_list_profile_pack_imports(role, limit=50)`
-19. `admin_profile_pack_dryrun(role, import_id, plan_id, selected_sections=None)`
-20. `admin_profile_pack_plugin_install_plan(role, import_id)`
-21. `admin_profile_pack_confirm_plugin_install(role, import_id, plugin_ids=None)`
-22. `admin_profile_pack_execute_plugin_install(role, import_id, plugin_ids=None, dry_run=False)`
-23. `admin_profile_pack_apply(role, plan_id)`
-24. `admin_profile_pack_rollback(role, plan_id)`
-25. `admin_set_profile_pack_featured(role, pack_id, featured, note="")`
-26. `admin_run_pipeline(role, contract, input_payload, actor_id="admin", run_id="")`
-27. `admin_storage_local_summary(role)`
-28. `admin_storage_get_policies(role)`
-29. `admin_storage_set_policies(role, patch, admin_id="admin")`
-30. `admin_storage_run_job(role, admin_id="admin", trigger="manual", note="")`
-31. `admin_storage_list_jobs(role, status="", limit=50)`
-32. `admin_storage_get_job(role, job_id)`
-33. `admin_storage_restore_prepare(role, artifact_ref, admin_id="admin", note="")`
-34. `admin_storage_restore_commit(role, restore_id, admin_id="admin")`
-35. `admin_storage_restore_cancel(role, restore_id, admin_id="admin")`
-36. `admin_storage_list_restore_jobs(role, state="", limit=50)`
-37. `admin_storage_get_restore_job(role, restore_id)`
-
-## Reviewer と認可運用メソッド
-
-1. `admin_create_reviewer_invite(role, admin_id, expires_in_seconds=3600)`
-2. `admin_list_reviewer_invites(role, status="")`
-3. `admin_revoke_reviewer_invite(role, invite_code, admin_id)`
-4. `reviewer_redeem_invite(invite_code, reviewer_id)`
-5. `reviewer_register_device(reviewer_id, label="")`
-6. `reviewer_list_devices(reviewer_id)`
-7. `reviewer_revoke_device(reviewer_id, device_id)`
-8. `admin_list_reviewers(role)`
-9. `admin_force_reset_reviewer_devices(role, reviewer_id, admin_id)`
-10. `admin_list_profile_pack_submissions(role, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
-11. `admin_decide_profile_pack_submission(role, submission_id, decision, review_note="", review_labels=None, reviewer_id="")`
-
-## 主なエラーコード
-
-1. `permission_denied`
-2. `invite_revoked`
-3. `review_lock_held`
-4. `takeover_reason_required`
-5. `review_lock_required`
-6. `review_lock_not_owner`
-7. `request_version_conflict`
-8. `lock_version_conflict`
-9. `template_not_installable`
-10. `package_service_unavailable`
-11. `invalid_package_payload`
-12. `plan_not_found`
-13. `plan_not_applied`
-14. `invalid_pack_type`
-15. `profile_pack_plugin_install_confirm_required`
-16. `profile_pack_plugin_not_in_plan`
-17. `profile_pack_plugin_id_required`
-18. `profile_pack_plugin_install_exec_disabled`
-19. `profile_pack_plugin_install_exec_required`
-20. `profile_pack_plugin_install_exec_failed`
-21. `pipeline_service_unavailable`
-22. `invalid_pipeline_contract`
-23. `pipeline_execution_failed`
-24. `storage_service_unavailable`
-25. `daily_upload_budget_exceeded`
-26. `remote_sync_command_not_found`
-27. `remote_sync_failed`
-28. `artifact_not_found`
-29. `artifact_checksum_mismatch`
-30. `remote_encryption_required`
-31. `remote_retention_failed`
-32. `remote_retention_command_not_found`
-
-## WebUI / HTTP ルート
-
-ユーザー側:
-
-1. `GET /api/preferences?user_id=...`
-2. `POST /api/preferences/mode`
-3. `POST /api/preferences/observe`
-4. `GET /api/templates`
-5. `GET /api/templates/detail?template_id=...`
-6. `POST /api/templates/submit`
-7. `GET /api/templates/package/download?template_id=...`
-8. `POST /api/trial`
-9. `GET /api/trial/status?user_id=...&session_id=...&template_id=...`
-10. `POST /api/templates/install`
-11. `POST /api/templates/prompt`
-12. `POST /api/templates/package`
-13. `GET /api/profile-pack/catalog`
-14. `GET /api/profile-pack/catalog/detail?pack_id=...`
-15. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
-16. `GET /api/profile-pack/catalog/insights`
-17. `POST /api/profile-pack/submit`
-18. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
-19. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
-20. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
-21. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
-
-Reviewer 側:
-
-1. `POST /api/reviewer/invites`
-2. `GET /api/reviewer/invites`
-3. `POST /api/reviewer/invites/revoke`
-4. `POST /api/reviewer/redeem`
-5. `POST /api/reviewer/devices/register`
-6. `GET /api/reviewer/devices`
-7. `DELETE /api/reviewer/devices/{device_id}`
-8. `GET /api/reviewer/accounts`
-9. `POST /api/reviewer/accounts/reset-devices`
-10. `GET /api/reviewer/session`
-11. `POST /api/reviewer/session/logout`
-12. `GET /api/reviewer/submissions`
-13. `POST /api/reviewer/submissions/review`
-14. `POST /api/reviewer/submissions/decide`
-15. `GET /api/reviewer/submissions/detail?submission_id=...`
-16. `GET /api/reviewer/submissions/compare?submission_id=...`
-17. `GET /api/reviewer/submissions/package/download?submission_id=...`
-18. `GET /api/reviewer/profile-pack/submissions`
-19. `POST /api/reviewer/profile-pack/submissions/decide`
-
-管理者側:
-
-1. `GET /api/admin/submissions?role=admin&status=...`
-2. `POST /api/admin/dryrun`
-3. `POST /api/admin/apply`
-4. `POST /api/admin/rollback`
-5. `GET /api/admin/submissions/detail?submission_id=...`
-6. `POST /api/admin/submissions/review`
-7. `GET /api/admin/submissions/compare?submission_id=...`
-8. `GET /api/admin/submissions/package/download?submission_id=...`
-9. `POST /api/admin/submissions/decide`
-10. `GET /api/admin/retry-requests?role=admin`
-11. `POST /api/admin/retry-requests/lock`
-12. `POST /api/admin/retry-requests/decide`
-13. `GET /api/admin/audit?role=admin&limit=20`
-14. `POST /api/admin/profile-pack/export`
-15. `GET /api/admin/profile-pack/export/download?artifact_id=...`
-16. `GET /api/admin/profile-pack/exports?role=admin&limit=...`
-17. `POST /api/admin/profile-pack/import`
-18. `POST /api/admin/profile-pack/import/from-export`
-19. `POST /api/admin/profile-pack/import-and-dryrun`
-20. `GET /api/admin/profile-pack/imports?role=admin&limit=...`
-21. `POST /api/admin/profile-pack/dryrun`
-22. `GET /api/admin/profile-pack/plugin-install-plan?import_id=...`
-23. `POST /api/admin/profile-pack/plugin-install-confirm`
-24. `POST /api/admin/profile-pack/plugin-install-execute`
-25. `POST /api/admin/profile-pack/apply`
-26. `POST /api/admin/profile-pack/rollback`
-27. `POST /api/admin/profile-pack/catalog/featured`
-28. `POST /api/admin/pipeline/run`
-29. `GET /api/admin/storage/local-summary`
-30. `GET /api/admin/storage/policies`
-31. `POST /api/admin/storage/policies`
-32. `POST /api/admin/storage/jobs/run`
-33. `GET /api/admin/storage/jobs`
-34. `GET /api/admin/storage/jobs/{job_id}`
-35. `POST /api/admin/storage/restore/prepare`
-36. `POST /api/admin/storage/restore/commit`
-37. `POST /api/admin/storage/restore/cancel`
-38. `GET /api/admin/storage/restore/jobs`
-39. `GET /api/admin/storage/restore/jobs/{restore_id}`
-
-`GET /api/admin/audit` は生の `events` に加えて、actor role / actor / action / reviewer / device 単位の `summary` 集計も返します。
-
-補助ルート:
+公開ルート:
 
 1. `GET /api/auth-info`
 2. `POST /api/login`
 3. `GET /api/health`
-4. `GET /api/notifications?limit=...`
-5. `GET /api/ui/capabilities?page_mode=auto|member|admin`（UI ゲート用の有効ロールと operation key を返却）
+4. `GET /api/ui/capabilities?page_mode=auto|member|market`
+5. `GET /api/templates`
+6. `GET /api/templates/detail?template_id=...`
+7. `GET /api/profile-pack/catalog`
+8. `GET /api/profile-pack/catalog/detail?pack_id=...`
+9. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
+10. `GET /api/profile-pack/catalog/insights`
+
+member ルート:
+
+1. `GET /api/preferences?user_id=...`
+2. `POST /api/preferences/mode`
+3. `POST /api/preferences/observe`
+4. `POST /api/trial`
+5. `GET /api/trial/status?user_id=...&session_id=...&template_id=...`
+6. `POST /api/templates/install`
+7. `POST /api/templates/submit`
+8. `GET /api/templates/package/download?template_id=...`
+9. `POST /api/templates/prompt`
+10. `POST /api/templates/package`
+11. `POST /api/profile-pack/submit`
+12. `GET /api/member/installations?user_id=...`
+13. `POST /api/member/installations/refresh`
+14. `POST /api/member/installations/uninstall`
+15. `GET /api/member/submissions?user_id=...`
+16. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
+17. `GET /api/member/submissions/package/download?user_id=...&submission_id=...`
+18. `GET /api/member/profile-pack/submissions?user_id=...`
+19. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
+20. `GET /api/member/profile-pack/submissions/export/download?user_id=...&submission_id=...`
+
+## 公開アップロード / インストール payload
+
+1. `POST /api/templates/install`
+   - `install_options.preflight: bool`
+   - `install_options.force_reinstall: bool`
+   - `install_options.source_preference: auto|uploaded_submission|generated`
+2. `POST /api/templates/submit`
+   - `package_name + package_base64` による直接アップロード
+   - `upload_options.scan_mode: strict|balanced`
+   - `upload_options.visibility: community|private`
+   - `upload_options.replace_existing: bool`
+3. `POST /api/profile-pack/submit`
+   - 現行 main では `artifact_id` が必須
+   - `submit_options.pack_type: bot_profile_pack|extension_pack`
+   - `submit_options.selected_sections: string[]`
+   - `submit_options.redaction_mode: exclude_secrets|exclude_provider|include_provider_no_key|include_encrypted_secrets`
+   - `submit_options.replace_existing: bool`
+4. template パッケージの直接アップロード上限は `20 MiB` で、超過時は `package_too_large` を返します。
 
 ## Auth Badge Matrix (HTTP)
 
-| ルート | Required Role | 拒否時の挙動 |
+| ルート | 必要ロール | 拒否時の挙動 |
 | --- | --- | --- |
-| `GET /api/ui/capabilities` | `public` | 該当なし |
+| `GET /api/ui/capabilities` | `public` | N/A |
 | `POST /api/login` | `public` | `401 invalid_credentials` または `429 rate_limited` |
-| `GET /api/templates` | `public`（読み取り専用マーケット面） | 該当なし |
-| `GET /api/templates/detail` | `public`（読み取り専用マーケット面） | 該当なし |
-| `GET /api/profile-pack/catalog` | `public`（読み取り専用マーケット面） | 該当なし |
-| `GET /api/profile-pack/catalog/detail` | `public`（読み取り専用マーケット面） | 該当なし |
-| `GET /api/profile-pack/catalog/compare` | `public`（読み取り専用マーケット面） | 該当なし |
-| `GET /api/profile-pack/catalog/insights` | `public`（読み取り専用マーケット面） | 該当なし |
-| `POST /api/templates/submit` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
-| `POST /api/profile-pack/submit` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
-| `GET /api/member/submissions` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
-| `GET /api/member/submissions/detail` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member が他者 `submission_id` を参照すると `403 permission_denied` |
-| `GET /api/member/profile-pack/submissions` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member の owner 不一致は `403 permission_denied` |
-| `GET /api/member/profile-pack/submissions/detail` | `member|reviewer|admin` | token 無しは `401 unauthorized`、member が他者 `submission_id` を参照すると `403 permission_denied` |
-| `POST /api/reviewer/invites/revoke` | `admin` | `403 permission_denied` |
-| `POST /api/reviewer/redeem` | `public`（招待コード型オンボーディング） | 招待検証エラー `400/404/409/410` |
-| `GET /api/reviewer/submissions` | `reviewer|admin` | `403 permission_denied` |
-| `POST /api/reviewer/submissions/decide` | `reviewer|admin` | `403 permission_denied` |
-| `POST /api/admin/apply` | `admin` | `403 permission_denied` |
-| `POST /api/admin/profile-pack/apply` | `admin` | `403 permission_denied` |
-| `POST /api/admin/pipeline/run` | `admin` | `403 permission_denied` |
+| `GET /api/templates` | `public` | N/A |
+| `GET /api/templates/detail` | `public` | N/A |
+| `GET /api/profile-pack/catalog` | `public` | N/A |
+| `GET /api/profile-pack/catalog/detail` | `public` | N/A |
+| `GET /api/profile-pack/catalog/compare` | `public` | N/A |
+| `GET /api/profile-pack/catalog/insights` | `public` | N/A |
+| `POST /api/trial` | `member` または匿名 allowlist | `401 unauthorized` または `403 permission_denied` |
+| `POST /api/templates/install` | `member` または匿名 allowlist | `401 unauthorized` または `403 permission_denied` |
+| `POST /api/templates/submit` | `member` | `401 unauthorized` または `403 permission_denied` |
+| `POST /api/profile-pack/submit` | `member` | `401 unauthorized` または `403 permission_denied` |
+| `GET /api/member/installations` | `member` または匿名 allowlist | `401 unauthorized` または `403 permission_denied` |
+| `POST /api/member/installations/refresh` | `member` または匿名 allowlist | `401 unauthorized` または `403 permission_denied` |
+| `POST /api/member/installations/uninstall` | `member` | `401 unauthorized` または `403 permission_denied` |
+| `GET /api/member/submissions` | `member` | `401 unauthorized` または `403 permission_denied` |
+| `GET /api/member/submissions/detail` | `member` | `401 unauthorized` または `403 permission_denied` |
+| `GET /api/member/profile-pack/submissions` | `member` | `401 unauthorized` または `403 permission_denied` |
+| `GET /api/member/profile-pack/submissions/detail` | `member` | `401 unauthorized` または `403 permission_denied` |
 
-ロール不足による拒否レスポンスは `error.code=permission_denied` を返す想定です。
+ロール拒否系レスポンスはすべて `error.code=permission_denied` を返す前提です。
 
-## 補足
+## エラーモデル
 
-1. `GET /api/trial/status` は `not_started|active|expired` を返し、TTL と残り秒数も確認できます。
-2. `GET /api/templates` は `category`、`tag`、`source_channel`、`review_label`、`warning_flag` を使った catalog フィルタに対応します。
-3. `GET /api/templates` は `sort_by=template_id|recent_activity|trial_requests|installs` と `sort_order=asc|desc` にも対応します。
-4. テンプレート一覧と詳細 payload は `category`、`tags`、`maintainer`、`source_channel`、aggregate な `engagement` を返します。
-5. `engagement` には `trial_requests`、`installs`、`prompt_generations`、`package_generations`、`community_submissions`、`last_activity_at` が含まれます。
-6. `POST /api/admin/dryrun` は plan を登録するだけで、まだランタイムには適用しません。
-7. `POST /api/admin/rollback` は直近の成功スナップショットを復元します。
-8. WebUI では Trial Status パネルと Admin Apply Workflow パネルからこの流れを直接操作できます。
-9. WebUI の locale 切替（`en-US` / `zh-CN` / `ja-JP`）はフロントエンド側の挙動であり、API は locale パラメータを受け取りません。レスポンス schema も locale で変化しません。
-10. collection/panel 状態文言、moderation ガイダンス、detail フィールドラベルなどの翻訳は WebUI 辞書で実施され、API フィールドキー（英語 `snake_case`）は固定です。
-11. `GET /api/ui/capabilities` はログイン前でも参照可能です。認証有効で token が無い場合、role は `public` になり最小 operation のみ返します。
-12. 認証有効時でも、マーケット読み取り API（`GET /api/templates*`、`GET /api/profile-pack/catalog*`）は公開し、更新系 API は引き続き token 必須です。
-13. `webui.public_market.auto_publish_profile_pack_approve=true` の場合、profile-pack 審査承認レスポンスに `public_market_publish` が追加され、公開化ステータスと生成物パスが返ります。
-14. 公開マーケット自動公開の実行設定キーは `webui.public_market.auto_publish_profile_pack_approve`、`webui.public_market.root`、`webui.public_market.rebuild_snapshot_on_publish` です。
-15. `POST /api/templates/submit` は `upload_options.idempotency_key` または `Idempotency-Key` ヘッダーで冪等リプレイに対応しました。同一スコープの再送は既存 submission を返します。
-16. `POST /api/profile-pack/submit` も `submit_options.idempotency_key` または `Idempotency-Key` ヘッダーで同じ冪等リプレイに対応します。
-17. 異なる投稿スコープで同一 idempotency key を再利用した場合は `idempotency_key_conflict` を返し、誤リプレイを防止します。
+1. `permission_denied`: ロール不一致または owner バインディング違反。
+2. `unauthorized` / `invalid_credentials`: ログイン必須または認証情報不正。
+3. `package_too_large`: アップロードが `20 MiB` 上限を超過。
+4. `template_not_installable`: 対象 template が現在インストール不可。
+5. `profile_pack_source_required`: profile-pack 投稿時に `artifact_id` がない。
+6. `prompt_injection_detected`: 高リスク信号を検知。現状はラベル付けと審査エスカレーションであり、自動削除ではありません。
+
+## 実行時メモ
+
+1. `get_trial_status()` と `GET /api/trial/status` は `not_started|active|expired` に加えて `ttl_seconds` と `remaining_seconds` を返します。
+2. `GET /api/ui/capabilities` はログイン前でも読めるため、UI 側で保護操作を隠す / 無効化するための基点になります。
+3. `allow_anonymous_member=true` を有効にした場合でも、匿名で使えるのは allowlist 内の API だけで、要求は `anonymous_member_user_id` に固定されます。
+4. member のダウンロード面は owner スコープ前提です。自分の投稿物しかダウンロードできません。
+5. 承認、apply/rollback、reviewer ライフサイクル、secret ローテーション、backup/restore、featured 運用は非公開 operator docs にのみ記載します。

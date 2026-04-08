@@ -19,7 +19,7 @@ The minimum viable platform includes:
 2. `M2` done: capability gateway (`sharelife/application/services_capability_gateway.py`) with deny-by-default for undeclared high-risk capabilities
 3. `M3` done: DX commands (`scripts/create-astrbot-plugin`, `scripts/sharelife-hot-reload`) + SDK contracts (`sharelife/sdk/contracts.py`)
 4. `M4` done: pipeline orchestrator (`sharelife/application/services_pipeline.py`) with A->B chaining and `retry/skip/abort`
-5. `M5` done: governance metadata (`capability_summary`, `compatibility_matrix`, `review_evidence`) + featured curation gate (`/api/admin/profile-pack/catalog/featured`)
+5. `M5` done: governance metadata (`capability_summary`, `compatibility_matrix`, `review_evidence`) + private featured-curation gate
 
 Post-M5 extension:
 

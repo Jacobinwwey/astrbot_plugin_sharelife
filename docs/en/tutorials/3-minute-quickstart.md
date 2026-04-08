@@ -1,6 +1,6 @@
 # 3-minute quickstart
 
-Goal: verify a working loop in minutes, then move to strict workflows.
+Goal: verify the member-side loop in minutes, then continue into the local WebUI flows.
 
 ## 0) Human quick install
 
@@ -33,13 +33,12 @@ Act as a terminal setup agent in repo root `astrbot_plugin_sharelife`. Run exact
 
 Expected result: trial state is explicit and market calls return usable data.
 
-## 3) Verify admin strict loop
+## 3) Verify the member handoff
 
-```text
-/sharelife_dryrun community/basic 1.0.0
-/sharelife_apply <plan_id>
-/sharelife_rollback <plan_id>
-```
+1. Open the local WebUI with `/sharelife_webui`.
+2. Use `/member` or `/market` for protected member actions.
+3. Continue with install, upload, or profile-pack submission from the local UI.
+4. Keep privileged moderation and recovery flows outside the public docs surface.
 
 ## 4) Continue
 

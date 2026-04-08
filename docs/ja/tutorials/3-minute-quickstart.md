@@ -1,6 +1,6 @@
 # 3分クイックスタート
 
-このページは最短経路のみです。まず 3 分で動かし、詳細は後で確認します。
+このページは member 側の最短経路だけを扱います。まず 3 分で動かし、詳細は後で確認します。
 
 ## 0. 人間向けクイック導入（最小）
 
@@ -33,13 +33,12 @@ bash scripts/sharelife-init-wizard --output config.generated.yaml
 
 期待値: trial 状態が明示され、market 応答が返ること。
 
-## 3. 管理者フロー確認
+## 3. Member 側への引き渡し確認
 
-```text
-/sharelife_dryrun community/basic 1.0.0
-/sharelife_apply <plan_id>
-/sharelife_rollback <plan_id>
-```
+1. `/sharelife_webui` でローカル WebUI を開きます。
+2. 保護された member 操作は `/member` または `/market` で続行します。
+3. install、upload、profile-pack 投稿はローカル UI で完結します。
+4. 特権 moderation や復旧手順は公開 docs に含めません。
 
 ## 4. 次の導線
 

@@ -17,7 +17,7 @@
 2. `M2` 完了: Capability Gateway（`sharelife/application/services_capability_gateway.py`）で未宣言高リスク能力を deny-by-default。
 3. `M3` 完了: DX コマンド（`scripts/create-astrbot-plugin` / `scripts/sharelife-hot-reload`）と SDK 型契約（`sharelife/sdk/contracts.py`）。
 4. `M4` 完了: Pipeline Orchestrator（`sharelife/application/services_pipeline.py`）で A->B 連鎖と `retry/skip/abort` を実装。
-5. `M5` 完了: ガバナンスメタデータ（`capability_summary` / `compatibility_matrix` / `review_evidence`）と Featured ゲート（`/api/admin/profile-pack/catalog/featured`）。
+5. `M5` 完了: ガバナンスメタデータ（`capability_summary` / `compatibility_matrix` / `review_evidence`）と非公開 Featured ゲート。
 
 M5 後の拡張:
 

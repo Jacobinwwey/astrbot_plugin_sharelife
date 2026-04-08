@@ -1,150 +1,88 @@
-# Bot profile pack operations
+# Bot Profile Pack Operations
 
-Use this runbook for day-to-day `bot_profile_pack` and `extension_pack` operations.
+This public guide is for browsing, comparing, and submitting profile packs from the member side.
+Privileged moderation, featured curation, secret export rules, and operator recovery steps are intentionally excluded from this page.
 
 Need the exact migration boundary first? Start here:
-[Bot profile migration scope (ground truth)](/en/how-to/profile-pack-migration-scope)
+[Bot Profile Migration Scope (Ground Truth)](/en/how-to/profile-pack-migration-scope)
 
-## What this flow gives you
+## What users can do now
 
-1. Export runtime config into a transferable package.
-2. Keep secrets redacted by default.
-3. Preview section-level diff before apply.
-4. Apply with rollback available.
-5. Share extension-oriented bundles (`skills`, `personas`, `mcp_servers`, `plugins`).
+1. Browse published profile packs in `/market`.
+2. Open `Detail & Compare` and run section-scoped compare against local runtime.
+3. Submit a profile-pack artifact to the community queue from the member surface.
+4. View only your own profile-pack submissions.
+5. Download only your own submission export.
 
 ## Official reference pack
 
-Sharelife now seeds one published starter pack automatically:
+Sharelife seeds one published starter pack automatically:
 
 1. `pack_id`: `profile/official-starter`
 2. `pack_type`: `bot_profile_pack`
 3. `version`: `1.0.0`
 4. `featured`: `true`
 
-Use this as your baseline for:
+Use it for:
 
 1. catalog filtering (`pack_id=profile/official-starter`)
-2. compare-with-runtime walkthrough
-3. import + dry-run + apply rehearsal before sharing your own pack
+2. compare-with-runtime rehearsal
+3. validating section selection before you submit your own pack
 
-The repository also includes a concrete sample pack in exploded form:
+## Current member submission chain
 
-1. `examples/profile-packs/official-starter/manifest.json`
-2. `examples/profile-packs/official-starter/sections/*.json`
+1. Prepare or select a local profile-pack artifact and copy its `artifact_id`.
+2. Open `/member` or `/market` in the local WebUI.
+3. In the profile-pack area, paste `artifact_id` into `Submit To Community`.
+4. Optional submit controls:
+   - `pack_type`
+   - `selected_sections`
+   - `redaction_mode`
+   - `replace_existing`
+5. Submit the pack.
+6. Open `My Profile-Pack Submissions` to inspect status, detail, and your own export download.
 
-To build an importable zip locally:
+## Submit options
 
-```bash
-cd examples/profile-packs/official-starter
-zip -r profile-official-starter-1.0.0.bot-profile-pack.zip manifest.json sections
-```
+1. `pack_type`
+   - `bot_profile_pack`
+   - `extension_pack`
+2. `selected_sections`
+   - section subset for the published artifact payload
+3. `redaction_mode`
+   - `exclude_secrets`
+   - `exclude_provider`
+   - `include_provider_no_key`
+   - `include_encrypted_secrets`
+4. `replace_existing`
+   - retires earlier pending submissions for the same member + pack and keeps the latest pending row as the active review candidate
 
-## Admin command flow
+## Compare and local apply handoff
 
-```text
-/sharelife_profile_export profile/basic 1.0.0 exclude_secrets astrbot_core,providers,plugins providers.openai.base_url sharelife_meta.owner bot_profile_pack
-/sharelife_profile_export extension/community-tools 1.0.0 exclude_secrets "" "" "" extension_pack
-/sharelife_profile_exports 20
-/sharelife_profile_import <artifact_id> --dryrun --plan-id profile-plan-basic --sections plugins,providers
-/sharelife_profile_plugins <import_id>
-/sharelife_profile_plugins_confirm <import_id> [plugins_csv]
-/sharelife_profile_plugins_install <import_id> [plugins_csv] [dry_run]
-/sharelife_profile_import_dryrun <artifact_id> profile-plan-basic plugins,providers
-/sharelife_profile_import_dryrun_latest profile-plan-basic plugins,providers
-/sharelife_profile_imports 20
-```
+1. Public/member docs cover compare and submission.
+2. Privileged apply/rollback is not part of the public contract.
+3. The supported handoff is:
+   - browse published pack
+   - compare selected sections
+   - decide whether to install/import locally
+   - submit your own artifact for review if you want it published
 
-### Notes
+## Current limitations
 
-1. `/sharelife_profile_import` source accepts `artifact_id` or local `.zip` path.
-2. `--dryrun` runs dry-run right after import.
-3. `--plan-id` and `--sections` are optional.
-4. Export positional args:
-   `pack_id version redaction_mode sections_csv mask_paths_csv drop_paths_csv pack_type`.
-5. If dry-run returns `profile_pack_plugin_install_confirm_required`, run
-   `/sharelife_profile_plugins` then `/sharelife_profile_plugins_confirm`, then rerun dry-run.
-6. `/sharelife_profile_plugins_install` executes only when
-   `profile_pack.plugin_install.enabled=true`.
+1. Community submission on this branch is `artifact_id`-based; direct public ZIP upload is not the contract here.
+2. `replace_existing` only normalizes pending rows. It does not overwrite already approved or rejected history.
+3. “Perfect restore” is not implied by compare/submission output; compare is advisory, not a full environment snapshot restore.
+4. Secret-bearing operator exports are not public artifacts and are not downloadable from member docs surfaces.
 
-## WebUI flow
+## User-visible statuses
 
-In **Bot Profile Pack** panel:
+1. `pending`
+2. `approved`
+3. `rejected`
+4. `replaced`
 
-1. Export (`Export Profile Pack`).
-2. Import by file or export artifact.
-3. Optional one-click `Import + Dry-Run`.
-4. Or select sections and run dry-run manually.
-5. For plugin sections: `Plugin Install Plan` -> `Confirm Plugin Install` -> `Execute Plugin Install`.
-6. Apply or rollback with the plan controls.
+## Security boundary
 
-### Compatibility guidance panel (WebUI)
-
-After import or dry-run, Sharelife now renders a dedicated **Compatibility Guidance** block:
-
-1. `Compatibility` summary (`compatible` / `degraded` / `blocked`).
-2. Human-readable issue list (signature/encrypted-secrets/runtime mismatch families).
-3. Action checklist for environment follow-up:
-   container reconfigure, system dependency reinstall, plugin binary reinstall, KB storage sync.
-4. Clickable action shortcuts: each action jumps to the relevant operation area (plugin install controls / section selector / developer payload).
-5. Issue rows with known mappings are also clickable and reuse the same shortcut pipeline.
-6. Shortcut clicks now prefill follow-up inputs when possible:
-   plugin-related actions auto-fill `plugin_ids` from `missing_plugins`, and KB sync actions auto-select `knowledge_base` section.
-7. For developer-only targets, the shortcut asks you to enable Developer Mode, then resumes automatically after toggle.
-8. Developer Mode only:
-   raw `compatibility_issues` + normalized `action_codes` payload.
-
-Use this block as the source of truth for "migration is technically imported, but still needs environment reconfiguration".
-
-## Redaction modes
-
-1. `exclude_secrets` (default): keep provider structure, mask secret values.
-2. `exclude_provider`: remove provider section.
-3. `include_provider_no_key`: keep provider fields except key-like secrets.
-4. `include_encrypted_secrets`: export encrypted secrets and decrypt on import/dry-run/apply when `profile_pack.secrets_encryption_key` is configured.
-
-Advanced overrides:
-
-1. `mask_paths`: force mask by dotted path.
-2. `drop_paths`: remove by dotted path.
-
-## Pack types
-
-1. `bot_profile_pack`: full runtime sections (`astrbot_core/providers/plugins/skills/personas/mcp_servers/sharelife_meta/memory_store/conversation_history/knowledge_base/environment_manifest`).
-2. `extension_pack`: extension sections only (`plugins/skills/personas/mcp_servers`).
-
-## Security config keys
-
-1. `profile_pack.signing_key_id`
-2. `profile_pack.signing_secret`
-3. `profile_pack.trusted_signing_keys`
-4. `profile_pack.secrets_encryption_key`
-5. `profile_pack.plugin_install.enabled`
-6. `profile_pack.plugin_install.command_timeout_seconds`
-7. `profile_pack.plugin_install.allowed_command_prefixes`
-8. `profile_pack.plugin_install.allow_http_source`
-9. `profile_pack.plugin_install.require_success_before_apply`
-
-## Governance metadata in published packs
-
-1. `capability_summary`
-2. `compatibility_matrix`
-3. `review_evidence`
-4. `featured` + admin curation note
-
-## HTTP API surface
-
-1. `POST /api/admin/profile-pack/export`
-2. `GET /api/admin/profile-pack/export/download`
-3. `GET /api/admin/profile-pack/exports`
-4. `POST /api/admin/profile-pack/import`
-5. `POST /api/admin/profile-pack/import/from-export`
-6. `POST /api/admin/profile-pack/import-and-dryrun`
-7. `GET /api/admin/profile-pack/imports`
-8. `POST /api/admin/profile-pack/dryrun`
-9. `GET /api/admin/profile-pack/plugin-install-plan`
-10. `POST /api/admin/profile-pack/plugin-install-confirm`
-11. `POST /api/admin/profile-pack/plugin-install-execute`
-12. `POST /api/admin/profile-pack/apply`
-13. `POST /api/admin/profile-pack/rollback`
-14. `POST /api/admin/profile-pack/catalog/featured`
+1. Profile-pack catalog routes are public read-only.
+2. Submission and “my submissions” routes are member-only and owner-scoped.
+3. Privileged moderation, device/session governance, and privileged storage workflows live in private docs only.

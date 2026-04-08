@@ -33,19 +33,14 @@
    - restore prepare/commit
    - audit/event log
 
-## 4. 管理者 API
+## 4. 非公開コントロール面
 
-1. `GET /api/admin/storage/local-summary`
-2. `GET /api/admin/storage/policies`
-3. `POST /api/admin/storage/policies`
-4. `POST /api/admin/storage/jobs/run`
-5. `GET /api/admin/storage/jobs`
-6. `GET /api/admin/storage/jobs/{job_id}`
-7. `POST /api/admin/storage/restore/prepare`
-8. `POST /api/admin/storage/restore/commit`
-9. `POST /api/admin/storage/restore/cancel`
+1. ローカルサマリー参照
+2. ポリシー読取 / 更新
+3. バックアップ job 実行 / 一覧 / 詳細
+4. restore prepare / commit / cancel
 
-すべて admin 権限必須 + audit 記録必須。
+正確な admin ルート名は非公開 operator docs にのみ残します。公開計画では能力グループと audit 要件だけを扱います。
 
 ## 5. MVP データモデル
 
@@ -63,16 +58,6 @@
 4. 帯域制限: 既定で有効
 5. 日次アップロード予算ガード: 有効
 6. 同時バックアップジョブ: 単一ロック
-
-## 6.1 実装進捗（`2026-04-07`）
-
-1. ストレージ冷備サービスで以下のポリシーガードを実装済み:
-   - リモート暗号化必須
-   - 日次アップロード予算
-   - 任意帯域制限
-   - 単一アクティブ backup ロック
-2. backup/restore ジョブは永続化され、決定論的な状態遷移で管理者 API から参照可能。
-3. template/profile-pack の submit 経路には冪等リプレイと競合拒否を導入し、バックアップ対象に入る前の重複ノイズを抑制。
 
 ## 7. Drive 制約への対応
 

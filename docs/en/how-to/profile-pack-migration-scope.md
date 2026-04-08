@@ -38,7 +38,7 @@ If you only need one answer, this is it: **what settings Sharelife migrates toda
 1. Keys in AstrBot `data/cmd_config.json` that are not mirrored into the listed sections are not auto-migrated.
 2. No field-level translator against AstrBot config schema exists yet; adapters are currently `section_name -> state_key`.
 3. Plugin binaries, system dependencies, container runtime state, and external DB/KB raw files are not bundled by profile pack; `environment_manifest` only carries reconfiguration metadata.
-4. Plugin install command execution is default-off; install metadata still needs explicit admin confirmation and execution-gate config.
+4. Plugin install command execution is default-off; install metadata still needs explicit privileged confirmation and execution-gate config.
 5. Cross-version support relies on declaration checks (`astrbot_version` / `plugin_compat`), not automatic semantic migration.
 6. If a pack includes `environment_manifest` or KB external paths, import will keep `compatibility=degraded` with explicit `compatibility_issues` so operators can run post-migration reconfiguration.
 

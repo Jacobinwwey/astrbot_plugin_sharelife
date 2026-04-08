@@ -1,10 +1,16 @@
 # 独立 WebUI 使用
 
-## 适用场景
+## 适用范围
 
-Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。  
-你可以用它处理试用、审核、apply/rollback、profile-pack 操作和审计查看。
-核心面板包括“试用状态（Trial Status）”与“管理员应用流程（Admin Apply Workflow）”。
+Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。
+本页只记录公开 / 用户侧的真实使用链路：
+
+1. Spotlight 风格的市场搜索
+2. 本地安装管理
+3. 模板上传与 profile-pack 投稿
+4. 用户侧任务 / 结果跟踪
+
+特权审核与 operator 流程只保留在私有文档中。
 
 ## 配置
 
@@ -54,32 +60,27 @@ Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。
 }
 ```
 
-鉴权规则：
+## 鉴权行为
 
-1. 鉴权字段为空时，默认保留公开 / member 导向界面。
-2. 任何有效 WebUI 密码都会开启 API 登录门控。
-3. 管理接口权限由 token 角色决定，不信任请求体 `role`。
-4. 兼容旧配置 `auth.password`，但它只作为 member 兼容字段。
-5. 默认关闭 query token，建议 `Authorization: Bearer <token>`。
-6. 登录失败受 `login_rate_limit_*` 限流。
-7. token 生命周期由 `token_ttl_seconds` 控制。
-8. API 请求受 `api_rate_limit_*` 限流（按 `client + role + path` 维度）。
-9. 指标 path 基数由 `observability.metrics_max_paths` 控制，超出后折叠到 `metrics_overflow_path_label`。
-10. `GET /api/ui/capabilities` 在登录前也可读取，会返回当前有效角色与可执行操作清单，供前端做能力门控。
-11. WebUI 默认会附加安全响应头（`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、`Content-Security-Policy`），可在 `webui.security_headers` 下调整。
-12. Reviewer / Admin 鉴权细节与密钥备份流程不出现在公开文档面。
-13. 若设置 `allow_anonymous_member=true`，可在不登录的情况下访问受控 member 端点（试用/安装/偏好/安装列表），但请求仍会强制绑定到 `anonymous_member_user_id`，不能跨 `user_id` 访问。
-14. `anonymous_member_allowlist` 可显式覆盖匿名可访问端点集合，格式为 `"METHOD /api/path"`；未配置时使用上面的安全默认集合。
+1. 鉴权字段为空时，公开 / 用户侧界面可直接使用。
+2. `member_password` 会为受保护的 member 动作开启登录门控。
+3. `GET /api/ui/capabilities` 在登录前可读，前端据此做按钮能力控制。
+4. 默认关闭 query token，使用 `Authorization: Bearer <token>`。
+5. 登录失败受 `login_rate_limit_*` 限流。
+6. API 请求受 `api_rate_limit_*` 限流（维度为 `client + role + path`）。
+7. 默认响应会带上 `security_headers`，包括 `Content-Security-Policy`。
+8. 若设置 `allow_anonymous_member=true`，只有匿名 allowlist 中的接口可以免登录调用，且请求仍固定绑定到 `anonymous_member_user_id`。
+9. 特权鉴权、secret 材料与备份恢复手册都保留在私有文档中。
 
 ## 启动与路由
 
-1. 插件初始化时会尝试启动 WebUI。
-2. 执行 `/sharelife_webui` 获取 URL。
-3. 可访问路由：
-   - `/` 完整控制台
-   - `/member` 普通用户控制台
-   - `/admin` 管理员控制台
+1. 插件启动时会尝试自动拉起 WebUI。
+2. 执行 `/sharelife_webui` 获取访问地址。
+3. 公开 / 用户侧路由：
+   - `/` 统一入口
+   - `/member` 用户控制台
    - `/market` 独立市场页
+4. 受限 operator 路由仍然存在，但不会在公开文档中描述。
 
 ### 容器快速启动
 
@@ -87,46 +88,71 @@ Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。
 docker compose up -d --build
 ```
 
-启动后访问 `http://127.0.0.1:8106`。  
-数据目录默认持久化到 `./output/docker-data`。
-Compose 默认使用 `state_store.backend=sqlite`，SQLite 文件为 `./output/docker-data/sharelife_state.sqlite3`。
+随后访问 `http://127.0.0.1:8106`。
+数据默认持久化到 `./output/docker-data`。
+Compose 默认使用 `state_store.backend=sqlite`，文件位于 `./output/docker-data/sharelife_state.sqlite3`。
 
-## 主要能力
+## 用户工作流
 
-1. 用户偏好：执行模式切换、任务细节观测开关。
-2. 试用状态（Trial Status）面板：明确展示状态、TTL、剩余秒数。
-3. 模板市场：列表、投稿、安装、提示词/包生成、下载。
-4. 管理员应用流程（Admin Apply Workflow）：dry-run -> apply -> rollback。
-5. 风险扫描：`risk_level`、标签、warning flag、注入命中规则。
-6. 右上角一键开发者模式：开启后可查看风险定位证据（`file/path/line/column`）。
-7. 关闭开发者模式时，风险面板仅保留决策级信息，避免普通用户被低层细节干扰。
-8. 审核区：投稿比较、审核备注、队列锁、决策和审计时间线。
-9. 通知中心：显示 WebUI 通知事件。
-10. 服务端筛选：支持 `template_id`、`category`、`tag`、`source_channel`、`risk_level`、`status`、`review_label`、`warning_flag`。
-11. Profile-pack 市场：submission/catalog/compare/featured 全链路，并通过 `/api/profile-pack/catalog/insights` 提供服务端洞察（metrics/featured/trending 数据卡片）。
-12. 插件安装门禁：`plan -> confirm -> execute`。
-13. 执行证据：失败按 `policy_blocked`、`command_failed`、`timed_out` 分组展示。
-14. 语言同步：`en-US` / `zh-CN` / `ja-JP` 在 `/`、`/member`、`/admin`、`/market` 间共享 `sharelife.uiLocale`。
-15. 顶部工具条常驻语言快速切换和控制台入口，方便在多语言/多视图间快速跳转。
-16. `/member` 与 `/admin` 已切换为独立信息架构模板（用户优先 / 管理优先），不再共用混合导航面板。
-17. 角色页登录角色选择已与页面强绑定（`/member` 仅 `member`、`/admin` 仅 `admin`），减少跨角色误操作。
-18. 低频操作默认折叠（`工作区路由操作`、`插件安装执行控制`、`风险词汇表`），减少常规使用的认知噪声。
-19. API 响应统一包含 `X-Request-ID` 便于追踪，请求指标可通过 `/api/metrics`（Prometheus 文本格式）采集（`sharelife_webui_http_*`、`sharelife_webui_auth_events_total`、`sharelife_webui_rate_limit_total`）。
-20. Reviewer / Admin 运维、可观测性值班手册和鉴权密钥备份流程仅保留在私有运维文档中，不出现在公开文档站。
-21. 鉴权/限流/内部异常统一返回错误结构：`{"ok": false, "error": {"code": "...", "message": "..."}}`。
-22. 按钮级操作会基于后端能力策略（`/api/ui/capabilities`）做显式门控，确保 public/member/admin 视图与 token 角色一致。
-23. Profile-pack 面板新增独立“兼容性指引”区（问题列表 + 可点击动作快捷跳转）；已映射的问题/动作可直接跳到目标操作区，且在有提示时会自动回填 `plugin_ids`/推荐 sections，开发者模式专属目标支持“开启后自动续执行”。原始 `compatibility_issues`/`action_codes` 仅在开发者模式展示。
-24. `/market` 已切换为左侧 Facet + 顶部搜索排序的信息架构（Hugging Face 风格），并在移动端提供筛选抽屉。
-25. 市场页本地视图状态支持 URL 同步（`q`、`sort`、`facet_*`、`pack_id`），筛选结果和选中项可直接分享链接复现。
-26. 桌面端 `/market` 中，“详情与对比”固定为右侧独立列；“操作日志”默认折叠，通过 profile-pack 卡片内按钮按需展开。
-27. 管理端已新增“存储备份与恢复”面板：支持本地摘要、策略读写、备份任务执行/列表/详情、恢复 prepare/commit/cancel、恢复任务观测全链路。
-28. 存储输出默认展示可读摘要；仅在开发者模式下附带原始 JSON 载荷，便于排障且不干扰日常操作。
+### 1. 市场搜索 + 试用状态
+
+1. `/member` 与 `/market` 都以 Spotlight 风格搜索作为第一入口。
+2. 搜索会驱动目录卡片、详情与对比面板。
+3. `试用状态（Trial Status）` 会展示 `not_started|active|expired`，以及 `ttl_seconds` 与 `remaining_seconds`。
+
+### 2. 本地安装管理
+
+1. 先加载本地安装列表。
+2. 用 `刷新本地已有配置` 同步当前可见状态。
+3. 单个安装项支持：
+   - `重新安装`
+   - `卸载`
+4. 安装控件支持：
+   - `preflight`
+   - `force_reinstall`
+   - `source_preference=auto|uploaded_submission|generated`
+
+### 3. 模板上传链路
+
+1. 在 `/member` 打开上传区域。
+2. 选择文件，或直接使用生成包输出。
+3. 模板包直传上限为 `20 MiB`。
+4. 上传选项：
+   - `scan_mode=strict|balanced`
+   - `visibility=community|private`
+   - `replace_existing=true|false`
+5. 提交后，在 `我的投稿` 中查看详情，并下载自己的原始投稿包。
+
+### 4. Profile-Pack 投稿链路
+
+1. 先准备 profile-pack 产物，并复制 `artifact_id`。
+2. 从 `/member` 或 `/market` 发起投稿。
+3. 提交选项包括：
+   - `pack_type`
+   - `selected_sections`
+   - `redaction_mode`
+   - `replace_existing`
+4. 提交后，在 `我的 Profile-Pack 投稿` 查看详情并下载自己的导出物。
+
+### 5. 能力门控与错误模型
+
+1. 所有按钮级动作都通过 `/api/ui/capabilities` 做后端能力门控。
+2. 鉴权 / 限流 / 内部错误统一返回：
+   `{"ok": false, "error": {"code": "...", "message": "..."}}`
+3. 属主不匹配会返回 `permission_denied`。
+4. 模板上传超限会返回 `package_too_large`。
+5. 类似 `prompt_injection_detected` 的风险命中会作为审查信号展示，不会静默删除。
+
+## 公开 / 私有边界
+
+1. 公开文档只覆盖搜索、安装、上传、以及用户自己的投稿管理。
+2. 公开文档不暴露审核动作、特权 apply/rollback、secret 处理、备份恢复 SOP。
 
 ## 常见问题
 
-1. `permission_denied`：当前 token 非 admin。
-2. `review_lock_held`：请求被其他管理员持锁。
-3. `401`：已启用鉴权但未登录。
-4. `prompt_injection_detected`：命中高风险规则，当前行为是标记和可视化，不自动删除。
-5. 手动改浏览器存储后语言异常：删除 `sharelife.uiLocale` 并刷新。
-6. 手动改浏览器存储后开发者模式异常：删除 `sharelife.developerMode` 并刷新。
+1. `401`：已开启鉴权，当前 member 动作需要先登录。
+2. `permission_denied`：当前 token 不能访问指定 `user_id` 或目标动作。
+3. `package_too_large`：模板上传超过 `20 MiB`。
+4. `prompt_injection_detected`：包已被标记并升级审查。
+5. 手动修改浏览器存储后语言异常：删除 `sharelife.uiLocale` 后刷新。
+6. 手动修改浏览器存储后开发者模式异常：删除 `sharelife.developerMode` 后刷新。

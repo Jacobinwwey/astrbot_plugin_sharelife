@@ -1,8 +1,15 @@
-# Sharelife API v1（命令复用层）
+# Sharelife API v1（公开 + 用户侧接口面）
 
-`sharelife/interfaces/api_v1.py` 提供统一用例入口，命令层直接调用它，编排逻辑只维护一处。
+本页只保留公开目录读取接口与 member 侧可调用的变更接口。
+reviewer/admin/operator 相关接口已从公开参考中移除，转入私有运维文档。
 
-## 用户侧
+## 范围
+
+1. 公开只读接口：市场检索、详情、对比、健康检查、能力发现。
+2. 用户接口：登录、试用、安装、上传、profile-pack 投稿、本地安装管理、本人投稿查询与下载。
+3. 属主绑定：开启鉴权后，member 路由只能操作与当前认证 `user_id` 对应的数据。
+
+## 公开 + 用户侧应用方法
 
 1. `get_preferences(user_id)`
 2. `set_preference_mode(user_id, mode)`
@@ -19,261 +26,113 @@
 13. `list_profile_pack_catalog(pack_query="", pack_type="", risk_level="", review_label="", warning_flag="", featured="")`
 14. `get_profile_pack_catalog_detail(pack_id)`
 15. `compare_profile_pack_catalog(pack_id, selected_sections=None)`
-16. `member_list_submissions(user_id, status="", template_query="", risk_level="", review_label="", warning_flag="")`
-17. `member_get_submission_detail(user_id, submission_id)`
-18. `member_list_profile_pack_submissions(user_id, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
-19. `member_get_profile_pack_submission_detail(user_id, submission_id)`
+16. `submit_profile_pack(user_id, artifact_id, submit_options=None)`
+17. `list_member_installations(user_id, limit=50)`
+18. `refresh_member_installations(user_id, limit=50)`
+19. `uninstall_member_installation(user_id, template_id)`
+20. `member_list_submissions(user_id, status="", template_query="", risk_level="", review_label="", warning_flag="")`
+21. `member_get_submission_detail(user_id, submission_id)`
+22. `member_get_submission_package(user_id, submission_id)`
+23. `member_list_profile_pack_submissions(user_id, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
+24. `member_get_profile_pack_submission_detail(user_id, submission_id)`
+25. `member_get_profile_pack_submission_export(user_id, submission_id)`
 
-## 管理员侧
+## 公开 + 用户侧 HTTP 路由
 
-1. `admin_list_submissions(role, status="")`
-2. `admin_get_submission_detail(role, submission_id)`
-3. `admin_update_submission_review(role, submission_id, review_note="", review_labels=None)`
-4. `admin_decide_submission(role, submission_id, decision, review_note="", review_labels=None)`
-5. `admin_list_retry_requests(role)`
-6. `admin_acquire_retry_lock(role, request_id, admin_id, force=False, reason="")`
-7. `admin_decide_retry_request(role, request_id, decision, admin_id=None, request_version=None, lock_version=None)`
-8. `admin_dryrun(role, plan_id, patch)`
-9. `admin_apply(role, plan_id)`
-10. `admin_rollback(role, plan_id)`
-11. `admin_list_audit(role, limit=100)`
-12. `admin_export_profile_pack(role, pack_id, version, pack_type="bot_profile_pack", redaction_mode="exclude_secrets", sections=None, mask_paths=None, drop_paths=None)`
-13. `admin_get_profile_pack_export(role, artifact_id)`
-14. `admin_list_profile_pack_exports(role, limit=50)`
-15. `admin_import_profile_pack(role, filename, content_base64)`
-16. `admin_import_profile_pack_from_export(role, artifact_id)`
-17. `admin_import_profile_pack_and_dryrun(role, plan_id, selected_sections=None, filename="", content_base64="", artifact_id="")`
-18. `admin_list_profile_pack_imports(role, limit=50)`
-19. `admin_profile_pack_dryrun(role, import_id, plan_id, selected_sections=None)`
-20. `admin_profile_pack_plugin_install_plan(role, import_id)`
-21. `admin_profile_pack_confirm_plugin_install(role, import_id, plugin_ids=None)`
-22. `admin_profile_pack_execute_plugin_install(role, import_id, plugin_ids=None, dry_run=False)`
-23. `admin_profile_pack_apply(role, plan_id)`
-24. `admin_profile_pack_rollback(role, plan_id)`
-25. `admin_set_profile_pack_featured(role, pack_id, featured, note="")`
-26. `admin_run_pipeline(role, contract, input_payload, actor_id="admin", run_id="")`
-27. `admin_storage_local_summary(role)`
-28. `admin_storage_get_policies(role)`
-29. `admin_storage_set_policies(role, patch, admin_id="admin")`
-30. `admin_storage_run_job(role, admin_id="admin", trigger="manual", note="")`
-31. `admin_storage_list_jobs(role, status="", limit=50)`
-32. `admin_storage_get_job(role, job_id)`
-33. `admin_storage_restore_prepare(role, artifact_ref, admin_id="admin", note="")`
-34. `admin_storage_restore_commit(role, restore_id, admin_id="admin")`
-35. `admin_storage_restore_cancel(role, restore_id, admin_id="admin")`
-36. `admin_storage_list_restore_jobs(role, state="", limit=50)`
-37. `admin_storage_get_restore_job(role, restore_id)`
+公开路由：
 
-## 审核员与准入治理方法
+1. `GET /api/auth-info`
+2. `POST /api/login`
+3. `GET /api/health`
+4. `GET /api/ui/capabilities?page_mode=auto|member|market`
+5. `GET /api/templates`
+6. `GET /api/templates/detail?template_id=...`
+7. `GET /api/profile-pack/catalog`
+8. `GET /api/profile-pack/catalog/detail?pack_id=...`
+9. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
+10. `GET /api/profile-pack/catalog/insights`
 
-1. `admin_create_reviewer_invite(role, admin_id, expires_in_seconds=3600)`
-2. `admin_list_reviewer_invites(role, status="")`
-3. `admin_revoke_reviewer_invite(role, invite_code, admin_id)`
-4. `reviewer_redeem_invite(invite_code, reviewer_id)`
-5. `reviewer_register_device(reviewer_id, label="")`
-6. `reviewer_list_devices(reviewer_id)`
-7. `reviewer_revoke_device(reviewer_id, device_id)`
-8. `admin_list_reviewers(role)`
-9. `admin_force_reset_reviewer_devices(role, reviewer_id, admin_id)`
-10. `admin_list_profile_pack_submissions(role, status="", pack_query="", pack_type="", risk_level="", review_label="", warning_flag="")`
-11. `admin_decide_profile_pack_submission(role, submission_id, decision, review_note="", review_labels=None, reviewer_id="")`
-
-## 错误码约定（节选）
-
-1. `permission_denied`
-2. `invite_revoked`
-3. `review_lock_held`
-4. `takeover_reason_required`
-5. `review_lock_required`
-6. `review_lock_not_owner`
-7. `request_version_conflict`
-8. `lock_version_conflict`
-9. `template_not_installable`
-10. `package_service_unavailable`
-11. `package_payload_required`
-12. `invalid_package_payload`
-13. `plan_not_found`
-14. `plan_not_applied`
-15. `invalid_pack_type`
-16. `profile_pack_plugin_install_confirm_required`
-17. `profile_pack_plugin_not_in_plan`
-18. `profile_pack_plugin_id_required`
-19. `profile_pack_plugin_install_exec_disabled`
-20. `profile_pack_plugin_install_exec_required`
-21. `profile_pack_plugin_install_exec_failed`
-22. `pipeline_service_unavailable`
-23. `invalid_pipeline_contract`
-24. `pipeline_execution_failed`
-25. `storage_service_unavailable`
-26. `daily_upload_budget_exceeded`
-27. `remote_sync_command_not_found`
-28. `remote_sync_failed`
-29. `artifact_not_found`
-30. `artifact_checksum_mismatch`
-31. `remote_encryption_required`
-32. `remote_retention_failed`
-33. `remote_retention_command_not_found`
-
-## 并发治理规则
-
-1. 审核锁默认 10 分钟。
-2. 强制接管必须提供理由。
-3. 决策可携带 `request_version + lock_version` 做乐观并发保护。
-
-## WebUI HTTP 适配层
-
-Phase 3 新增 `sharelife/interfaces/web_api_v1.py` 与 `sharelife/interfaces/webui_server.py`，提供独立页面和 HTTP 接口。
-
-接口前缀：`/api`（独立 WebUI 服务内）。
-
-用户侧：
+用户路由：
 
 1. `GET /api/preferences?user_id=...`
 2. `POST /api/preferences/mode`
 3. `POST /api/preferences/observe`
-4. `GET /api/templates`
-5. `GET /api/templates/detail?template_id=...`
-6. `POST /api/templates/submit`
-7. `GET /api/templates/package/download?template_id=...`
-8. `POST /api/trial`
-9. `GET /api/trial/status?user_id=...&session_id=...&template_id=...`
-10. `POST /api/templates/install`
-11. `POST /api/templates/prompt`
-12. `POST /api/templates/package`
-13. `GET /api/profile-pack/catalog`
-14. `GET /api/profile-pack/catalog/detail?pack_id=...`
-15. `GET /api/profile-pack/catalog/compare?pack_id=...&selected_sections=plugins,providers`
-16. `GET /api/profile-pack/catalog/insights`
-17. `POST /api/profile-pack/submit`
-18. `GET /api/member/submissions?user_id=...&status=...&template_id=...`
-19. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
-20. `GET /api/member/profile-pack/submissions?user_id=...&status=...&pack_id=...`
-21. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
+4. `POST /api/trial`
+5. `GET /api/trial/status?user_id=...&session_id=...&template_id=...`
+6. `POST /api/templates/install`
+7. `POST /api/templates/submit`
+8. `GET /api/templates/package/download?template_id=...`
+9. `POST /api/templates/prompt`
+10. `POST /api/templates/package`
+11. `POST /api/profile-pack/submit`
+12. `GET /api/member/installations?user_id=...`
+13. `POST /api/member/installations/refresh`
+14. `POST /api/member/installations/uninstall`
+15. `GET /api/member/submissions?user_id=...`
+16. `GET /api/member/submissions/detail?user_id=...&submission_id=...`
+17. `GET /api/member/submissions/package/download?user_id=...&submission_id=...`
+18. `GET /api/member/profile-pack/submissions?user_id=...`
+19. `GET /api/member/profile-pack/submissions/detail?user_id=...&submission_id=...`
+20. `GET /api/member/profile-pack/submissions/export/download?user_id=...&submission_id=...`
 
-审核员侧：
+## 公开上传 / 安装载荷说明
 
-1. `POST /api/reviewer/invites`
-2. `GET /api/reviewer/invites`
-3. `POST /api/reviewer/invites/revoke`
-4. `POST /api/reviewer/redeem`
-5. `POST /api/reviewer/devices/register`
-6. `GET /api/reviewer/devices`
-7. `DELETE /api/reviewer/devices/{device_id}`
-8. `GET /api/reviewer/accounts`
-9. `POST /api/reviewer/accounts/reset-devices`
-10. `GET /api/reviewer/session`
-11. `POST /api/reviewer/session/logout`
-12. `GET /api/reviewer/submissions`
-13. `POST /api/reviewer/submissions/review`
-14. `POST /api/reviewer/submissions/decide`
-15. `GET /api/reviewer/submissions/detail?submission_id=...`
-16. `GET /api/reviewer/submissions/compare?submission_id=...`
-17. `GET /api/reviewer/submissions/package/download?submission_id=...`
-18. `GET /api/reviewer/profile-pack/submissions`
-19. `POST /api/reviewer/profile-pack/submissions/decide`
-
-管理员侧：
-
-1. `GET /api/admin/submissions?role=admin&status=...`
-2. `POST /api/admin/dryrun`
-3. `POST /api/admin/apply`
-4. `POST /api/admin/rollback`
-5. `GET /api/admin/submissions/detail?submission_id=...`
-6. `POST /api/admin/submissions/review`
-7. `GET /api/admin/submissions/compare?submission_id=...`
-8. `GET /api/admin/submissions/package/download?submission_id=...`
-9. `POST /api/admin/submissions/decide`
-10. `GET /api/admin/retry-requests?role=admin`
-11. `POST /api/admin/retry-requests/lock`
-12. `POST /api/admin/retry-requests/decide`
-13. `GET /api/admin/audit?role=admin&limit=20`
-14. `POST /api/admin/profile-pack/export`
-15. `GET /api/admin/profile-pack/export/download?artifact_id=...`
-16. `GET /api/admin/profile-pack/exports?role=admin&limit=...`
-17. `POST /api/admin/profile-pack/import`
-18. `POST /api/admin/profile-pack/import/from-export`
-19. `POST /api/admin/profile-pack/import-and-dryrun`
-20. `GET /api/admin/profile-pack/imports?role=admin&limit=...`
-21. `POST /api/admin/profile-pack/dryrun`
-22. `GET /api/admin/profile-pack/plugin-install-plan?import_id=...`
-23. `POST /api/admin/profile-pack/plugin-install-confirm`
-24. `POST /api/admin/profile-pack/plugin-install-execute`
-25. `POST /api/admin/profile-pack/apply`
-26. `POST /api/admin/profile-pack/rollback`
-27. `POST /api/admin/profile-pack/catalog/featured`
-28. `POST /api/admin/pipeline/run`
-29. `GET /api/admin/storage/local-summary`
-30. `GET /api/admin/storage/policies`
-31. `POST /api/admin/storage/policies`
-32. `POST /api/admin/storage/jobs/run`
-33. `GET /api/admin/storage/jobs`
-34. `GET /api/admin/storage/jobs/{job_id}`
-35. `POST /api/admin/storage/restore/prepare`
-36. `POST /api/admin/storage/restore/commit`
-37. `POST /api/admin/storage/restore/cancel`
-38. `GET /api/admin/storage/restore/jobs`
-39. `GET /api/admin/storage/restore/jobs/{restore_id}`
-
-`GET /api/admin/audit` 除原始 `events` 外，还会返回按 actor role、actor、action、reviewer、device 聚合的 `summary` 摘要块。
-
-辅助接口：
-
-1. `GET /api/auth-info`
-2. `POST /api/login`（支持 `member/admin` 分级密码）
-3. `GET /api/health`
-4. `GET /api/notifications?limit=...`
-5. `GET /api/ui/capabilities?page_mode=auto|member|admin`（返回 UI 门控所需的有效角色与操作键）
+1. `POST /api/templates/install`
+   - `install_options.preflight: bool`
+   - `install_options.force_reinstall: bool`
+   - `install_options.source_preference: auto|uploaded_submission|generated`
+2. `POST /api/templates/submit`
+   - `package_name + package_base64`：直接上传模板包
+   - `upload_options.scan_mode: strict|balanced`
+   - `upload_options.visibility: community|private`
+   - `upload_options.replace_existing: bool`
+3. `POST /api/profile-pack/submit`
+   - 当前主线必须提供 `artifact_id`
+   - `submit_options.pack_type: bot_profile_pack|extension_pack`
+   - `submit_options.selected_sections: string[]`
+   - `submit_options.redaction_mode: exclude_secrets|exclude_provider|include_provider_no_key|include_encrypted_secrets`
+   - `submit_options.replace_existing: bool`
+4. 模板包直接上传上限为 `20 MiB`，超限返回 `package_too_large`。
 
 ## Auth Badge Matrix (HTTP)
 
-| 路由 | Required Role | 拒绝语义 |
+| 路由 | 所需角色 | 拒绝行为 |
 | --- | --- | --- |
-| `GET /api/ui/capabilities` | `public` | 不适用 |
+| `GET /api/ui/capabilities` | `public` | N/A |
 | `POST /api/login` | `public` | `401 invalid_credentials` 或 `429 rate_limited` |
-| `GET /api/templates` | `public`（只读市场能力） | 不适用 |
-| `GET /api/templates/detail` | `public`（只读市场能力） | 不适用 |
-| `GET /api/profile-pack/catalog` | `public`（只读市场能力） | 不适用 |
-| `GET /api/profile-pack/catalog/detail` | `public`（只读市场能力） | 不适用 |
-| `GET /api/profile-pack/catalog/compare` | `public`（只读市场能力） | 不适用 |
-| `GET /api/profile-pack/catalog/insights` | `public`（只读市场能力） | 不适用 |
-| `POST /api/templates/submit` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 提交他人 `user_id` 时 `403 permission_denied` |
-| `POST /api/profile-pack/submit` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 提交他人 `user_id` 时 `403 permission_denied` |
-| `GET /api/member/submissions` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询他人 `user_id` 时 `403 permission_denied` |
-| `GET /api/member/submissions/detail` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询非本人 `submission_id` 时 `403 permission_denied` |
-| `GET /api/member/profile-pack/submissions` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询他人 `user_id` 时 `403 permission_denied` |
-| `GET /api/member/profile-pack/submissions/detail` | `member|reviewer|admin` | 无 token 时 `401 unauthorized`；member 查询非本人 `submission_id` 时 `403 permission_denied` |
-| `POST /api/reviewer/invites/revoke` | `admin` | `403 permission_denied` |
-| `POST /api/reviewer/redeem` | `public`（邀请码准入） | 邀请码校验失败返回 `400/404/409/410` |
-| `GET /api/reviewer/submissions` | `reviewer|admin` | `403 permission_denied` |
-| `POST /api/reviewer/submissions/decide` | `reviewer|admin` | `403 permission_denied` |
-| `POST /api/admin/apply` | `admin` | `403 permission_denied` |
-| `POST /api/admin/profile-pack/apply` | `admin` | `403 permission_denied` |
-| `POST /api/admin/pipeline/run` | `admin` | `403 permission_denied` |
+| `GET /api/templates` | `public` | N/A |
+| `GET /api/templates/detail` | `public` | N/A |
+| `GET /api/profile-pack/catalog` | `public` | N/A |
+| `GET /api/profile-pack/catalog/detail` | `public` | N/A |
+| `GET /api/profile-pack/catalog/compare` | `public` | N/A |
+| `GET /api/profile-pack/catalog/insights` | `public` | N/A |
+| `POST /api/trial` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/templates/install` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/templates/submit` | `member` | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/profile-pack/submit` | `member` | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/member/installations` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/member/installations/refresh` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/member/installations/uninstall` | `member` | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/member/submissions` | `member` | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/member/submissions/detail` | `member` | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/member/profile-pack/submissions` | `member` | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/member/profile-pack/submissions/detail` | `member` | `401 unauthorized` 或 `403 permission_denied` |
 
-所有基于角色的拒绝响应，应返回 `error.code=permission_denied`。
+所有越权拒绝都应返回 `error.code=permission_denied`。
 
-## Phase 4 补充
+## 错误模型
 
-1. `get_trial_status()` 与 `GET /api/trial/status` 现在可返回 `not_started|active|expired` 状态，以及 `ttl_seconds` / `remaining_seconds`。
-2. `admin_dryrun()` 与 `POST /api/admin/dryrun` 用于预注册严格模式 patch 计划，不直接落配置。
-3. `admin_rollback()` 与 `POST /api/admin/rollback` 可在最近一次成功 apply 后恢复快照。
-4. `POST /api/templates/submit` 现在支持附带 `package_name + package_base64`，用于上传模板包。
-5. 上传后返回 `risk_level`、`review_labels`、`warning_flags` 与 `scan_summary.prompt_injection`。
-6. `generate_package()` 和下载接口会优先复用已批准投稿所附带的原始模板包，并返回 `source=uploaded_submission|generated`。
-7. 管理员可通过 `POST /api/admin/submissions/review` 单独保存 `review_note` 与人工审核标签，无需立即 approve/reject。
-8. 管理员可在投稿尚未批准前，通过 `GET /api/admin/submissions/package/download` 下载原始投稿包，并用 `GET /api/admin/submissions/compare` 对比当前已发布基线。
-9. `GET /api/admin/submissions/compare` 现返回 `details` 字段，包含 version/risk/review_note/prompt/package/scan 等字段级 diff。
-10. `GET /api/templates` 现在还支持 `category`、`tag`、`source_channel` 等官方目录筛选参数，并继续支持 `review_label`、`warning_flag`。
-11. `GET /api/templates` 还支持 `sort_by=template_id|recent_activity|trial_requests|installs` 与 `sort_order=asc|desc`。
-12. 模板列表与详情 payload 现在会返回 `category`、`tags`、`maintainer`、`source_channel`，以及聚合后的 `engagement` 对象，便于 starter catalog 浏览。
-13. `engagement` 当前包含 `trial_requests`、`installs`、`prompt_generations`、`package_generations`、`community_submissions` 与 `last_activity_at`。
-14. `GET /api/templates/detail` 与 `GET /api/admin/submissions/detail` 会返回适合 WebUI 详情卡片的 payload，包括 prompt 预览/长度、时间戳、包元数据、目录元数据与模板 engagement 数据。
-15. WebUI 的语言切换（`en-US` / `zh-CN` / `ja-JP`）属于前端行为；API 接口不接收 locale 参数，返回 schema 不随语言变化。
-16. WebUI 中的本地化文案（集合状态、面板状态、审核提示、详情字段标签）由前端字典映射生成；API 字段 key 保持稳定（英文 `snake_case`）。
-17. `GET /api/ui/capabilities` 设计为登录前可读；开启鉴权但未携带 token 时，角色解析为 `public`，仅返回最小能力集。
-18. 即便开启鉴权，市场目录只读接口仍保持公开（`GET /api/templates*`、`GET /api/profile-pack/catalog*`），所有写接口继续要求 token。
-19. 当 `webui.public_market.auto_publish_profile_pack_approve=true` 时，审核通过 profile-pack 提交后，决策响应会附带 `public_market_publish` 字段，返回发布状态与生成产物路径。
-20. 公共市场自动发布相关运行时配置键：`webui.public_market.auto_publish_profile_pack_approve`、`webui.public_market.root`、`webui.public_market.rebuild_snapshot_on_publish`。
-21. `POST /api/templates/submit` 现支持 `upload_options.idempotency_key` 或 `Idempotency-Key` 请求头的幂等重放；同一范围重试返回已有 submission。
-22. `POST /api/profile-pack/submit` 同样支持 `submit_options.idempotency_key` 或 `Idempotency-Key` 请求头幂等重放。
-23. 当幂等键跨不同提交流程范围复用时，会返回 `idempotency_key_conflict`，用于阻断误重放。
+1. `permission_denied`：角色或属主绑定拒绝当前操作。
+2. `unauthorized` / `invalid_credentials`：需要登录或凭证错误。
+3. `package_too_large`：上传包超过 `20 MiB` 上限。
+4. `template_not_installable`：目标模板当前不可安装。
+5. `profile_pack_source_required`：投稿 profile-pack 时未提供 `artifact_id`。
+6. `prompt_injection_detected`：扫描命中高风险信号；当前行为是标记并升级审查，不会静默删除。
+
+## 运行说明
+
+1. `get_trial_status()` 与 `GET /api/trial/status` 会返回 `not_started|active|expired`，并附带 `ttl_seconds` 与 `remaining_seconds`。
+2. `GET /api/ui/capabilities` 在登录前可读，前端据此隐藏或禁用受保护控件。
+3. 若启用 `allow_anonymous_member=true`，只有 allowlist 中的接口可匿名访问，且请求仍固定绑定到 `anonymous_member_user_id`。
+4. 用户下载接口默认做属主隔离：member 只能下载自己的投稿包或导出产物。
+5. 审核、apply/rollback、reviewer 生命周期、secret 轮换、备份恢复、精选运营等流程只在私有运维文档中维护。
