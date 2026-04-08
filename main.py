@@ -10,6 +10,7 @@ from astrbot.api.star import Context, Star, register
 from .sharelife.application.services_apply import ApplyService
 from .sharelife.application.services_audit import AuditService
 from .sharelife.application.services_capability_gateway import CapabilityGateway
+from .sharelife.application.services_continuity import ConfigContinuityService
 from .sharelife.application.services_market import MarketService
 from .sharelife.application.services_package import PackageService
 from .sharelife.application.services_pipeline import PipelineOrchestrator, builtin_pipeline_plugins
@@ -60,6 +61,7 @@ class SharelifePlugin(Star):
         profile_pack_store = state_stores["profile_pack_state"]
         reviewer_auth_store = state_stores["reviewer_auth_state"]
         storage_store = state_stores["storage_state"]
+        continuity_store = state_stores["continuity_state"]
         package_root = data_root / "packages"
         registry_store = LocalStore(data_root)
         bundled_registry_path = Path(__file__).resolve().parent / "templates" / "index.json"
@@ -69,7 +71,14 @@ class SharelifePlugin(Star):
         self.clock = SystemClock()
         self.preference_service = PreferenceService(state_store=preference_store)
         self.runtime_bridge = self._build_runtime_bridge(data_root=data_root)
-        self.apply_service = ApplyService(runtime=self.runtime_bridge)
+        self.continuity_service = ConfigContinuityService(
+            state_store=continuity_store,
+            clock=self.clock,
+        )
+        self.apply_service = ApplyService(
+            runtime=self.runtime_bridge,
+            continuity_service=self.continuity_service,
+        )
         self.retry_queue_service = RetryQueueService(clock=self.clock, state_store=retry_store)
         self.trial_service = TrialService(clock=self.clock, state_store=trial_store)
         self.market_service = MarketService(clock=self.clock, state_store=market_store)
@@ -222,6 +231,7 @@ class SharelifePlugin(Star):
             "profile_pack_state": "profile_pack_state.json",
             "reviewer_auth_state": "reviewer_auth_state.json",
             "storage_state": "storage_state.json",
+            "continuity_state": "continuity_state.json",
         }
 
     def _reviewer_device_key_config(self) -> dict:

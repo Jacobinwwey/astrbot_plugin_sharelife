@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_preferences import PreferenceService
@@ -22,6 +23,7 @@ from sharelife.application.services_reviewer_auth import ReviewerAuthService
 from sharelife.application.services_storage_backup import StorageBackupService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
+from sharelife.infrastructure.json_state_store import JsonStateStore
 from sharelife.infrastructure.notifier import InMemoryNotifier
 from sharelife.infrastructure.runtime_bridge import InMemoryRuntimeBridge
 from sharelife.interfaces.api_v1 import SharelifeApiV1
@@ -84,7 +86,14 @@ def build_server(tmp_path, config=None):
     )
     market = MarketService(clock=clock)
     package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
-    apply = ApplyService(runtime=InMemoryRuntimeBridge(initial_state={}))
+    continuity = ConfigContinuityService(
+        state_store=JsonStateStore(tmp_path / "continuity_state.json"),
+        clock=clock,
+    )
+    apply = ApplyService(
+        runtime=InMemoryRuntimeBridge(initial_state={}),
+        continuity_service=continuity,
+    )
     profile_pack = ProfilePackService(
         runtime=apply.runtime,
         apply_service=apply,
@@ -1260,6 +1269,11 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert 'id="btnStorageRestoreCancel"' in page.text
     assert 'id="btnStorageRestoreJobsList"' in page.text
     assert 'id="btnStorageRestoreJobGet"' in page.text
+    assert 'id="section-continuity"' in page.text
+    assert 'id="btnContinuityList"' in page.text
+    assert 'id="btnContinuityGet"' in page.text
+    assert 'id="continuitySummaryOutput"' in page.text
+    assert 'id="continuityDetailOutput"' in page.text
     assert 'id="storageSummaryOutput"' in page.text
     assert 'id="storagePoliciesOutput"' in page.text
     assert 'id="storageJobsOutput"' in page.text
@@ -1444,6 +1458,7 @@ def test_webui_trial_status_and_apply_workflow_routes(tmp_path):
     )
     assert applied.status_code == 200
     assert applied.json()["data"]["status"] == "applied"
+    assert applied.json()["data"]["continuity"]["source_kind"] == "manual_patch"
 
     rolled_back = client.post(
         "/api/admin/rollback",
@@ -1451,6 +1466,21 @@ def test_webui_trial_status_and_apply_workflow_routes(tmp_path):
     )
     assert rolled_back.status_code == 200
     assert rolled_back.json()["data"]["status"] == "rolled_back"
+    assert rolled_back.json()["data"]["continuity"]["restore_verification"] == "matched"
+
+    continuity = client.get(
+        "/api/admin/continuity",
+        params={"role": "admin", "limit": 10},
+    )
+    assert continuity.status_code == 200
+    assert continuity.json()["data"]["entries"][0]["plan_id"] == "plan-community-basic"
+
+    detail = client.get(
+        "/api/admin/continuity/detail",
+        params={"role": "admin", "plan_id": "plan-community-basic"},
+    )
+    assert detail.status_code == 200
+    assert detail.json()["data"]["entry"]["restore_verification"] == "matched"
 
 
 def test_route_scoped_login_selectors_are_role_fixed(tmp_path):

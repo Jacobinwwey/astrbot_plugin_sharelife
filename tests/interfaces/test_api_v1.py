@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
 from sharelife.application.services_capability_gateway import CapabilityGateway
+from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_pipeline import PipelineOrchestrator, builtin_pipeline_plugins
@@ -56,7 +57,14 @@ def build_api(tmp_path):
     )
     market = MarketService(clock=clock)
     package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
-    apply = ApplyService(runtime=InMemoryRuntimeBridge(initial_state={}))
+    continuity = ConfigContinuityService(
+        state_store=JsonStateStore(tmp_path / "continuity_state.json"),
+        clock=clock,
+    )
+    apply = ApplyService(
+        runtime=InMemoryRuntimeBridge(initial_state={}),
+        continuity_service=continuity,
+    )
     audit = AuditService(clock=clock)
     storage_backup = StorageBackupService(
         state_store=JsonStateStore(tmp_path / "storage_state.json"),
@@ -338,9 +346,15 @@ def test_api_exposes_trial_status_and_apply_rollback_cycle(tmp_path):
 
     applied = api.admin_apply(role="admin", plan_id="plan-community-basic")
     assert applied["status"] == "applied"
+    assert applied["continuity"]["recovery_class"] == "config_snapshot_restore"
+    assert applied["continuity"]["source_kind"] == "manual_patch"
 
     rolled_back = api.admin_rollback(role="admin", plan_id="plan-community-basic")
     assert rolled_back["status"] == "rolled_back"
+    assert rolled_back["continuity"]["restore_verification"] == "matched"
+
+    continuity = api.admin_get_continuity(role="admin", plan_id="plan-community-basic")
+    assert continuity["entry"]["restore_verification"] == "matched"
 
 
 def test_api_submit_template_package_uses_uploaded_artifact_after_approval(tmp_path):

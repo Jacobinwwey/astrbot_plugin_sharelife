@@ -534,7 +534,18 @@ class ProfilePackService:
             sections_payload=target_sections,
             selected_sections=normalized_sections,
         )
-        registered = self.apply_service.register_plan(plan_id=plan_id, patch=patch)
+        registered = self.apply_service.register_plan(
+            plan_id=plan_id,
+            patch=patch,
+            metadata={
+                "actor_id": "admin",
+                "actor_role": "admin",
+                "source_id": str(imported.manifest.pack_id or imported.import_id or plan_id),
+                "source_kind": "profile_pack",
+                "selected_sections": normalized_sections,
+                "recovery_class": "config_snapshot_restore",
+            },
+        )
         capability_summary = self._build_capability_summary(
             manifest=imported.manifest,
             sections=imported.sections,

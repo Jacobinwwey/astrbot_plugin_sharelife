@@ -2619,6 +2619,24 @@ class SharelifeWebUIServer:
                 )
             )
 
+        @self.app.get("/api/admin/continuity")
+        async def admin_continuity(request: Request, role: str = "member", limit: int = 20):
+            return self._response(
+                self.api.admin_list_continuity(
+                    role=self._request_role(request),
+                    limit=limit,
+                )
+            )
+
+        @self.app.get("/api/admin/continuity/detail")
+        async def admin_continuity_detail(request: Request, role: str = "member", plan_id: str = ""):
+            return self._response(
+                self.api.admin_get_continuity(
+                    role=self._request_role(request),
+                    plan_id=plan_id,
+                )
+            )
+
         @self.app.post("/api/admin/pipeline/run")
         async def admin_pipeline_run(request: Request, payload: dict[str, Any]):
             contract = payload.get("contract", {})

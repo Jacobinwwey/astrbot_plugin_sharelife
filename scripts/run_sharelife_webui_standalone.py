@@ -52,6 +52,7 @@ ensure_astrbot_logger_stub()
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_preferences import PreferenceService
@@ -170,6 +171,7 @@ def state_store_filenames() -> dict[str, str]:
         "market_state": "market_state.json",
         "audit_state": "audit_state.json",
         "profile_pack_state": "profile_pack_state.json",
+        "continuity_state": "continuity_state.json",
     }
 
 
@@ -219,7 +221,11 @@ def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWe
             "plugins": {"sharelife": {"enabled": True}},
         }
     )
-    apply = ApplyService(runtime=runtime)
+    continuity = ConfigContinuityService(
+        state_store=state_stores["continuity_state"],
+        clock=clock,
+    )
+    apply = ApplyService(runtime=runtime, continuity_service=continuity)
     profile_pack = ProfilePackService(
         runtime=runtime,
         apply_service=apply,

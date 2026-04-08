@@ -24,6 +24,7 @@
           <a class="sidebar-link" href="#section-admin-submissions" data-i18n-key="console.nav.moderation">Moderation</a>
           <a class="sidebar-link" href="#submissionWorkspaceSection" data-i18n-key="console.nav.submission_workspace">Submission Workspace</a>
           <a class="sidebar-link" href="#section-reliability" data-i18n-key="console.nav.ops">Ops</a>
+          <a class="sidebar-link" href="#section-continuity" data-i18n-key="console.nav.continuity">Continuity</a>
           <a class="sidebar-link" href="#section-response" data-i18n-key="console.nav.response">Response Log</a>
         </nav>
       </aside>
@@ -303,6 +304,27 @@
       </div>
       <div id="dryrunSummary" class="scan-summary" data-i18n-key="dryrun.summary_idle">No apply plan prepared yet.</div>
       <pre id="dryrunDetails" class="scan-details"></pre>
+    </section>
+
+    <section class="card" id="section-continuity" data-console-scope="reviewer">
+      <h2 data-i18n-key="console.section.continuity">Config Continuity</h2>
+      <p class="note" data-i18n-key="console.note.continuity">Inspect persisted rollback continuity entries before or after apply/rollback operations.</p>
+      <div class="grid">
+        <label>
+          <span data-i18n-key="field.plan_id">Plan ID</span>
+          <input id="continuityPlanId" type="text" value="plan-community-basic" />
+        </label>
+        <label>
+          <span data-i18n-key="field.storage_jobs_limit">Limit</span>
+          <input id="continuityLimit" type="number" min="1" step="1" value="10" />
+        </label>
+      </div>
+      <div class="inline-form wrap">
+        <button id="btnContinuityList" type="button" data-i18n-key="button.continuity_list">Load Continuity Entries</button>
+        <button id="btnContinuityGet" type="button" data-i18n-key="button.continuity_get">Load Continuity Detail</button>
+      </div>
+      <div id="continuitySummaryOutput" class="scan-summary" data-i18n-key="continuity.summary_idle">No continuity history loaded yet.</div>
+      <pre id="continuityDetailOutput" class="scan-details"></pre>
     </section>
 
     <section class="card" id="section-profile-pack" data-console-scope="reviewer">

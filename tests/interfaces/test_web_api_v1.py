@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_preferences import PreferenceService
@@ -61,7 +62,11 @@ def build_web_api(tmp_path, *, with_profile_pack: bool = False):
             "plugins": {"sharelife": {"enabled": True}},
         }
     )
-    apply = ApplyService(runtime=runtime)
+    continuity = ConfigContinuityService(
+        state_store=JsonStateStore(tmp_path / "continuity_state.json"),
+        clock=clock,
+    )
+    apply = ApplyService(runtime=runtime, continuity_service=continuity)
     audit = AuditService(clock=clock)
     storage_backup = StorageBackupService(
         state_store=JsonStateStore(tmp_path / "storage_state.json"),
@@ -399,10 +404,16 @@ def test_web_api_exposes_trial_status_and_apply_rollback_cycle(tmp_path):
     applied = web_api.admin_apply(role="admin", plan_id="plan-community-basic")
     assert applied.ok is True
     assert applied.data["status"] == "applied"
+    assert applied.data["continuity"]["source_kind"] == "manual_patch"
 
     rolled_back = web_api.admin_rollback(role="admin", plan_id="plan-community-basic")
     assert rolled_back.ok is True
     assert rolled_back.data["status"] == "rolled_back"
+    assert rolled_back.data["continuity"]["restore_verification"] == "matched"
+
+    continuity = web_api.admin_get_continuity(role="admin", plan_id="plan-community-basic")
+    assert continuity.ok is True
+    assert continuity.data["entry"]["restore_verification"] == "matched"
 
 
 def test_web_api_submit_template_package_exposes_risk_labels(tmp_path):

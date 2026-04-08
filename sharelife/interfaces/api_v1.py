@@ -100,6 +100,9 @@ class SharelifeApiV1:
         )
         return max(1, int(value or PackageService.DEFAULT_MAX_SUBMISSION_PACKAGE_BYTES))
 
+    def _continuity_service(self):
+        return getattr(self.apply_service, "continuity_service", None)
+
     @staticmethod
     def _estimate_base64_decoded_size(content_base64: str) -> int:
         text = str(content_base64 or "").strip()
@@ -1067,7 +1070,7 @@ class SharelifeApiV1:
         if role != "admin":
             return {"error": "permission_denied", "plan_id": plan_id}
         try:
-            self.apply_service.apply(plan_id=plan_id)
+            continuity = self.apply_service.apply(plan_id=plan_id)
         except ValueError as exc:
             return self._apply_error_payload(plan_id=plan_id, exc=exc)
         self._audit(
@@ -1076,15 +1079,18 @@ class SharelifeApiV1:
             actor_role="admin",
             target_id=plan_id,
             status="applied",
-            detail={},
+            detail={"continuity": continuity},
         )
-        return {"plan_id": plan_id, "status": "applied"}
+        payload = {"plan_id": plan_id, "status": "applied"}
+        if continuity:
+            payload["continuity"] = continuity
+        return payload
 
     def admin_profile_pack_rollback(self, role: str, plan_id: str) -> dict:
         if role != "admin":
             return {"error": "permission_denied", "plan_id": plan_id}
         try:
-            self.apply_service.rollback(plan_id=plan_id)
+            continuity = self.apply_service.rollback(plan_id=plan_id)
         except ValueError as exc:
             return self._apply_error_payload(plan_id=plan_id, exc=exc)
         self._audit(
@@ -1093,9 +1099,34 @@ class SharelifeApiV1:
             actor_role="admin",
             target_id=plan_id,
             status="rolled_back",
-            detail={},
+            detail={"continuity": continuity},
         )
-        return {"plan_id": plan_id, "status": "rolled_back"}
+        payload = {"plan_id": plan_id, "status": "rolled_back"}
+        if continuity:
+            payload["continuity"] = continuity
+        return payload
+
+    def admin_list_continuity(self, role: str, limit: int = 20) -> dict:
+        if role != "admin":
+            return {"error": "permission_denied"}
+        continuity_service = self._continuity_service()
+        if continuity_service is None:
+            return {"error": "continuity_unavailable"}
+        return {"entries": continuity_service.list_entries(limit=max(1, int(limit or 20)))}
+
+    def admin_get_continuity(self, role: str, plan_id: str) -> dict:
+        if role != "admin":
+            return {"error": "permission_denied", "plan_id": plan_id}
+        normalized_plan_id = str(plan_id or "").strip()
+        if not normalized_plan_id:
+            return {"error": "plan_id_required"}
+        continuity_service = self._continuity_service()
+        if continuity_service is None:
+            return {"error": "continuity_unavailable", "plan_id": normalized_plan_id}
+        entry = continuity_service.describe(normalized_plan_id)
+        if entry is None:
+            return {"error": "continuity_not_found", "plan_id": normalized_plan_id}
+        return {"plan_id": normalized_plan_id, "entry": entry}
 
     def submit_profile_pack(
         self,
@@ -2021,7 +2052,20 @@ class SharelifeApiV1:
     def admin_dryrun(self, role: str, plan_id: str, patch: dict) -> dict:
         if role != "admin":
             return {"error": "permission_denied", "plan_id": plan_id}
-        plan = self.apply_service.register_plan(plan_id=plan_id, patch=patch)
+        plan = self.apply_service.register_plan(
+            plan_id=plan_id,
+            patch=patch,
+            metadata={
+                "actor_id": "admin",
+                "actor_role": "admin",
+                "source_id": plan_id,
+                "source_kind": "manual_patch",
+                "selected_sections": sorted(
+                    str(key or "").strip() for key in patch.keys() if str(key or "").strip()
+                ),
+                "recovery_class": "config_snapshot_restore",
+            },
+        )
         self._audit(
             action="apply.dryrun_prepared",
             actor_id="admin",
@@ -2036,7 +2080,7 @@ class SharelifeApiV1:
         if role != "admin":
             return {"error": "permission_denied", "plan_id": plan_id}
         try:
-            self.apply_service.apply(plan_id=plan_id)
+            continuity = self.apply_service.apply(plan_id=plan_id)
         except ValueError as exc:
             return self._apply_error_payload(plan_id=plan_id, exc=exc)
         self._audit(
@@ -2045,15 +2089,18 @@ class SharelifeApiV1:
             actor_role="admin",
             target_id=plan_id,
             status="applied",
-            detail={},
+            detail={"continuity": continuity},
         )
-        return {"plan_id": plan_id, "status": "applied"}
+        payload = {"plan_id": plan_id, "status": "applied"}
+        if continuity:
+            payload["continuity"] = continuity
+        return payload
 
     def admin_rollback(self, role: str, plan_id: str) -> dict:
         if role != "admin":
             return {"error": "permission_denied", "plan_id": plan_id}
         try:
-            self.apply_service.rollback(plan_id=plan_id)
+            continuity = self.apply_service.rollback(plan_id=plan_id)
         except ValueError as exc:
             return self._apply_error_payload(plan_id=plan_id, exc=exc)
         self._audit(
@@ -2062,9 +2109,12 @@ class SharelifeApiV1:
             actor_role="admin",
             target_id=plan_id,
             status="rolled_back",
-            detail={},
+            detail={"continuity": continuity},
         )
-        return {"plan_id": plan_id, "status": "rolled_back"}
+        payload = {"plan_id": plan_id, "status": "rolled_back"}
+        if continuity:
+            payload["continuity"] = continuity
+        return payload
 
     def admin_run_pipeline(
         self,

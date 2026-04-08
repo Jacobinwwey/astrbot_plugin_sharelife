@@ -880,6 +880,20 @@ class SharelifeWebApiV1:
         response = self.api.admin_rollback(role=role, plan_id=plan_id)
         return self._from_api_error_or_ok(response, default_message="plan rolled back")
 
+    def admin_list_continuity(self, role: str, limit: int = 20) -> WebApiResult:
+        response = self.api.admin_list_continuity(role=role, limit=max(1, min(limit, 200)))
+        return self._from_api_error_or_ok(response, default_message="continuity entries listed")
+
+    def admin_get_continuity(self, role: str, plan_id: str) -> WebApiResult:
+        if not plan_id:
+            return self._error(
+                code="plan_id_required",
+                message="plan_id is required",
+                status_code=400,
+            )
+        response = self.api.admin_get_continuity(role=role, plan_id=plan_id)
+        return self._from_api_error_or_ok(response, default_message="continuity entry ready")
+
     def admin_run_pipeline(
         self,
         role: str,

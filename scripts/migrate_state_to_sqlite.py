@@ -24,6 +24,7 @@ def state_store_filenames() -> dict[str, str]:
         "market_state": "market_state.json",
         "audit_state": "audit_state.json",
         "profile_pack_state": "profile_pack_state.json",
+        "continuity_state": "continuity_state.json",
     }
 
 

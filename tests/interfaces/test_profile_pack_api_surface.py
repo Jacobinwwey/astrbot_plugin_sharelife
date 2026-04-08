@@ -7,6 +7,7 @@ from pathlib import Path
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_preferences import PreferenceService
@@ -14,6 +15,7 @@ from sharelife.application.services_profile_pack import ProfilePackService
 from sharelife.application.services_queue import RetryQueueService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
+from sharelife.infrastructure.json_state_store import JsonStateStore
 from sharelife.infrastructure.notifier import InMemoryNotifier
 from sharelife.infrastructure.runtime_bridge import InMemoryRuntimeBridge
 from sharelife.interfaces.api_v1 import SharelifeApiV1
@@ -57,7 +59,11 @@ def build_interfaces(
     )
     market = MarketService(clock=clock)
     package = PackageService(market_service=market, output_root=tmp_path / "packages", clock=clock)
-    apply_service = ApplyService(runtime=runtime)
+    continuity = ConfigContinuityService(
+        state_store=JsonStateStore(tmp_path / "continuity_state.json"),
+        clock=clock,
+    )
+    apply_service = ApplyService(runtime=runtime, continuity_service=continuity)
     audit = AuditService(clock=clock)
     profile_pack = ProfilePackService(
         runtime=runtime,
@@ -117,6 +123,12 @@ def test_api_admin_profile_pack_export_import_dryrun_apply_flow(tmp_path):
 
     applied = api.admin_profile_pack_apply(role="admin", plan_id="plan-profile-basic")
     assert applied["status"] == "applied"
+    assert applied["continuity"]["source_kind"] == "profile_pack"
+    assert applied["continuity"]["selected_sections"] == ["plugins"]
+
+    continuity = api.admin_get_continuity(role="admin", plan_id="plan-profile-basic")
+    assert continuity["entry"]["source_kind"] == "profile_pack"
+    assert continuity["entry"]["selected_sections"] == ["plugins"]
 
     listed_imports = api.admin_list_profile_pack_imports(role="admin", limit=20)
     assert len(listed_imports["imports"]) == 1

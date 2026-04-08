@@ -128,6 +128,8 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnReviewerSessionRevoke: "admin.reviewer.lifecycle.manage",
   btnNotice: "notifications.read",
   btnStorageSummary: "admin.storage.local_summary.read",
+  btnContinuityList: "admin.apply.workflow",
+  btnContinuityGet: "admin.apply.workflow",
   btnStoragePoliciesGet: "admin.storage.policies.read",
   btnStoragePoliciesSet: "admin.storage.policies.write",
   btnStorageRunBackup: "admin.storage.jobs.run",
@@ -3413,10 +3415,15 @@ async function applyProfilePackPlan() {
   })
   render("admin_profile_pack_apply", response)
   if (workspaceRequestFailed(response)) return response
+  const data = apiData(response)
   updateProfilePackPanel({
     ...(state.profilePack.dryrun || {}),
-    ...apiData(response),
+    ...data,
   })
+  if (data && data.continuity) {
+    setContinuityOutput("continuityDetailOutput", buildContinuityDetailText({ entry: data.continuity }), { entry: data.continuity })
+    applyFieldPatches({ continuityPlanId: data.continuity.plan_id || planId })
+  }
   return response
 }
 
@@ -3429,10 +3436,15 @@ async function rollbackProfilePackPlan() {
   })
   render("admin_profile_pack_rollback", response)
   if (workspaceRequestFailed(response)) return response
+  const data = apiData(response)
   updateProfilePackPanel({
     ...(state.profilePack.dryrun || {}),
-    ...apiData(response),
+    ...data,
   })
+  if (data && data.continuity) {
+    setContinuityOutput("continuityDetailOutput", buildContinuityDetailText({ entry: data.continuity }), { entry: data.continuity })
+    applyFieldPatches({ continuityPlanId: data.continuity.plan_id || planId })
+  }
   return response
 }
 
@@ -4653,6 +4665,71 @@ function setAuditOutput(nodeId, summaryText, payload) {
   node.textContent = summary || i18nMessage("audit.output.empty", "No audit events matched current window.")
 }
 
+function buildContinuityEntriesText(data) {
+  const entries = data && typeof data === "object" && Array.isArray(data.entries)
+    ? data.entries
+    : []
+  if (!entries.length) {
+    return i18nMessage("continuity.output.entries.empty", "No continuity entries recorded yet.")
+  }
+  const lines = [
+    i18nFormat("continuity.output.entries.header", "Continuity Entries ({count})", {
+      count: entries.length,
+    }),
+  ]
+  entries.slice(0, 20).forEach((item, index) => {
+    const sections = Array.isArray(item.selected_sections) && item.selected_sections.length
+      ? item.selected_sections.join(",")
+      : "-"
+    lines.push(
+      `${index + 1}. ${storageValueText(item.plan_id)} | status=${storageValueText(item.status)} | source=${storageValueText(item.source_kind)}/${storageValueText(item.source_id)} | sections=${sections} | recovery=${storageValueText(item.recovery_class)} | verify=${storageValueText(item.restore_verification)} | active_snapshot=${item.active_snapshot_available ? "yes" : "no"}`,
+    )
+  })
+  return lines.join("\n")
+}
+
+function buildContinuityDetailText(data) {
+  const entry = data && typeof data === "object" && data.entry && typeof data.entry === "object"
+    ? data.entry
+    : null
+  if (!entry) {
+    return i18nMessage("continuity.output.empty", "No continuity response data.")
+  }
+  const sections = Array.isArray(entry.selected_sections) && entry.selected_sections.length
+    ? entry.selected_sections.join(", ")
+    : "-"
+  const lines = [
+    i18nMessage("continuity.output.detail.header", "Continuity Detail"),
+    `plan_id=${storageValueText(entry.plan_id)}`,
+    `status=${storageValueText(entry.status)}`,
+    `source=${storageValueText(entry.source_kind)}/${storageValueText(entry.source_id)}`,
+    `actor=${storageValueText(entry.actor_role)}/${storageValueText(entry.actor_id)}`,
+    `sections=${sections}`,
+    `recovery_class=${storageValueText(entry.recovery_class)}`,
+    `pre_snapshot_id=${storageValueText(entry.pre_snapshot_id)}`,
+    `post_snapshot_id=${storageValueText(entry.post_snapshot_id)}`,
+    `restore_verification=${storageValueText(entry.restore_verification)}`,
+    `active_snapshot_available=${entry.active_snapshot_available ? "yes" : "no"}`,
+    `applied_at=${storageValueText(entry.applied_at)}`,
+  ]
+  if (entry.rolled_back_at) {
+    lines.push(`rolled_back_at=${storageValueText(entry.rolled_back_at)}`)
+  }
+  return lines.join("\n")
+}
+
+function setContinuityOutput(nodeId, summaryText, payload) {
+  const node = byId(nodeId)
+  if (!node) return
+  const summary = String(summaryText || "").trim()
+  if (state.developerMode) {
+    const raw = JSON.stringify(payload, null, 2)
+    node.textContent = summary ? `${summary}\n\n---\n${raw}` : raw
+    return
+  }
+  node.textContent = summary || i18nMessage("continuity.output.empty", "No continuity response data.")
+}
+
 function setStorageOutput(nodeId, summaryText, payload) {
   const node = byId(nodeId)
   if (!node) return
@@ -4685,6 +4762,37 @@ function applyStoragePolicyFields(policies) {
   setCheckboxField("storagePolicySingleActiveLock", policies.single_active_backup_lock)
   setCheckboxField("storagePolicyIncludeProfilePacks", policies.include_profile_packs)
   setCheckboxField("storagePolicyIncludePackages", policies.include_packages)
+}
+
+async function listContinuityEntries() {
+  const a = actor()
+  const limit = readIntegerField("continuityLimit", 10, 1)
+  const response = await api(`/api/admin/continuity${queryString({ role: a.role, limit })}`)
+  render("admin_continuity_list", response)
+  const data = apiData(response)
+  setContinuityOutput("continuitySummaryOutput", buildContinuityEntriesText(data), data)
+  return response
+}
+
+async function getContinuityDetail(options = {}) {
+  const a = actor()
+  const planId = String(
+    options.planId || readTextField("continuityPlanId", "") || readTextField("dryrunPlanId", ""),
+  ).trim()
+  if (!planId) {
+    setContinuityOutput(
+      "continuityDetailOutput",
+      i18nMessage("continuity.output.plan_id_required", "plan_id is required."),
+      { error: "plan_id_required" },
+    )
+    return { status: 400, data: { ok: false, error: { code: "plan_id_required" } } }
+  }
+  applyFieldPatches({ continuityPlanId: planId })
+  const response = await api(`/api/admin/continuity/detail${queryString({ role: a.role, plan_id: planId })}`)
+  render("admin_continuity_detail", response)
+  const data = apiData(response)
+  setContinuityOutput("continuityDetailOutput", buildContinuityDetailText(data), data)
+  return response
 }
 
 function readStoragePoliciesPatch() {
@@ -6855,11 +6963,16 @@ async function applyPlan() {
   })
   render("admin_apply", response)
   if (!workspaceRequestFailed(response)) {
+    const data = apiData(response)
     updateApplyWorkflowPanel({
       ...state.applyPlanResult,
-      ...apiData(response),
+      ...data,
       patch: (state.applyPlanResult && state.applyPlanResult.patch) || draft.patch,
     })
+    if (data && data.continuity) {
+      setContinuityOutput("continuityDetailOutput", buildContinuityDetailText({ entry: data.continuity }), { entry: data.continuity })
+      applyFieldPatches({ continuityPlanId: data.continuity.plan_id || draft.plan_id })
+    }
   }
   return response
 }
@@ -6876,11 +6989,16 @@ async function rollbackPlan() {
   })
   render("admin_rollback", response)
   if (!workspaceRequestFailed(response)) {
+    const data = apiData(response)
     updateApplyWorkflowPanel({
       ...state.applyPlanResult,
-      ...apiData(response),
+      ...data,
       patch: (state.applyPlanResult && state.applyPlanResult.patch) || draft.patch,
     })
+    if (data && data.continuity) {
+      setContinuityOutput("continuityDetailOutput", buildContinuityDetailText({ entry: data.continuity }), { entry: data.continuity })
+      applyFieldPatches({ continuityPlanId: data.continuity.plan_id || draft.plan_id })
+    }
   }
   return response
 }
@@ -7550,6 +7668,14 @@ function bindButtons() {
     render("admin_storage_local_summary", response)
     const data = apiData(response)
     setStorageOutput("storageSummaryOutput", buildStorageLocalSummaryText(data), data)
+  })
+
+  byId("btnContinuityList").addEventListener("click", () => {
+    void listContinuityEntries()
+  })
+
+  byId("btnContinuityGet").addEventListener("click", () => {
+    void getContinuityDetail()
   })
 
   byId("btnStoragePoliciesGet").addEventListener("click", async () => {
