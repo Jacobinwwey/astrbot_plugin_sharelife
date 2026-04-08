@@ -17,6 +17,12 @@
    `plugins/skills/personas/mcp_servers`
 3. 迁移是“按 key 原样回放”，不做字段语义翻译。
 
+## 原始 AstrBot 输入兼容边界
+
+1. 现在 Sharelife 导入链路已经接受原始 AstrBot 备份 zip、`cmd_config.json` 与 `abconf_*.json`。
+2. 这些输入**不会被直接 apply**。Sharelife 会先把它们投影成一个 **degraded 的 Sharelife 标准包**，再走常规 import/校验/submit 流程。
+3. 整机备份里的数据库、附件、知识库原始文件、dashboard secrets，以及 `plugin_set=["*"]` 这类无法精确还原的内容，仍然不在闭环内，只会以 `compatibility_issues` 的形式降级提示。
+
 ## 迁移范围矩阵（当前已实现）
 
 | Section | 来源键（runtime snapshot） | 当前迁移行为 | 备注 |
@@ -36,7 +42,7 @@
 ## 当前明确不在迁移闭环内的内容
 
 1. AstrBot `data/cmd_config.json` 中、且**未映射到上述 section** 的键，不会自动迁移。
-2. 当前没有“按 AstrBot 配置 schema 的字段级转换器”；适配层是 `section_name -> state_key` 一对一回放。
+2. 当前仍然没有“完整的 AstrBot config schema 语义转换器”；现有 raw AstrBot 兼容只是保守投影到 Sharelife sections，而不是高保真恢复。
 3. 插件二进制、系统依赖、容器环境、外部数据库/知识库原始文件不会随 profile pack 自动打包；`environment_manifest` 只承载“需要重配”的声明信息。
 4. 插件安装默认不执行命令；即使有安装元数据，也必须经过特权确认和执行门禁配置。
 5. 跨大版本 AstrBot 的兼容只做声明校验（`astrbot_version` / `plugin_compat`），不做自动语义迁移。
@@ -59,7 +65,7 @@
 3. 导入后先 dry-run：
    `/sharelife_profile_import <artifact_id> --dryrun --plan-id <plan_id> --sections <sections_csv>`
 4. 重点看 dry-run 结果中的 `selected_sections`、`changed_sections`、`diff`，再决定 apply。
-5. 若看到 `environment_*_reconfigure_required` 或 `knowledge_base_storage_sync_required`，在迁移后应把该提示同步给你的 AI 运维代理，执行容器/依赖/二进制的重配流程。
+5. 若看到 `environment_*_reconfigure_required` 或 `knowledge_base_storage_sync_required`，在迁移后应把该提示同步给你的自动化流程，显式执行容器/依赖/二进制的重配。
 
 ## 开发维护要求（给开发者）
 

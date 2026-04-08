@@ -17,6 +17,12 @@ If you only need one answer, this is it: **what settings Sharelife migrates toda
    `plugins/skills/personas/mcp_servers`
 3. Migration is key-preserving replay, without semantic field remapping.
 
+## Raw AstrBot input compatibility
+
+1. Sharelife import now accepts raw AstrBot backup zip, `cmd_config.json`, and `abconf_*.json`.
+2. Those inputs are never applied directly. Sharelife first projects them into a **degraded Sharelife standard pack** and then reuses the normal import/validation/submission flow.
+3. Full backup payloads remain out of scope: databases, attachments, knowledge-base raw files, dashboard secrets, and wildcard plugin resolution are omitted or downgraded with explicit `compatibility_issues`.
+
 ## Scope matrix (implemented now)
 
 | Section | Source key (runtime snapshot) | Current migration behavior | Notes |
@@ -36,11 +42,11 @@ If you only need one answer, this is it: **what settings Sharelife migrates toda
 ## Explicitly out of scope today
 
 1. Keys in AstrBot `data/cmd_config.json` that are not mirrored into the listed sections are not auto-migrated.
-2. No field-level translator against AstrBot config schema exists yet; adapters are currently `section_name -> state_key`.
+2. There is still no full semantic translator against AstrBot config schema. Current raw AstrBot compatibility is a conservative projection into Sharelife sections, not a full-fidelity restore.
 3. Plugin binaries, system dependencies, container runtime state, and external DB/KB raw files are not bundled by profile pack; `environment_manifest` only carries reconfiguration metadata.
 4. Plugin install command execution is default-off; install metadata still needs explicit privileged confirmation and execution-gate config.
 5. Cross-version support relies on declaration checks (`astrbot_version` / `plugin_compat`), not automatic semantic migration.
-6. If a pack includes `environment_manifest` or KB external paths, import will keep `compatibility=degraded` with explicit `compatibility_issues` so operators can run post-migration reconfiguration.
+6. If a pack includes `environment_manifest` or KB external paths, import will keep `compatibility=degraded` with explicit `compatibility_issues`; post-migration reconfiguration is still explicit.
 
 ## Accuracy and safety controls (current)
 
@@ -59,7 +65,7 @@ If you only need one answer, this is it: **what settings Sharelife migrates toda
 3. Import with dry-run:
    `/sharelife_profile_import <artifact_id> --dryrun --plan-id <plan_id> --sections <sections_csv>`
 4. Review `selected_sections`, `changed_sections`, and `diff` before apply.
-5. If `compatibility_issues` includes `environment_*_reconfigure_required` or `knowledge_base_storage_sync_required`, hand that list to your AI/Ops agent after migration and execute environment reconfiguration explicitly.
+5. If `compatibility_issues` includes `environment_*_reconfigure_required` or `knowledge_base_storage_sync_required`, hand that list to your automation flow after migration and execute environment reconfiguration explicitly.
 
 ## Maintenance checklist (for developers)
 

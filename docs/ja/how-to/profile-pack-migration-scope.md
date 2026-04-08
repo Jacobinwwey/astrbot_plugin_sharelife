@@ -17,6 +17,12 @@
    `plugins/skills/personas/mcp_servers`
 3. 移行方式は key を維持した再適用で、意味変換ベースのフィールドマッピングは行いません。
 
+## 生の AstrBot 入力との互換境界
+
+1. Sharelife import は、生の AstrBot backup zip、`cmd_config.json`、`abconf_*.json` を受け付けます。
+2. ただしそれらを**直接 apply することはありません**。Sharelife がまず **degraded な Sharelife 標準 pack** に投影してから、通常の import/validation/submit フローへ流します。
+3. データベース、添付ファイル、knowledge-base の生ファイル、dashboard secrets、`plugin_set=["*"]` のような完全復元できない情報は対象外のままで、`compatibility_issues` として明示されます。
+
 ## 現在の移行範囲マトリクス
 
 | Section | 取得元キー（runtime snapshot） | 現在の移行挙動 | 備考 |
@@ -36,11 +42,11 @@
 ## 現時点でスコープ外の項目
 
 1. AstrBot `data/cmd_config.json` のうち、上記 section に鏡像されていないキーは自動移行されません。
-2. AstrBot 設定スキーマに対するフィールド単位の変換層は未実装で、アダプタは `section_name -> state_key` の 1:1 です。
+2. AstrBot config schema に対する完全な意味変換レイヤーは未実装です。現在の raw AstrBot 互換は、Sharelife section への保守的な投影であって、高忠実度 restore ではありません。
 3. プラグイン実体、システム依存、コンテナ状態、外部 DB/KB 生ファイルは profile pack には含まれません。`environment_manifest` は「再構成が必要」という宣言情報のみ保持します。
 4. プラグイン install 実行は既定で無効。install メタデータがあっても特権確認と実行ゲート設定が必要です。
 5. バージョン跨ぎ互換は宣言検証（`astrbot_version` / `plugin_compat`）中心で、自動意味移行は行いません。
-6. `environment_manifest` や KB 外部パス情報が含まれる場合、import 後は `compatibility_issues` に再構成通知を出し、運用者による後処理を必須化します（degraded）。
+6. `environment_manifest` や KB 外部パス情報が含まれる場合、import 後は `compatibility_issues` に再構成通知を出し、明示的な後処理を必須化します（degraded）。
 
 ## 精度と安全性の担保（現行）
 
@@ -59,7 +65,7 @@
 3. import 後に dry-run:
    `/sharelife_profile_import <artifact_id> --dryrun --plan-id <plan_id> --sections <sections_csv>`
 4. `selected_sections` / `changed_sections` / `diff` を確認してから apply。
-5. `environment_*_reconfigure_required` または `knowledge_base_storage_sync_required` が出た場合は、移行後にその一覧を AI/Ops エージェントへ渡し、コンテナ/依存/バイナリ再設定を実行してください。
+5. `environment_*_reconfigure_required` または `knowledge_base_storage_sync_required` が出た場合は、移行後にその一覧を自動化フローへ渡し、コンテナ/依存/バイナリ再設定を実行してください。
 
 ## 開発者向けメンテナンス手順
 
