@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+from scripts.run_sharelife_webui_standalone import build_server as standalone_build_server
+
 
 class FakeEvent:
     def __init__(self, sender_id: str = "u1", session_id: str = "s1", role: str = "member"):
@@ -191,6 +193,32 @@ def test_sharelife_state_store_sqlite_persists_profile_pack_exports_across_reloa
     reloaded_plugin = module.SharelifePlugin(module.Context(), config=config)
     exports = asyncio.run(_collect(reloaded_plugin.sharelife_profile_exports(admin, "10")))[0]
     assert "profile/sqlite@1.0.0" in exports
+
+
+def test_sharelife_continuity_retention_is_configurable_from_plugin_config(tmp_path: Path) -> None:
+    module = _load_plugin_module(tmp_path)
+    plugin = module.SharelifePlugin(
+        module.Context(),
+        config={
+            "webui": {"enabled": False},
+            "continuity": {"max_entries": 7},
+        },
+    )
+
+    assert plugin.continuity_service.max_entries == 7
+
+
+def test_sharelife_continuity_retention_is_configurable_in_standalone_runner(tmp_path: Path) -> None:
+    server, api = standalone_build_server(
+        tmp_path,
+        config={
+            "continuity": {"max_entries": 9},
+        },
+    )
+
+    assert server is not None
+    assert api.apply_service.continuity_service is not None
+    assert api.apply_service.continuity_service.max_entries == 9
 
 
 def test_sharelife_market_lists_bundled_official_template(tmp_path: Path) -> None:

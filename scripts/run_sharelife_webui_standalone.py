@@ -96,6 +96,21 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
     return default
 
 
+def _as_int(value: Any, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
 def _build_bundle_zip(payload: dict[str, Any]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -202,6 +217,7 @@ def build_state_stores(data_root: Path, config: dict[str, Any]) -> dict[str, Any
 def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWebUIServer, SharelifeApiV1]:
     clock = FrozenClock(datetime.now(UTC))
     state_stores = build_state_stores(output_root, config=config)
+    continuity_cfg = config.get("continuity", {}) if isinstance(config.get("continuity"), dict) else {}
     preferences = PreferenceService(state_store=state_stores["preference_state"])
     queue = RetryQueueService(clock=clock, state_store=state_stores["retry_state"])
     trial = TrialService(clock=clock, state_store=state_stores["trial_state"])
@@ -224,6 +240,7 @@ def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWe
     continuity = ConfigContinuityService(
         state_store=state_stores["continuity_state"],
         clock=clock,
+        max_entries=max(1, _as_int(continuity_cfg.get("max_entries"), 50)),
     )
     apply = ApplyService(runtime=runtime, continuity_service=continuity)
     profile_pack = ProfilePackService(

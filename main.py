@@ -67,6 +67,7 @@ class SharelifePlugin(Star):
         bundled_registry_path = Path(__file__).resolve().parent / "templates" / "index.json"
         configured_registry_url = str(self.config.get("official_registry_url", "") or "").strip()
         registry_index_url = configured_registry_url or str(bundled_registry_path)
+        continuity_cfg = self._continuity_config()
 
         self.clock = SystemClock()
         self.preference_service = PreferenceService(state_store=preference_store)
@@ -74,6 +75,7 @@ class SharelifePlugin(Star):
         self.continuity_service = ConfigContinuityService(
             state_store=continuity_store,
             clock=self.clock,
+            max_entries=self._to_int(continuity_cfg.get("max_entries"), default=50),
         )
         self.apply_service = ApplyService(
             runtime=self.runtime_bridge,
@@ -293,6 +295,12 @@ class SharelifePlugin(Star):
 
     def _profile_pack_config(self) -> dict:
         raw = self.config.get("profile_pack", {}) if isinstance(self.config, dict) else {}
+        if isinstance(raw, dict):
+            return raw
+        return {}
+
+    def _continuity_config(self) -> dict:
+        raw = self.config.get("continuity", {}) if isinstance(self.config, dict) else {}
         if isinstance(raw, dict):
             return raw
         return {}
