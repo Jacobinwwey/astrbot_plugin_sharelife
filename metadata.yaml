@@ -1,22 +1,22 @@
 name: astrbot_plugin_sharelife
-display_name: sharelife
-desc: Sharelife community-first template governance plugin.
+display_name: Sharelife 社区配置中心
+desc: Sharelife 社区模板治理与配置包协同插件。
 version: v0.3.13
 author: Jacobinwwey
 repo: https://github.com/Jacobinwwey/astrbot_plugin_sharelife
-astrbot_version: ">=4.16,<5"
+astrbot_version: '>=4.16,<5'
 support_platforms:
-  - aiocqhttp
-  - qq_official
-  - telegram
-  - wecom
-  - lark
-  - dingtalk
-  - discord
-  - slack
-  - kook
-  - vocechat
-  - weixin_official_account
-  - satori
-  - misskey
-  - line
+- aiocqhttp
+- qq_official
+- telegram
+- wecom
+- lark
+- dingtalk
+- discord
+- slack
+- kook
+- vocechat
+- weixin_official_account
+- satori
+- misskey
+- line

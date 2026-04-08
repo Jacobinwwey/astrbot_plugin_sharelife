@@ -9,6 +9,7 @@ from astrbot.api.star import Context, Star, register
 
 from .sharelife.application.services_apply import ApplyService
 from .sharelife.application.services_audit import AuditService
+from .sharelife.application.services_artifact_mirror import ArtifactMirrorService
 from .sharelife.application.services_capability_gateway import CapabilityGateway
 from .sharelife.application.services_continuity import ConfigContinuityService
 from .sharelife.application.services_market import MarketService
@@ -24,6 +25,7 @@ from .sharelife.application.services_registry import RegistryService
 from .sharelife.application.services_registry_bootstrap import RegistryBootstrapService
 from .sharelife.application.services_reviewer_auth import ReviewerAuthService
 from .sharelife.application.services_storage_backup import StorageBackupService
+from .sharelife.application.services_transfer_jobs import TransferJobService
 from .sharelife.application.services_trial import TrialService
 from .sharelife.application.services_trial_request import TrialRequestService
 from .sharelife.infrastructure.json_state_store import JsonStateStore
@@ -42,7 +44,7 @@ from .sharelife.interfaces.webui_server import SharelifeWebUIServer
 @register(
     "sharelife",
     "Jacobinwwey",
-    "Sharelife community-first template governance plugin.",
+    "Sharelife 社区模板治理与配置包协同插件。",
     "0.3.13",
 )
 class SharelifePlugin(Star):
@@ -59,14 +61,18 @@ class SharelifePlugin(Star):
         market_store = state_stores["market_state"]
         audit_store = state_stores["audit_state"]
         profile_pack_store = state_stores["profile_pack_state"]
+        identity_store = state_stores["identity_state"]
         reviewer_auth_store = state_stores["reviewer_auth_state"]
         storage_store = state_stores["storage_state"]
+        transfer_store = state_stores["transfer_state"]
+        artifact_store = state_stores["artifact_state"]
         continuity_store = state_stores["continuity_state"]
         package_root = data_root / "packages"
         registry_store = LocalStore(data_root)
         bundled_registry_path = Path(__file__).resolve().parent / "templates" / "index.json"
         configured_registry_url = str(self.config.get("official_registry_url", "") or "").strip()
         registry_index_url = configured_registry_url or str(bundled_registry_path)
+
         continuity_cfg = self._continuity_config()
 
         self.clock = SystemClock()
@@ -87,6 +93,11 @@ class SharelifePlugin(Star):
         self.package_service = PackageService(
             market_service=self.market_service,
             output_root=package_root,
+            clock=self.clock,
+            artifact_state_store=artifact_store,
+        )
+        self.artifact_mirror_service = ArtifactMirrorService(
+            artifact_store=self.package_service.artifact_store,
             clock=self.clock,
         )
         profile_pack_cfg = self._profile_pack_config()
@@ -126,13 +137,18 @@ class SharelifePlugin(Star):
         self.audit_service = AuditService(clock=self.clock, state_store=audit_store)
         reviewer_auth_cfg = self._reviewer_device_key_config()
         self.reviewer_auth_service = ReviewerAuthService(
-            state_store=reviewer_auth_store,
+            state_store=identity_store,
+            legacy_state_store=reviewer_auth_store,
             max_devices=self._to_int(reviewer_auth_cfg.get("max_reviewer_devices"), default=3),
         )
         self.storage_backup_service = StorageBackupService(
             state_store=storage_store,
             data_root=data_root,
             clock=self.clock,
+        )
+        self.transfer_job_service = TransferJobService(
+            clock=self.clock,
+            state_store=transfer_store,
         )
         self.protocol_contract_service = ProtocolContractService()
         self.capability_gateway = CapabilityGateway(audit_service=self.audit_service)
@@ -181,10 +197,12 @@ class SharelifePlugin(Star):
             package_service=self.package_service,
             apply_service=self.apply_service,
             audit_service=self.audit_service,
+            artifact_mirror_service=self.artifact_mirror_service,
             profile_pack_service=self.profile_pack_service,
             pipeline_orchestrator=self.pipeline_orchestrator,
             reviewer_auth_service=self.reviewer_auth_service,
             storage_backup_service=self.storage_backup_service,
+            transfer_job_service=self.transfer_job_service,
             public_market_auto_publish_profile_pack_approve=self._to_bool(
                 public_market_cfg.get("auto_publish_profile_pack_approve"),
                 default=False,
@@ -231,8 +249,11 @@ class SharelifePlugin(Star):
             "market_state": "market_state.json",
             "audit_state": "audit_state.json",
             "profile_pack_state": "profile_pack_state.json",
+            "identity_state": "identity_state.json",
             "reviewer_auth_state": "reviewer_auth_state.json",
             "storage_state": "storage_state.json",
+            "transfer_state": "transfer_state.json",
+            "artifact_state": "artifact_state.json",
             "continuity_state": "continuity_state.json",
         }
 
