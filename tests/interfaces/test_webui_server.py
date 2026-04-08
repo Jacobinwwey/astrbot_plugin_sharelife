@@ -1293,15 +1293,16 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert "<title>Sharelife Member Console</title>" in member_page.text
     assert 'data-i18n-key="console.member.subtitle"' in member_page.text
     assert 'id="memberConsoleLink"' in member_page.text
+    assert 'id="marketConsoleLink"' in member_page.text
     assert 'id="memberSpotlightShell"' in member_page.text
     assert 'data-i18n-key="member.search.spotlight_hint"' in member_page.text
     assert 'id="btnRefreshMemberInstallations"' in member_page.text
     assert 'id="memberUploadDropzone"' in member_page.text
     assert 'id="memberUploadFileName"' in member_page.text
-    assert 'id="reviewerConsoleLink" href="/reviewer" class="market-link hidden"' in member_page.text
-    assert 'id="adminConsoleLink" href="/admin" class="market-link hidden"' in member_page.text
-    assert 'id="fullConsoleLink" href="/" class="market-link hidden"' in member_page.text
-    assert 'id="btnToggleDeveloperMode" type="button" class="btn-ghost developer-mode-toggle hidden"' in member_page.text
+    assert 'id="reviewerConsoleLink"' not in member_page.text
+    assert 'id="adminConsoleLink"' not in member_page.text
+    assert 'id="fullConsoleLink"' not in member_page.text
+    assert 'id="btnToggleDeveloperMode"' not in member_page.text
     assert 'id="developerModeLine" class="hidden"' in member_page.text
     assert 'data-i18n-key="market.hub.heading"' not in member_page.text
     assert 'src="/console_scope.js"' in member_page.text
