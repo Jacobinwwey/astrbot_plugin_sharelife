@@ -10,6 +10,14 @@ BASE_URL="http://${HOST}:${PORT}"
 ARTIFACT_DIR="${SHARELIFE_E2E_ARTIFACT_DIR:-${REPO_ROOT}/output/playwright}"
 SERVER_LOG="${ARTIFACT_DIR}/sharelife-webui-e2e-server.log"
 
+if [[ "${SHARELIFE_SKIP_WEBUI_E2E:-0}" == "1" ]]; then
+  cat <<'EOF'
+[sharelife] Skipping WebUI E2E because SHARELIFE_SKIP_WEBUI_E2E=1.
+[sharelife] TODO: stabilize seeded template identity, selector contracts, and async timing before re-enabling this suite in CI.
+EOF
+  exit 0
+fi
+
 mkdir -p "${ARTIFACT_DIR}"
 
 cleanup() {

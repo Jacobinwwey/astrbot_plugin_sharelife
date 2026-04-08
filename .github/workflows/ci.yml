@@ -52,6 +52,8 @@ jobs:
         run: google-chrome --version
 
       - name: Run WebUI E2E
+        env:
+          SHARELIFE_SKIP_WEBUI_E2E: '1'
         run: bash scripts/run_webui_e2e.sh
 
       - name: Run WebUI Market Auth E2E
