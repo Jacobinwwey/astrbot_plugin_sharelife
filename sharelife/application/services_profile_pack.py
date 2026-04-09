@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 import difflib
 import hashlib
 import hmac
@@ -43,6 +44,7 @@ PROFILE_PACK_SUBMISSION_PENDING = "pending"
 PROFILE_PACK_SUBMISSION_APPROVED = "approved"
 PROFILE_PACK_SUBMISSION_REJECTED = "rejected"
 PROFILE_PACK_SUBMISSION_REPLACED = "replaced"
+PROFILE_PACK_SUBMISSION_WITHDRAWN = "withdrawn"
 
 
 @dataclass(slots=True)
@@ -57,6 +59,7 @@ class ProfilePackArtifact:
     size_bytes: int
     manifest: BotProfilePackManifest
     redaction_notes: list[str]
+    owner_user_id: str = ""
 
 
 @dataclass(slots=True)
@@ -69,6 +72,10 @@ class ImportedProfilePack:
     scan_summary: dict[str, Any]
     compatibility: str
     compatibility_issues: list[str]
+    user_id: str = ""
+    source_artifact_id: str = ""
+    import_origin: str = ""
+    source_fingerprint: str = ""
 
 
 @dataclass(slots=True)
@@ -130,6 +137,15 @@ class PublishedProfilePack:
     featured_note: str = ""
     featured_by: str = ""
     featured_at: str = ""
+
+
+@dataclass(slots=True)
+class PreparedProfilePackImport:
+    filename: str
+    archive_bytes: bytes
+    manifest: BotProfilePackManifest
+    sections: dict[str, Any]
+    extra_issues: list[str] = field(default_factory=list)
 
 
 class ProfilePackService:
@@ -288,6 +304,7 @@ class ProfilePackService:
             size_bytes=path.stat().st_size,
             manifest=manifest,
             redaction_notes=redaction_notes,
+            owner_user_id="",
         )
         self._artifacts[artifact_id] = artifact
         self._flush_state()
@@ -299,9 +316,157 @@ class ProfilePackService:
             raise ValueError("PROFILE_PACK_ARTIFACT_NOT_FOUND")
         return artifact
 
-    def import_bot_profile_pack(self, filename: str, content: bytes) -> ImportedProfilePack:
+    def import_bot_profile_pack(
+        self,
+        filename: str,
+        content: bytes,
+        *,
+        user_id: str = "",
+        source_artifact_id: str = "",
+    ) -> ImportedProfilePack:
+        imported, _prepared = self._import_profile_pack(
+            filename=filename,
+            content=content,
+            user_id=user_id,
+            source_artifact_id=source_artifact_id,
+        )
+        return imported
+
+    def import_member_profile_pack(
+        self,
+        *,
+        user_id: str,
+        filename: str,
+        content: bytes,
+        import_origin: str = "",
+        source_fingerprint: str = "",
+        refresh_existing: bool = False,
+    ) -> ImportedProfilePack:
+        normalized_user_id = str(user_id or "").strip() or "member"
+        normalized_import_origin = str(import_origin or "").strip()
+        normalized_source_fingerprint = str(source_fingerprint or "").strip()
+        if refresh_existing and normalized_import_origin and normalized_source_fingerprint:
+            self._refresh_member_imports(
+                user_id=normalized_user_id,
+                import_origin=normalized_import_origin,
+                source_fingerprint=normalized_source_fingerprint,
+            )
+        imported, prepared = self._import_profile_pack(
+            filename=filename,
+            content=content,
+            user_id=normalized_user_id,
+            import_origin=normalized_import_origin,
+            source_fingerprint=normalized_source_fingerprint,
+        )
+
+        artifact_id = str(uuid4())
+        output_dir = self.output_root / "member-imports"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_filename = self._safe_filename(
+            f"{imported.manifest.pack_id.replace('/', '__')}-{imported.manifest.version}-{artifact_id[:8]}-{imported.filename}",
+        )
+        path = output_dir / safe_filename
+        path.write_bytes(prepared.archive_bytes)
+        artifact = ProfilePackArtifact(
+            artifact_id=artifact_id,
+            pack_id=imported.manifest.pack_id,
+            version=imported.manifest.version,
+            exported_at=imported.imported_at,
+            path=path,
+            filename=safe_filename,
+            sha256=hashlib.sha256(prepared.archive_bytes).hexdigest(),
+            size_bytes=len(prepared.archive_bytes),
+            manifest=imported.manifest,
+            redaction_notes=[],
+            owner_user_id=normalized_user_id,
+        )
+        self._artifacts[artifact_id] = artifact
+        imported.source_artifact_id = artifact_id
+        self._imports[imported.import_id] = imported
+        self._flush_state()
+        return imported
+
+    def _import_profile_pack(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+        user_id: str = "",
+        source_artifact_id: str = "",
+        import_origin: str = "",
+        source_fingerprint: str = "",
+    ) -> tuple[ImportedProfilePack, PreparedProfilePackImport]:
+        prepared, hash_mismatches = self._prepare_profile_pack_import(
+            filename=filename,
+            content=content,
+        )
+        scan_summary = self.scan_service.to_dict(
+            self.scan_service.scan(
+                self._scan_payload(prepared.manifest, prepared.sections),
+                manifest=prepared.manifest,
+            )
+        )
+        signature_issue = self._verify_signature_issue(prepared.manifest)
+        compatibility, issues = self._resolve_compatibility(
+            prepared.manifest,
+            sections=prepared.sections,
+            hash_mismatches=hash_mismatches,
+            signature_issue=signature_issue,
+        )
+        embedded_issues = self._embedded_profile_pack_issues(prepared.sections)
+        issues = self._dedupe_issue_codes([*issues, *embedded_issues, *list(prepared.extra_issues or [])])
+        if compatibility == "compatible" and issues:
+            compatibility = "degraded"
+
+        imported = ImportedProfilePack(
+            import_id=str(uuid4()),
+            imported_at=self.clock.utcnow().isoformat(),
+            filename=prepared.filename,
+            manifest=prepared.manifest,
+            sections=prepared.sections,
+            scan_summary=scan_summary,
+            compatibility=compatibility,
+            compatibility_issues=issues,
+            user_id=str(user_id or "").strip(),
+            source_artifact_id=str(source_artifact_id or "").strip(),
+            import_origin=str(import_origin or "").strip(),
+            source_fingerprint=str(source_fingerprint or "").strip(),
+        )
+        self._imports[imported.import_id] = imported
+        self._flush_state()
+        return imported, prepared
+
+    def _prepare_profile_pack_import(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+    ) -> tuple[PreparedProfilePackImport, list[str]]:
         if not content:
             raise ValueError("PROFILE_PACK_BYTES_REQUIRED")
+
+        standard_error: ValueError | None = None
+        try:
+            return self._prepare_standard_profile_pack_import(filename=filename, content=content)
+        except ValueError as exc:
+            standard_error = exc
+
+        converted = self._try_prepare_astrbot_profile_pack_import(
+            filename=filename,
+            content=content,
+        )
+        if converted is not None:
+            return converted
+        if standard_error is not None:
+            raise standard_error
+        raise ValueError("PROFILE_PACK_INVALID_ARCHIVE")
+
+    def _prepare_standard_profile_pack_import(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+    ) -> tuple[PreparedProfilePackImport, list[str]]:
         archive_buffer = io.BytesIO(content)
         if not zipfile.is_zipfile(archive_buffer):
             raise ValueError("PROFILE_PACK_INVALID_ARCHIVE")
@@ -311,9 +476,12 @@ class ProfilePackService:
             names = set(zf.namelist())
             if "manifest.json" not in names:
                 raise ValueError("PROFILE_PACK_MANIFEST_MISSING")
-            manifest = BotProfilePackManifest.model_validate(
-                json.loads(zf.read("manifest.json").decode("utf-8"))
-            )
+            try:
+                manifest = BotProfilePackManifest.model_validate(
+                    json.loads(zf.read("manifest.json").decode("utf-8"))
+                )
+            except Exception as exc:  # pragma: no cover - normalized to api payload below
+                raise ValueError("PROFILE_PACK_MANIFEST_INVALID") from exc
             sections: dict[str, Any] = {}
             hash_mismatches: list[str] = []
             for section in manifest.sections:
@@ -327,38 +495,978 @@ class ProfilePackService:
                 if expected_hash != actual_hash:
                     hash_mismatches.append(section)
 
-        scan_summary = self.scan_service.to_dict(
-            self.scan_service.scan(
-                self._scan_payload(manifest, sections),
-                manifest=manifest,
-            )
-        )
-        signature_issue = self._verify_signature_issue(manifest)
-        compatibility, issues = self._resolve_compatibility(
-            manifest,
-            sections=sections,
-            hash_mismatches=hash_mismatches,
-            signature_issue=signature_issue,
-        )
-        imported = ImportedProfilePack(
-            import_id=str(uuid4()),
-            imported_at=self.clock.utcnow().isoformat(),
+        prepared = PreparedProfilePackImport(
             filename=self._safe_filename(filename or "profile-pack.zip"),
+            archive_bytes=content,
             manifest=manifest,
             sections=sections,
-            scan_summary=scan_summary,
-            compatibility=compatibility,
-            compatibility_issues=issues,
+            extra_issues=[],
         )
-        self._imports[imported.import_id] = imported
-        self._flush_state()
-        return imported
+        return prepared, hash_mismatches
+
+    def _try_prepare_astrbot_profile_pack_import(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+    ) -> tuple[PreparedProfilePackImport, list[str]] | None:
+        archive_buffer = io.BytesIO(content)
+        if zipfile.is_zipfile(archive_buffer):
+            archive_buffer.seek(0)
+            with zipfile.ZipFile(archive_buffer, "r") as zf:
+                names = set(zf.namelist())
+                config_path = self._astrbot_backup_config_path(names)
+                if not config_path:
+                    return None
+                raw_config = self._load_json_dict(
+                    zf.read(config_path),
+                    error_code="PROFILE_PACK_INVALID_ARCHIVE",
+                )
+                backup_manifest: dict[str, Any] = {}
+                if "manifest.json" in names:
+                    try:
+                        backup_manifest = self._load_json_dict(
+                            zf.read("manifest.json"),
+                            error_code="PROFILE_PACK_INVALID_ARCHIVE",
+                        )
+                    except ValueError:
+                        backup_manifest = {}
+                prepared = self._build_astrbot_converted_profile_pack(
+                    filename=filename,
+                    raw_config=raw_config,
+                    source_type="astrbot_backup_zip",
+                    source_sha256=hashlib.sha256(content).hexdigest(),
+                    astrbot_version=str(backup_manifest.get("astrbot_version", "") or ""),
+                    backup_manifest=backup_manifest,
+                    extra_issues=["astrbot_raw_import_converted", "astrbot_backup_runtime_payload_omitted"],
+                )
+                return prepared, []
+
+        raw_config = self._try_load_astrbot_json_config(filename=filename, content=content)
+        if raw_config is None:
+            return None
+        basename = Path(filename or "").name
+        source_type = "astrbot_cmd_config_json"
+        if basename.startswith("abconf_"):
+            source_type = "astrbot_abconf_json"
+        elif basename != "cmd_config.json":
+            source_type = "astrbot_config_json"
+        prepared = self._build_astrbot_converted_profile_pack(
+            filename=filename,
+            raw_config=raw_config,
+            source_type=source_type,
+            source_sha256=hashlib.sha256(content).hexdigest(),
+            astrbot_version="",
+            backup_manifest={},
+            extra_issues=["astrbot_raw_import_converted"],
+        )
+        return prepared, []
+
+    @staticmethod
+    def _load_json_dict(payload: bytes, *, error_code: str) -> dict[str, Any]:
+        try:
+            data = json.loads(payload.decode("utf-8-sig"))
+        except Exception as exc:
+            raise ValueError(error_code) from exc
+        if not isinstance(data, dict):
+            raise ValueError(error_code)
+        return data
+
+    @staticmethod
+    def _astrbot_backup_config_path(names: set[str]) -> str:
+        if "config/cmd_config.json" in names:
+            return "config/cmd_config.json"
+        for name in sorted(names):
+            if name.endswith("/cmd_config.json") or name == "cmd_config.json":
+                return name
+        return ""
+
+    def _try_load_astrbot_json_config(self, *, filename: str, content: bytes) -> dict[str, Any] | None:
+        basename = Path(filename or "").name
+        if not basename.endswith(".json"):
+            return None
+        try:
+            payload = json.loads(content.decode("utf-8-sig"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if not self._looks_like_astrbot_config_payload(payload):
+            return None
+        return payload
+
+    @staticmethod
+    def _looks_like_astrbot_config_payload(payload: dict[str, Any]) -> bool:
+        if {"pack_id", "version", "sections", "hashes"} <= set(payload.keys()):
+            return False
+        astrbot_markers = {
+            "provider",
+            "provider_settings",
+            "plugin_set",
+            "dashboard",
+            "platform",
+            "timezone",
+            "platform_settings",
+        }
+        return bool(set(payload.keys()) & astrbot_markers)
+
+    def _build_astrbot_converted_profile_pack(
+        self,
+        *,
+        filename: str,
+        raw_config: dict[str, Any],
+        source_type: str,
+        source_sha256: str,
+        astrbot_version: str,
+        backup_manifest: dict[str, Any],
+        extra_issues: list[str],
+    ) -> PreparedProfilePackImport:
+        sections, conversion_issues = self._build_astrbot_conversion_sections(
+            raw_config=raw_config,
+            source_type=source_type,
+            filename=filename,
+            source_sha256=source_sha256,
+            backup_manifest=backup_manifest,
+        )
+        redacted_sections, _redaction_notes = self._redact_sections(
+            sections,
+            "exclude_secrets",
+        )
+        all_issues = self._dedupe_issue_codes([*extra_issues, *conversion_issues])
+        sharelife_meta = redacted_sections.get("sharelife_meta")
+        if isinstance(sharelife_meta, dict):
+            astrbot_import = sharelife_meta.get("astrbot_import")
+            if isinstance(astrbot_import, dict):
+                astrbot_import["issues"] = list(all_issues)
+        pack_id = self._astrbot_conversion_pack_id(
+            filename=filename,
+            source_sha256=source_sha256,
+            raw_config=raw_config,
+        )
+        version = self._astrbot_conversion_version(source_sha256=source_sha256)
+        manifest_payload: dict[str, Any] = {
+            "pack_type": PROFILE_PACK_TYPE,
+            "pack_id": pack_id,
+            "version": version,
+            "created_at": self.clock.utcnow().isoformat(),
+            "astrbot_version": str(astrbot_version or "").strip() or "any",
+            "plugin_compat": self.plugin_version or "any",
+            "sections": list(redacted_sections.keys()),
+            "capabilities": self._infer_manifest_capabilities(
+                sections=redacted_sections,
+                pack_type=PROFILE_PACK_TYPE,
+            ),
+            "redaction_policy": RedactionPolicy.model_validate(
+                {
+                    "mode": "exclude_secrets",
+                    "include_sections": list(redacted_sections.keys()),
+                }
+            ).model_dump(),
+            "hashes": {
+                BotProfilePackManifest.hash_key(section_name): self._hash_json(payload)
+                for section_name, payload in redacted_sections.items()
+            },
+        }
+        manifest = BotProfilePackManifest.model_validate(manifest_payload)
+        archive_bytes = self._build_profile_pack_archive_bytes(
+            manifest=manifest,
+            sections=redacted_sections,
+        )
+        normalized_filename = self._safe_filename(
+            f"{pack_id.replace('/', '__')}-{version}-converted.zip",
+        )
+        prepared = PreparedProfilePackImport(
+            filename=normalized_filename,
+            archive_bytes=archive_bytes,
+            manifest=manifest,
+            sections=redacted_sections,
+            extra_issues=all_issues,
+        )
+        return prepared
+
+    def _build_astrbot_conversion_sections(
+        self,
+        *,
+        raw_config: dict[str, Any],
+        source_type: str,
+        filename: str,
+        source_sha256: str,
+        backup_manifest: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[str]]:
+        issues: list[str] = []
+        sections: dict[str, Any] = {}
+        personas_payload, personas_summary = self._build_astrbot_conversion_personas(raw_config)
+        if personas_payload:
+            sections["personas"] = personas_payload
+
+        environment_payload, environment_summary = self._build_astrbot_conversion_environment(raw_config)
+        if environment_payload:
+            sections["environment_manifest"] = environment_payload
+
+        core_payload: dict[str, Any] = {}
+        operator_keys = {"dashboard", "admins_id"}
+        if any(key in raw_config for key in operator_keys):
+            issues.append("astrbot_operator_fields_omitted")
+        extracted_keys = {
+            "provider",
+            "plugin_set",
+            "persona",
+            "default_personality",
+            "subagent_orchestrator",
+            "platform",
+            "provider_sources",
+            *operator_keys,
+        }
+        for key, value in raw_config.items():
+            key_text = str(key or "").strip()
+            if not key_text or key_text in extracted_keys:
+                continue
+            core_payload[key_text] = self._sanitize_astrbot_conversion_value(
+                deepcopy(value),
+                path=f"astrbot_core.{key_text}",
+            )
+        if core_payload:
+            sections["astrbot_core"] = core_payload
+
+        providers_payload = self._build_astrbot_conversion_providers(raw_config)
+        if providers_payload:
+            sections["providers"] = providers_payload
+
+        plugins_payload, plugin_issues = self._build_astrbot_conversion_plugins(raw_config)
+        issues.extend(plugin_issues)
+        if plugins_payload is not None:
+            sections["plugins"] = plugins_payload
+
+        summary = self._build_astrbot_conversion_summary(
+            raw_config=raw_config,
+            personas_summary=personas_summary,
+            environment_summary=environment_summary,
+            plugins_payload=plugins_payload,
+        )
+
+        sections["sharelife_meta"] = {
+            "astrbot_import": {
+                "source_type": source_type,
+                "source_filename": self._safe_filename(filename or "astrbot-import"),
+                "source_sha256": source_sha256,
+                "config_version": raw_config.get("config_version"),
+                "backup_manifest": deepcopy(backup_manifest),
+                "summary": summary,
+                "issues": self._dedupe_issue_codes(issues),
+            }
+        }
+        return sections, self._dedupe_issue_codes(issues)
+
+    def _build_astrbot_conversion_providers(self, raw_config: dict[str, Any]) -> dict[str, Any]:
+        providers = raw_config.get("provider", [])
+        if not isinstance(providers, list):
+            return {}
+        out: dict[str, Any] = {}
+        for index, item in enumerate(providers):
+            if not isinstance(item, dict):
+                continue
+            provider_id = str(item.get("id", "") or "").strip() or f"provider-{index + 1}"
+            normalized = deepcopy(item)
+            if "key" in normalized and "api_key" not in normalized:
+                normalized["api_key"] = normalized.pop("key")
+            normalized = self._sanitize_astrbot_conversion_value(
+                normalized,
+                path=f"providers.{provider_id}",
+            )
+            out[provider_id] = normalized
+        return out
+
+    def _build_astrbot_conversion_plugins(self, raw_config: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+        plugin_set = raw_config.get("plugin_set")
+        if plugin_set is None:
+            return None, []
+        if not isinstance(plugin_set, list):
+            return {}, []
+        normalized = [str(item or "").strip() for item in plugin_set if str(item or "").strip()]
+        if "*" in normalized:
+            return None, ["astrbot_plugin_wildcard_unresolved"]
+        return {plugin_id: {"enabled": True} for plugin_id in normalized}, []
+
+    def _build_astrbot_conversion_personas(self, raw_config: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        payload: dict[str, Any] = {}
+        summary: dict[str, Any] = {}
+        raw_personas = raw_config.get("persona")
+        entries: dict[str, Any] = {}
+        if isinstance(raw_personas, list):
+            for index, item in enumerate(raw_personas):
+                if isinstance(item, dict):
+                    name = (
+                        str(item.get("name", "") or "").strip()
+                        or str(item.get("id", "") or "").strip()
+                        or f"persona-{index + 1}"
+                    )
+                    entries[name] = self._sanitize_astrbot_conversion_value(
+                        deepcopy(item),
+                        path=f"personas.entries.{name}",
+                    )
+                else:
+                    text = str(item or "").strip()
+                    if text:
+                        entries[text] = {"name": text}
+        provider_settings = raw_config.get("provider_settings")
+        default_personality = ""
+        persona_pool: list[str] = []
+        if isinstance(provider_settings, dict):
+            default_personality = str(provider_settings.get("default_personality", "") or "").strip()
+            raw_pool = provider_settings.get("persona_pool")
+            if isinstance(raw_pool, list):
+                persona_pool = [str(item or "").strip() for item in raw_pool if str(item or "").strip()]
+        if not default_personality:
+            default_personality = str(raw_config.get("default_personality", "") or "").strip()
+        runtime: dict[str, Any] = {}
+        if default_personality:
+            runtime["default_personality"] = default_personality
+            summary["default_personality"] = default_personality
+        if persona_pool:
+            runtime["persona_pool"] = list(persona_pool)
+            summary["persona_pool"] = list(persona_pool)
+        if runtime:
+            payload["runtime"] = runtime
+        if entries:
+            payload["entries"] = entries
+            summary["persona_count"] = len(entries)
+            summary["persona_ids"] = list(entries.keys())
+        elif runtime:
+            summary["persona_count"] = 0
+            summary["persona_ids"] = []
+        return (payload or None), summary
+
+    def _build_astrbot_conversion_environment(self, raw_config: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        payload: dict[str, Any] = {}
+        summary: dict[str, Any] = {}
+
+        subagent_orchestrator = raw_config.get("subagent_orchestrator")
+        if isinstance(subagent_orchestrator, dict):
+            normalized = self._sanitize_astrbot_conversion_value(
+                deepcopy(subagent_orchestrator),
+                path="environment_manifest.subagent_orchestrator",
+            )
+            agents = normalized.get("agents") if isinstance(normalized, dict) else None
+            enabled_agents = []
+            if isinstance(agents, list):
+                for item in agents:
+                    if not isinstance(item, dict):
+                        continue
+                    if not bool(item.get("enabled", False)):
+                        continue
+                    name = str(item.get("name", "") or item.get("id", "") or "").strip()
+                    if name:
+                        enabled_agents.append(name)
+                normalized["enabled_agents"] = enabled_agents
+            payload["subagent_orchestrator"] = normalized
+            summary["subagent_count"] = len(enabled_agents)
+            summary["subagent_ids"] = enabled_agents
+
+        platform = raw_config.get("platform")
+        if isinstance(platform, list):
+            normalized_platform = self._sanitize_astrbot_conversion_value(
+                deepcopy(platform),
+                path="environment_manifest.platform",
+            )
+            payload["platform"] = normalized_platform
+            summary["platform_count"] = len(normalized_platform)
+
+        provider_sources = raw_config.get("provider_sources")
+        if isinstance(provider_sources, list):
+            normalized_sources = self._sanitize_astrbot_conversion_value(
+                deepcopy(provider_sources),
+                path="environment_manifest.provider_sources",
+            )
+            payload["provider_sources"] = normalized_sources
+            summary["provider_source_count"] = len(normalized_sources)
+
+        return (payload or None), summary
+
+    def _build_astrbot_conversion_summary(
+        self,
+        *,
+        raw_config: dict[str, Any],
+        personas_summary: dict[str, Any],
+        environment_summary: dict[str, Any],
+        plugins_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        summary: dict[str, Any] = {}
+        summary.update(personas_summary)
+        summary.update(environment_summary)
+        if isinstance(plugins_payload, dict):
+            summary["plugin_count"] = len(plugins_payload)
+        provider_count = raw_config.get("provider")
+        if isinstance(provider_count, list):
+            summary["provider_count"] = len(provider_count)
+        return summary
+
+    def _sanitize_astrbot_conversion_value(self, value: Any, *, path: str) -> Any:
+        if isinstance(value, dict):
+            out: dict[str, Any] = {}
+            for key, item in value.items():
+                key_text = str(key or "").strip()
+                child_path = f"{path}.{key_text}" if path else key_text
+                if self._astrbot_conversion_should_redact_key(key_text, child_path):
+                    out[key_text] = self._astrbot_redacted_value(item)
+                    continue
+                out[key_text] = self._sanitize_astrbot_conversion_value(item, path=child_path)
+            return out
+        if isinstance(value, list):
+            return [
+                self._sanitize_astrbot_conversion_value(item, path=f"{path}[{index}]")
+                for index, item in enumerate(value)
+            ]
+        return value
+
+    @staticmethod
+    def _astrbot_conversion_should_redact_key(key: str, path: str) -> bool:
+        normalized_key = str(key or "").strip().lower()
+        if not normalized_key:
+            return False
+        if ProfileRedactionService._is_sensitive_key(normalized_key):
+            return True
+        if normalized_key == "key":
+            return True
+        if normalized_key.endswith("_key"):
+            return True
+        return normalized_key == "jwt_secret"
+
+    @staticmethod
+    def _astrbot_redacted_value(value: Any) -> Any:
+        if isinstance(value, list):
+            return ["***REDACTED***"] if value else []
+        if isinstance(value, dict):
+            return "***REDACTED***"
+        return "***REDACTED***"
+
+    def _build_profile_pack_archive_bytes(
+        self,
+        *,
+        manifest: BotProfilePackManifest,
+        sections: dict[str, Any],
+    ) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.json", json.dumps(manifest.model_dump(), ensure_ascii=False, indent=2))
+            for section_name, payload in sections.items():
+                zf.writestr(
+                    BotProfilePackManifest.hash_key(section_name),
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                )
+        return buffer.getvalue()
+
+    def _astrbot_conversion_pack_id(
+        self,
+        *,
+        filename: str,
+        source_sha256: str,
+        raw_config: dict[str, Any],
+    ) -> str:
+        basename = Path(filename or "").stem
+        descriptor = self._astrbot_conversion_descriptor(raw_config=raw_config, fallback=basename or "astrbot-import")
+        slug = self._official_record_slug(descriptor, source_sha256[:8])
+        return f"profile/imported-{slug}"
+
+    def _astrbot_conversion_descriptor(self, *, raw_config: dict[str, Any], fallback: str) -> str:
+        provider_settings = raw_config.get("provider_settings")
+        if isinstance(provider_settings, dict):
+            default_personality = str(provider_settings.get("default_personality", "") or "").strip()
+            if default_personality:
+                return default_personality
+        default_personality = str(raw_config.get("default_personality", "") or "").strip()
+        if default_personality:
+            return default_personality
+        raw_personas = raw_config.get("persona")
+        if isinstance(raw_personas, list):
+            for item in raw_personas:
+                if isinstance(item, dict):
+                    name = str(item.get("name", "") or item.get("id", "") or "").strip()
+                    if name:
+                        return name
+                else:
+                    text = str(item or "").strip()
+                    if text:
+                        return text
+        subagent_orchestrator = raw_config.get("subagent_orchestrator")
+        if isinstance(subagent_orchestrator, dict):
+            agents = subagent_orchestrator.get("agents")
+            if isinstance(agents, list):
+                for item in agents:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name", "") or item.get("id", "") or "").strip()
+                    if name:
+                        return name
+        return str(fallback or "astrbot-import").strip() or "astrbot-import"
+
+    @staticmethod
+    def _astrbot_conversion_version(*, source_sha256: str) -> str:
+        return f"0.1.0-converted-{source_sha256[:8]}"
+
+    @staticmethod
+    def _dedupe_issue_codes(values: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            out.append(text)
+        return out
+
+    def _embedded_profile_pack_issues(self, sections: dict[str, Any]) -> list[str]:
+        meta = sections.get("sharelife_meta")
+        if not isinstance(meta, dict):
+            return []
+        astrbot_import = meta.get("astrbot_import")
+        if not isinstance(astrbot_import, dict):
+            return []
+        raw_issues = astrbot_import.get("issues")
+        if not isinstance(raw_issues, list):
+            return []
+        return self._dedupe_issue_codes([str(item or "").strip() for item in raw_issues])
 
     def get_import_record(self, import_id: str) -> ImportedProfilePack:
         record = self._imports.get(str(import_id or "").strip())
         if record is None:
             raise ValueError("PROFILE_IMPORT_NOT_FOUND")
         return record
+
+    def delete_import(self, *, user_id: str, import_id: str) -> ImportedProfilePack:
+        imported = self.get_import_record(import_id)
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id or str(imported.user_id or "").strip() != normalized_user_id:
+            raise ValueError("PROFILE_PACK_ARTIFACT_PERMISSION_DENIED")
+        if not self._can_delete_import(imported):
+            raise ValueError("PROFILE_IMPORT_IN_USE")
+        self._delete_import_record(imported)
+        self._flush_state()
+        return imported
+
+    def _refresh_member_imports(
+        self,
+        *,
+        user_id: str,
+        import_origin: str,
+        source_fingerprint: str,
+    ) -> None:
+        normalized_user_id = str(user_id or "").strip()
+        normalized_origin = str(import_origin or "").strip()
+        normalized_fingerprint = str(source_fingerprint or "").strip()
+        if not normalized_user_id or not normalized_origin or not normalized_fingerprint:
+            return
+        changed = False
+        for imported in list(self._imports.values()):
+            if str(imported.user_id or "").strip() != normalized_user_id:
+                continue
+            if str(imported.import_origin or "").strip() != normalized_origin:
+                continue
+            if str(imported.source_fingerprint or "").strip() != normalized_fingerprint:
+                continue
+            if not self._can_delete_import(imported):
+                continue
+            self._delete_import_record(imported)
+            changed = True
+        if changed:
+            self._flush_state()
+
+    def _can_delete_import(self, imported: ImportedProfilePack) -> bool:
+        normalized_import_id = str(imported.import_id or "").strip()
+        normalized_artifact_id = str(imported.source_artifact_id or "").strip()
+        for submission in self._submissions.values():
+            if normalized_import_id and str(submission.import_id or "").strip() == normalized_import_id:
+                return False
+            if normalized_artifact_id and str(submission.artifact_id or "").strip() == normalized_artifact_id:
+                return False
+        return True
+
+    def _delete_import_record(self, imported: ImportedProfilePack) -> None:
+        normalized_import_id = str(imported.import_id or "").strip()
+        normalized_artifact_id = str(imported.source_artifact_id or "").strip()
+        if normalized_import_id:
+            self._imports.pop(normalized_import_id, None)
+            self._plugin_install_confirmations.pop(normalized_import_id, None)
+            self._plugin_install_executions.pop(normalized_import_id, None)
+        if normalized_artifact_id:
+            artifact = self._artifacts.pop(normalized_artifact_id, None)
+            if artifact is not None:
+                try:
+                    if artifact.path.exists():
+                        artifact.path.unlink()
+                except OSError:
+                    pass
+
+    def _import_summary(self, imported: ImportedProfilePack) -> dict[str, Any]:
+        meta = imported.sections.get("sharelife_meta")
+        if not isinstance(meta, dict):
+            return {}
+        astrbot_import = meta.get("astrbot_import")
+        if not isinstance(astrbot_import, dict):
+            return {}
+        summary = astrbot_import.get("summary")
+        if not isinstance(summary, dict):
+            return {}
+        return dict(summary)
+
+    def build_import_selection_tree(self, imported: ImportedProfilePack) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for section_name in imported.manifest.sections:
+            payload = imported.sections.get(section_name)
+            if payload is None:
+                continue
+            items = self._build_selection_items_for_section(section_name, payload)
+            preview_lines, preview_truncated = self._selection_preview_lines(payload)
+            out.append(
+                {
+                    "name": section_name,
+                    "label": self._humanize_key(section_name),
+                    "path": section_name,
+                    "kind": self._selection_kind(payload),
+                    "items": items,
+                    "preview_lines": preview_lines,
+                    "preview_truncated": preview_truncated,
+                }
+            )
+        return out
+
+    def _build_selection_items_for_section(self, section_name: str, payload: Any) -> list[dict[str, Any]]:
+        if section_name == "personas" and isinstance(payload, dict):
+            return self._build_personas_selection_items(payload)
+        if section_name == "environment_manifest" and isinstance(payload, dict):
+            return self._build_environment_selection_items(payload)
+        if section_name == "astrbot_core" and isinstance(payload, dict):
+            return self._build_astrbot_core_selection_items(payload)
+        if section_name == "providers" and isinstance(payload, dict):
+            return [
+                self._build_nested_selection_item(
+                    path=f"providers.{provider_id}",
+                    label=str(provider_id or "").strip() or "Provider",
+                    value=provider_payload,
+                    max_depth=2,
+                )
+                for provider_id, provider_payload in payload.items()
+            ]
+        if section_name == "plugins" and isinstance(payload, dict):
+            return [
+                self._build_nested_selection_item(
+                    path=f"plugins.{plugin_id}",
+                    label=str(plugin_id or "").strip() or "Plugin",
+                    value=plugin_payload,
+                    max_depth=2,
+                )
+                for plugin_id, plugin_payload in payload.items()
+            ]
+        if section_name == "sharelife_meta":
+            return []
+        return self._build_generic_section_selection_items(section_name, payload)
+
+    def _build_personas_selection_items(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        runtime = payload.get("runtime")
+        if isinstance(runtime, dict) and runtime:
+            items.append(
+                self._selection_node(
+                    path="personas.runtime",
+                    label="Runtime Persona Settings",
+                    kind="object",
+                    value=runtime,
+                    children=[
+                        self._build_nested_selection_item(
+                            path=f"personas.runtime.{key}",
+                            label=self._humanize_key(str(key or "")),
+                            value=value,
+                            max_depth=2,
+                        )
+                        for key, value in runtime.items()
+                    ],
+                )
+            )
+        entries = payload.get("entries")
+        if isinstance(entries, dict) and entries:
+            items.append(
+                self._selection_node(
+                    path="personas.entries",
+                    label="Persona Entries",
+                    kind="object",
+                    value=entries,
+                    children=[
+                        self._build_nested_selection_item(
+                            path=f"personas.entries.{name}",
+                            label=str(name or "").strip() or "Persona",
+                            value=value,
+                            max_depth=2,
+                        )
+                        for name, value in entries.items()
+                    ],
+                )
+            )
+        return items
+
+    def _build_environment_selection_items(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for key, value in payload.items():
+            key_text = str(key or "").strip()
+            if not key_text:
+                continue
+            path = f"environment_manifest.{key_text}"
+            if key_text == "subagent_orchestrator" and isinstance(value, dict):
+                children: list[dict[str, Any]] = []
+                for child_key, child_value in value.items():
+                    if child_key == "enabled_agents":
+                        continue
+                    if child_key == "agents" and isinstance(child_value, list):
+                        for index, item in enumerate(child_value):
+                            children.append(
+                                self._build_nested_selection_item(
+                                    path=f"{path}.agents[{index}]",
+                                    label=self._list_item_label(item, index, fallback_prefix="Agent"),
+                                    value=item,
+                                    max_depth=2,
+                                )
+                            )
+                    else:
+                        children.append(
+                            self._build_nested_selection_item(
+                                path=f"{path}.{child_key}",
+                                label=self._humanize_key(str(child_key or "")),
+                                value=child_value,
+                                max_depth=2,
+                            )
+                        )
+                items.append(
+                    self._selection_node(
+                        path=path,
+                        label="Subagent Orchestrator",
+                        kind="object",
+                        value=value,
+                        children=children,
+                    )
+                )
+                continue
+            if isinstance(value, list):
+                children = [
+                    self._build_nested_selection_item(
+                        path=f"{path}[{index}]",
+                        label=self._list_item_label(item, index, fallback_prefix=self._humanize_key(key_text)),
+                        value=item,
+                        max_depth=2,
+                    )
+                    for index, item in enumerate(value)
+                ]
+                items.append(
+                    self._selection_node(
+                        path=path,
+                        label=self._humanize_key(key_text),
+                        kind="list",
+                        value=value,
+                        children=children,
+                    )
+                )
+                continue
+            items.append(
+                    self._build_nested_selection_item(
+                        path=path,
+                        label=self._humanize_key(key_text),
+                        value=value,
+                        max_depth=2,
+                    )
+                )
+        return items
+
+    def _build_astrbot_core_selection_items(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for key, value in payload.items():
+            key_text = str(key or "").strip()
+            if not key_text:
+                continue
+            path = f"astrbot_core.{key_text}"
+            if key_text == "provider_settings" and isinstance(value, dict):
+                children = [
+                    self._build_nested_selection_item(
+                        path=f"{path}.{child_key}",
+                        label=self._humanize_key(str(child_key or "")),
+                        value=child_value,
+                        max_depth=2,
+                    )
+                    for child_key, child_value in value.items()
+                ]
+                items.append(
+                    self._selection_node(
+                        path=path,
+                        label="Provider Settings",
+                        kind="object",
+                        value=value,
+                        children=children,
+                    )
+                )
+                continue
+            items.append(
+                self._build_nested_selection_item(
+                    path=path,
+                    label=self._humanize_key(key_text),
+                    value=value,
+                    max_depth=2,
+                )
+            )
+        return items
+
+    def _build_generic_section_selection_items(self, section_name: str, payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, dict):
+            return [
+                self._build_nested_selection_item(
+                    path=f"{section_name}.{key}",
+                    label=self._humanize_key(str(key or "")),
+                    value=value,
+                    max_depth=2,
+                )
+                for key, value in payload.items()
+            ]
+        if isinstance(payload, list):
+            return [
+                self._build_nested_selection_item(
+                    path=f"{section_name}[{index}]",
+                    label=self._list_item_label(item, index, fallback_prefix=self._humanize_key(section_name)),
+                    value=item,
+                    max_depth=2,
+                )
+                for index, item in enumerate(payload)
+            ]
+        return []
+
+    def _build_nested_selection_item(
+        self,
+        *,
+        path: str,
+        label: str,
+        value: Any,
+        max_depth: int,
+        depth: int = 0,
+    ) -> dict[str, Any]:
+        if depth >= max_depth:
+            return self._selection_leaf(
+                path=path,
+                label=label,
+                kind=self._selection_kind(value),
+                value=value,
+            )
+
+        if isinstance(value, dict):
+            children = [
+                self._build_nested_selection_item(
+                    path=f"{path}.{key}",
+                    label=self._humanize_key(str(key or "")),
+                    value=nested,
+                    max_depth=max_depth,
+                    depth=depth + 1,
+                )
+                for key, nested in value.items()
+                if str(key or "").strip()
+            ]
+            if children:
+                return self._selection_node(
+                    path=path,
+                    label=label,
+                    children=children,
+                    kind="object",
+                    value=value,
+                )
+
+        if isinstance(value, list):
+            children = [
+                self._build_nested_selection_item(
+                    path=f"{path}[{index}]",
+                    label=self._list_item_label(item, index, fallback_prefix=label),
+                    value=item,
+                    max_depth=max_depth,
+                    depth=depth + 1,
+                )
+                for index, item in enumerate(value)
+            ]
+            if children:
+                return self._selection_node(
+                    path=path,
+                    label=label,
+                    children=children,
+                    kind="list",
+                    value=value,
+                )
+
+        return self._selection_leaf(path=path, label=label, kind=self._selection_kind(value), value=value)
+
+    def _selection_leaf(
+        self,
+        *,
+        path: str,
+        label: str,
+        kind: str = "scalar",
+        value: Any = None,
+    ) -> dict[str, Any]:
+        preview_lines, preview_truncated = self._selection_preview_lines(value)
+        return {
+            "path": path,
+            "label": label,
+            "kind": kind,
+            "children": [],
+            "preview_lines": preview_lines,
+            "preview_truncated": preview_truncated,
+        }
+
+    def _selection_node(
+        self,
+        *,
+        path: str,
+        label: str,
+        children: list[dict[str, Any]],
+        kind: str,
+        value: Any,
+    ) -> dict[str, Any]:
+        preview_lines, preview_truncated = self._selection_preview_lines(value)
+        return {
+            "path": path,
+            "label": label,
+            "kind": kind,
+            "children": children,
+            "preview_lines": preview_lines,
+            "preview_truncated": preview_truncated,
+        }
+
+    @staticmethod
+    def _selection_preview_lines(value: Any) -> tuple[list[str], bool]:
+        if value in (None, "", [], {}):
+            return [], False
+        if isinstance(value, str):
+            lines = value.splitlines() or [value]
+            if len(lines) <= 12:
+                return lines, False
+            return lines[:12], True
+        if isinstance(value, (bool, int, float)):
+            return [str(value)], False
+        return ProfilePackService._json_preview_lines(value, limit=24)
+
+    @staticmethod
+    def _selection_kind(value: Any) -> str:
+        if isinstance(value, dict):
+            return "object"
+        if isinstance(value, list):
+            return "list"
+        return "scalar"
+
+    @staticmethod
+    def _humanize_key(value: str) -> str:
+        text = str(value or "").strip().replace("_", " ")
+        if not text:
+            return "Item"
+        return " ".join(part.capitalize() for part in text.split())
+
+    @staticmethod
+    def _list_item_label(item: Any, index: int, *, fallback_prefix: str) -> str:
+        if isinstance(item, dict):
+            for key in ("name", "id", "type"):
+                text = str(item.get(key, "") or "").strip()
+                if text:
+                    return text
+        return f"{fallback_prefix} #{index + 1}"
 
     def profile_pack_plugin_install_plan(self, import_id: str) -> dict[str, Any]:
         imported = self.get_import_record(import_id)
@@ -580,10 +1688,19 @@ class ProfilePackService:
             "plugin_install": plugin_install,
         }
 
-    def list_imports(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_imports(self, limit: int = 50, *, user_id: str = "") -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit or 50), 200))
+        normalized_user_id = str(user_id or "").strip()
+        candidates = list(self._imports.values())
+        if normalized_user_id:
+            candidates = [item for item in candidates if str(item.user_id or "").strip() == normalized_user_id]
+        candidates = [
+            item
+            for item in candidates
+            if str(item.import_origin or "").strip() != "submission_materialized"
+        ]
         rows = sorted(
-            self._imports.values(),
+            candidates,
             key=lambda item: item.imported_at,
             reverse=True,
         )[:bounded_limit]
@@ -593,6 +1710,7 @@ class ProfilePackService:
                 {
                     "import_id": item.import_id,
                     "imported_at": item.imported_at,
+                    "user_id": item.user_id,
                     "filename": item.filename,
                     "pack_type": item.manifest.pack_type,
                     "pack_id": item.manifest.pack_id,
@@ -601,6 +1719,11 @@ class ProfilePackService:
                     "capabilities": list(item.manifest.capabilities),
                     "compatibility": item.compatibility,
                     "compatibility_issues": list(item.compatibility_issues),
+                    "source_artifact_id": item.source_artifact_id,
+                    "import_origin": item.import_origin,
+                    "delete_allowed": self._can_delete_import(item),
+                    "import_summary": self._import_summary(item),
+                    "selection_tree": self.build_import_selection_tree(item),
                 }
             )
         return out
@@ -640,13 +1763,40 @@ class ProfilePackService:
         submit_options: dict[str, Any] | None = None,
     ) -> ProfilePackSubmission:
         artifact = self.get_export_artifact(artifact_id=artifact_id)
+        normalized_user_id = str(user_id or "").strip() or "member"
+        if str(artifact.owner_user_id or "").strip() and artifact.owner_user_id != normalized_user_id:
+            raise ValueError("PROFILE_PACK_ARTIFACT_PERMISSION_DENIED")
         if not artifact.path.exists():
             raise ValueError("PROFILE_PACK_ARTIFACT_NOT_FOUND")
 
+        normalized_submit_options = dict(submit_options or {})
         imported = self.import_bot_profile_pack(
             filename=artifact.filename,
             content=artifact.path.read_bytes(),
         )
+        selected_sections = self._resolve_submission_sections(
+            manifest=imported.manifest,
+            submit_options=normalized_submit_options,
+        )
+        selected_item_paths = self._normalize_selected_item_paths(
+            normalized_submit_options.get("selected_item_paths"),
+            selected_sections=selected_sections,
+        )
+        normalized_submit_options["selected_sections"] = list(selected_sections)
+        normalized_submit_options["selected_item_paths"] = list(selected_item_paths)
+        if self._requires_submission_materialization(
+            manifest_sections=list(imported.manifest.sections),
+            selected_sections=selected_sections,
+            selected_item_paths=selected_item_paths,
+        ):
+            artifact, imported = self._materialize_submission_copy(
+                source_artifact=artifact,
+                imported=imported,
+                user_id=normalized_user_id,
+                selected_sections=selected_sections,
+                selected_item_paths=selected_item_paths,
+            )
+
         now = self.clock.utcnow().isoformat()
         scan_summary = dict(imported.scan_summary or {})
         capability_summary = self._build_capability_summary(
@@ -667,7 +1817,7 @@ class ProfilePackService:
         )
         submission = ProfilePackSubmission(
             submission_id=str(uuid4()),
-            user_id=str(user_id or "").strip() or "member",
+            user_id=normalized_user_id,
             artifact_id=artifact.artifact_id,
             import_id=imported.import_id,
             pack_type=imported.manifest.pack_type,
@@ -690,11 +1840,209 @@ class ProfilePackService:
             capability_summary=capability_summary,
             compatibility_matrix=compatibility_matrix,
             review_evidence=review_evidence,
-            submit_options=dict(submit_options or {}),
+            submit_options=dict(normalized_submit_options),
         )
         self._submissions[submission.submission_id] = submission
         self._flush_state()
         return submission
+
+    def _resolve_submission_sections(
+        self,
+        *,
+        manifest: BotProfilePackManifest,
+        submit_options: dict[str, Any],
+    ) -> list[str]:
+        requested_sections = submit_options.get("selected_sections")
+        if isinstance(requested_sections, list):
+            normalized_requested = [str(item or "").strip() for item in requested_sections if str(item or "").strip()]
+        elif isinstance(requested_sections, str):
+            normalized_requested = [item.strip() for item in requested_sections.split(",") if item.strip()]
+        else:
+            normalized_requested = []
+        if not normalized_requested:
+            return list(manifest.sections)
+        return self._resolve_export_sections(
+            pack_type=manifest.pack_type,
+            requested_sections=normalized_requested,
+        )
+
+    def _normalize_selected_item_paths(
+        self,
+        value: Any,
+        *,
+        selected_sections: list[str] | None = None,
+    ) -> list[str]:
+        if isinstance(value, list):
+            raw_items = [str(item or "").strip() for item in value]
+        elif isinstance(value, str):
+            raw_items = [item.strip() for item in value.split(",")]
+        else:
+            raw_items = []
+        allowed_sections = set(selected_sections or [])
+        out: list[str] = []
+        seen: set[str] = set()
+        for entry in raw_items:
+            item = str(entry or "").strip()
+            if not item:
+                continue
+            section = self._selection_root_section(item)
+            if not section:
+                raise ValueError("PROFILE_SECTION_ITEM_SELECTION_INVALID")
+            if allowed_sections and section not in allowed_sections:
+                raise ValueError("PROFILE_SECTION_ITEM_SELECTION_INVALID")
+            if item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _selection_root_section(path: str) -> str:
+        text = str(path or "").strip()
+        if not text:
+            return ""
+        segment = text.split(".", 1)[0]
+        segment = segment.split("[", 1)[0]
+        return segment
+
+    @staticmethod
+    def _requires_submission_materialization(
+        *,
+        manifest_sections: list[str],
+        selected_sections: list[str],
+        selected_item_paths: list[str],
+    ) -> bool:
+        if list(manifest_sections) != list(selected_sections):
+            return True
+        return bool(selected_item_paths)
+
+    def _materialize_submission_copy(
+        self,
+        *,
+        source_artifact: ProfilePackArtifact,
+        imported: ImportedProfilePack,
+        user_id: str,
+        selected_sections: list[str],
+        selected_item_paths: list[str],
+    ) -> tuple[ProfilePackArtifact, ImportedProfilePack]:
+        filtered_sections = self._materialize_target_sections(
+            imported=imported,
+            selected_sections=selected_sections,
+            selected_item_paths=selected_item_paths or None,
+        )
+        created_at = self.clock.utcnow().isoformat()
+        manifest = self._build_materialized_manifest(
+            source_manifest=imported.manifest,
+            sections=filtered_sections,
+            created_at=created_at,
+        )
+        archive_bytes = self._build_profile_pack_archive_bytes(
+            manifest=manifest,
+            sections=filtered_sections,
+        )
+        artifact_id = str(uuid4())
+        output_dir = self.output_root / "member-submissions"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filename = self._safe_filename(
+            f"{manifest.pack_id.replace('/', '__')}-{manifest.version}-{artifact_id[:8]}-submission.zip"
+        )
+        path = output_dir / filename
+        path.write_bytes(archive_bytes)
+        artifact = ProfilePackArtifact(
+            artifact_id=artifact_id,
+            pack_id=manifest.pack_id,
+            version=manifest.version,
+            exported_at=created_at,
+            path=path,
+            filename=filename,
+            sha256=hashlib.sha256(archive_bytes).hexdigest(),
+            size_bytes=len(archive_bytes),
+            manifest=manifest,
+            redaction_notes=[],
+            owner_user_id=str(user_id or "").strip(),
+        )
+        self._artifacts[artifact_id] = artifact
+
+        scan_summary = self.scan_service.to_dict(
+            self.scan_service.scan(
+                self._scan_payload(manifest, filtered_sections),
+                manifest=manifest,
+            )
+        )
+        signature_issue = self._verify_signature_issue(manifest)
+        compatibility, compatibility_issues = self._resolve_compatibility(
+            manifest,
+            sections=filtered_sections,
+            hash_mismatches=[],
+            signature_issue=signature_issue,
+        )
+        if compatibility == "compatible" and compatibility_issues:
+            compatibility = "degraded"
+        imported_record = ImportedProfilePack(
+            import_id=str(uuid4()),
+            imported_at=created_at,
+            filename=filename,
+            manifest=manifest,
+            sections=filtered_sections,
+            scan_summary=scan_summary,
+            compatibility=compatibility,
+            compatibility_issues=list(compatibility_issues),
+            user_id=str(user_id or "").strip(),
+            source_artifact_id=artifact_id,
+            import_origin="submission_materialized",
+            source_fingerprint=str(source_artifact.sha256 or "").strip(),
+        )
+        self._imports[imported_record.import_id] = imported_record
+        self._flush_state()
+        return artifact, imported_record
+
+    def _build_materialized_manifest(
+        self,
+        *,
+        source_manifest: BotProfilePackManifest,
+        sections: dict[str, Any],
+        created_at: str,
+    ) -> BotProfilePackManifest:
+        policy_payload = source_manifest.redaction_policy.model_dump()
+        policy_payload["include_sections"] = list(sections.keys())
+        manifest_payload: dict[str, Any] = {
+            "pack_type": source_manifest.pack_type,
+            "pack_id": source_manifest.pack_id,
+            "version": source_manifest.version,
+            "created_at": created_at,
+            "astrbot_version": source_manifest.astrbot_version,
+            "plugin_compat": source_manifest.plugin_compat,
+            "sections": list(sections.keys()),
+            "capabilities": self._infer_manifest_capabilities(
+                sections=sections,
+                pack_type=source_manifest.pack_type,
+            ),
+            "redaction_policy": policy_payload,
+            "hashes": {
+                BotProfilePackManifest.hash_key(section_name): self._hash_json(payload)
+                for section_name, payload in sections.items()
+            },
+        }
+        signature = self._build_signature(manifest_payload)
+        if signature:
+            manifest_payload["signature"] = signature
+        return BotProfilePackManifest.model_validate(manifest_payload)
+
+    @staticmethod
+    def _build_profile_pack_archive_bytes(
+        *,
+        manifest: BotProfilePackManifest,
+        sections: dict[str, Any],
+    ) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.json", json.dumps(manifest.model_dump(), ensure_ascii=False, indent=2))
+            for section_name, payload in sections.items():
+                zf.writestr(
+                    BotProfilePackManifest.hash_key(section_name),
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                )
+        return buffer.getvalue()
 
     def replace_pending_submissions(
         self,
@@ -730,6 +2078,25 @@ class ProfilePackService:
             raise ValueError("PROFILE_PACK_SUBMISSION_NOT_FOUND")
         return record
 
+    def withdraw_submission(
+        self,
+        *,
+        user_id: str,
+        submission_id: str,
+    ) -> ProfilePackSubmission:
+        submission = self.get_submission(submission_id=submission_id)
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id or str(submission.user_id or "").strip() != normalized_user_id:
+            raise ValueError("PROFILE_PACK_SUBMISSION_PERMISSION_DENIED")
+        if submission.status == PROFILE_PACK_SUBMISSION_WITHDRAWN:
+            return submission
+        if submission.status != PROFILE_PACK_SUBMISSION_PENDING:
+            raise ValueError("PROFILE_PACK_SUBMISSION_STATE_INVALID")
+        submission.status = PROFILE_PACK_SUBMISSION_WITHDRAWN
+        submission.updated_at = self.clock.utcnow().isoformat()
+        self._flush_state()
+        return submission
+
     def list_submissions(self, status: str = "") -> list[ProfilePackSubmission]:
         normalized_status = str(status or "").strip().lower()
         rows = list(self._submissions.values())
@@ -746,6 +2113,8 @@ class ProfilePackService:
         review_labels: list[str] | None = None,
     ) -> ProfilePackSubmission:
         submission = self.get_submission(submission_id=submission_id)
+        if submission.status != PROFILE_PACK_SUBMISSION_PENDING:
+            raise ValueError("PROFILE_PACK_SUBMISSION_STATE_INVALID")
         normalized = str(decision or "").strip().lower()
         if normalized not in {"approve", "approved", "reject", "rejected"}:
             raise ValueError("INVALID_PROFILE_PACK_SUBMISSION_DECISION")
@@ -1603,10 +2972,20 @@ class ProfilePackService:
         *,
         imported: ImportedProfilePack,
         selected_sections: list[str],
+        selected_item_paths: list[str] | None = None,
     ) -> dict[str, Any]:
         mode = imported.manifest.redaction_policy.mode
         if mode == "include_encrypted_secrets" and not self.secrets_encryption_key:
             raise ValueError("PROFILE_PACK_ENCRYPTION_KEY_REQUIRED")
+
+        normalized_item_paths = self._normalize_selected_item_paths(
+            selected_item_paths,
+            selected_sections=selected_sections,
+        )
+        paths_by_section: dict[str, list[str]] = {}
+        for path in normalized_item_paths:
+            section = self._selection_root_section(path)
+            paths_by_section.setdefault(section, []).append(path)
 
         out: dict[str, Any] = {}
         for section_name in selected_sections:
@@ -1615,8 +2994,92 @@ class ProfilePackService:
             payload = json.loads(json.dumps(imported.sections[section_name], ensure_ascii=False))
             if mode == "include_encrypted_secrets":
                 payload = self._decrypt_section_secrets(payload, path=section_name)
+            section_paths = paths_by_section.get(section_name, [])
+            if section_paths and section_name not in section_paths:
+                payload = self._select_payload_paths(
+                    payload,
+                    base_path=section_name,
+                    selected_paths=section_paths,
+                )
             out[section_name] = payload
         return out
+
+    def _select_payload_paths(
+        self,
+        value: Any,
+        *,
+        base_path: str,
+        selected_paths: list[str],
+    ) -> Any:
+        matched: set[str] = set()
+        result = self._copy_selected_payload(
+            value=value,
+            current_path=base_path,
+            selected_paths=set(selected_paths),
+            matched_paths=matched,
+        )
+        if result in (None, {}, []):
+            raise ValueError("PROFILE_SECTION_ITEM_SELECTION_INVALID")
+        if matched != set(selected_paths):
+            raise ValueError("PROFILE_SECTION_ITEM_SELECTION_INVALID")
+        return result
+
+    def _copy_selected_payload(
+        self,
+        *,
+        value: Any,
+        current_path: str,
+        selected_paths: set[str],
+        matched_paths: set[str],
+    ) -> Any:
+        if current_path in selected_paths:
+            matched_paths.add(current_path)
+            return json.loads(json.dumps(value, ensure_ascii=False))
+
+        if isinstance(value, dict):
+            out: dict[str, Any] = {}
+            for key, nested in value.items():
+                child_path = f"{current_path}.{key}" if current_path else str(key)
+                if not self._selection_path_may_match(child_path, selected_paths):
+                    continue
+                copied = self._copy_selected_payload(
+                    value=nested,
+                    current_path=child_path,
+                    selected_paths=selected_paths,
+                    matched_paths=matched_paths,
+                )
+                if copied not in (None, {}, []):
+                    out[str(key)] = copied
+            return out
+
+        if isinstance(value, list):
+            out: list[Any] = []
+            for index, nested in enumerate(value):
+                child_path = f"{current_path}[{index}]"
+                if not self._selection_path_may_match(child_path, selected_paths):
+                    continue
+                copied = self._copy_selected_payload(
+                    value=nested,
+                    current_path=child_path,
+                    selected_paths=selected_paths,
+                    matched_paths=matched_paths,
+                )
+                if copied not in (None, {}, []):
+                    out.append(copied)
+            return out
+
+        return None
+
+    @staticmethod
+    def _selection_path_may_match(current_path: str, selected_paths: set[str]) -> bool:
+        for item in selected_paths:
+            if item == current_path:
+                return True
+            if item.startswith(f"{current_path}."):
+                return True
+            if item.startswith(f"{current_path}["):
+                return True
+        return False
 
     def _encrypted_secret_issue(
         self,
@@ -1952,6 +3415,7 @@ class ProfilePackService:
                     size_bytes=int(item.get("size_bytes", 0) or 0),
                     manifest=manifest,
                     redaction_notes=list(item.get("redaction_notes", []) or []),
+                    owner_user_id=str(item.get("owner_user_id", "") or ""),
                 )
             except Exception:
                 continue
@@ -1970,6 +3434,10 @@ class ProfilePackService:
                     scan_summary=dict(item.get("scan_summary", {}) or {}),
                     compatibility=str(item.get("compatibility", "compatible") or "compatible"),
                     compatibility_issues=list(item.get("compatibility_issues", []) or []),
+                    user_id=str(item.get("user_id", "") or ""),
+                    source_artifact_id=str(item.get("source_artifact_id", "") or ""),
+                    import_origin=str(item.get("import_origin", "") or ""),
+                    source_fingerprint=str(item.get("source_fingerprint", "") or ""),
                 )
             except Exception:
                 continue
@@ -2095,6 +3563,7 @@ class ProfilePackService:
                     "size_bytes": item.size_bytes,
                     "manifest": item.manifest.model_dump(),
                     "redaction_notes": list(item.redaction_notes),
+                    "owner_user_id": item.owner_user_id,
                 }
             )
         imports = []
@@ -2109,6 +3578,10 @@ class ProfilePackService:
                     "scan_summary": item.scan_summary,
                     "compatibility": item.compatibility,
                     "compatibility_issues": list(item.compatibility_issues),
+                    "user_id": item.user_id,
+                    "source_artifact_id": item.source_artifact_id,
+                    "import_origin": item.import_origin,
+                    "source_fingerprint": item.source_fingerprint,
                 }
             )
         submissions = []

@@ -35,6 +35,15 @@
 1. `install_options.source_preference=generated` は実際に package 解決経路へ反映済み。
 2. それ以外の option block は正規化・永続化・UI/API 返却までは実装済みだが、下流の governance 意味論まで全面適用はまだ完了していない。
 
+次の収束項目:
+
+1. `/member` の top-bar 主操作は汎用的な config import 表現ではなく、`Import Local AstrBot Config` 相当の明示文言へ変更する。
+2. `/member` の top utility には member 安全な入口だけを残す:
+   - `Member Console`
+   - `Market Hub`
+3. reviewer/admin/full console リンクと developer-mode toggle は CSS で隠すのではなく、member DOM から除去する。
+4. 生の AstrBot import 成功後は、section 確認用の upload review modal を必ず開く。
+
 ## 1. 目標
 
 既存契約と権限境界を維持したまま、ユーザー向け WebUI を次の 4 ワークフローに再編する。
@@ -58,7 +67,7 @@
 1. Top bar:
    - Spotlight 型グローバル検索
    - 言語切替
-   - 常時表示 `刷新本地已有配置`
+   - 常時表示 `Import Local AstrBot Config`
 2. 主表示: インストール済み一覧。
 3. 補助表示:
    - アップロード Drop zone + オプション
@@ -132,3 +141,5 @@
    制御: 高度操作は削除ではなく折りたたみ。
 3. リスク: UI と backend の capability ドリフト  
    制御: 新 UI 操作は `CONTROL_CAPABILITY_MAP` 反映後に公開。
+4. リスク: member DOM に特権 console 導線が残り続ける  
+   制御: `member.html` から特権リンク/トグルを除去し、権限制御は server 側でも継続する。

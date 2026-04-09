@@ -172,6 +172,13 @@ class MarketService:
     def get_submission(self, submission_id: str) -> CommunitySubmission:
         return self._submissions[submission_id]
 
+    def set_submission_package_artifact(self, submission_id: str, package_artifact: dict | None) -> CommunitySubmission:
+        submission = self.get_submission(submission_id)
+        submission.package_artifact = dict(package_artifact or {}) if isinstance(package_artifact, dict) else None
+        submission.updated_at = self.clock.utcnow()
+        self._flush_state()
+        return submission
+
     def list_submissions(self, status: str | None = None) -> list[CommunitySubmission]:
         values = list(self._submissions.values())
         if status:
@@ -265,6 +272,19 @@ class MarketService:
 
     def get_published_template(self, template_id: str) -> PublishedTemplate | None:
         return self._published.get(template_id)
+
+    def set_published_package_artifact(
+        self,
+        template_id: str,
+        package_artifact: dict | None,
+    ) -> PublishedTemplate | None:
+        published = self._published.get(template_id)
+        if published is None:
+            return None
+        published.package_artifact = dict(package_artifact or {}) if isinstance(package_artifact, dict) else None
+        published.published_at = self.clock.utcnow()
+        self._flush_state()
+        return published
 
     def publish_official_template(
         self,

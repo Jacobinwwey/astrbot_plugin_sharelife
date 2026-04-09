@@ -59,11 +59,12 @@ async function main() {
     assert.equal(await page.locator("#memberSpotlightShell").isVisible(), true)
     assert.equal(await page.locator('[data-i18n-key="market.hub.heading"]').count(), 0)
     assert.equal(await page.locator("#memberUploadDropzone").isVisible(), true)
+    assert.equal(await page.locator("#btnRefreshMemberInstallationsInline").isVisible(), true)
     await page.waitForFunction(() => {
       const node = document.querySelector("#memberInstallationsState")
       return node && /Local installations:|No local installations yet\./i.test(String(node.textContent || ""))
     })
-    await page.click("#btnRefreshMemberInstallations")
+    await page.click("#btnRefreshMemberInstallationsInline")
     await page.waitForFunction(() => {
       const node = document.querySelector("#memberInstallationsState")
       return node && /Local installations:/i.test(String(node.textContent || ""))
@@ -117,6 +118,82 @@ async function main() {
     assert.equal(await page.locator("#marketReviewerConsoleLink").isVisible(), false)
     assert.equal(await page.locator("#marketAdminConsoleLink").isVisible(), false)
     assert.equal(await page.locator("#marketFullConsoleLink").isVisible(), false)
+    await page.waitForFunction(() => {
+      const search = document.querySelector("#marketGlobalSearch")
+      const detailArea = document.querySelector("#marketDetailArea")
+      const cards = document.querySelectorAll("#marketCatalogGrid .template-card")
+      return (
+        search &&
+        !document.querySelector("#marketCompareStrip") &&
+        !detailArea &&
+        cards.length >= 1
+      )
+    })
+    await page.fill("#marketGlobalSearch", "profile/official-starter")
+    await page.waitForFunction(() => {
+      const cards = Array.from(document.querySelectorAll("#marketCatalogGrid .template-card"))
+      return cards.length >= 1 && cards.some((card) => /profile\/official-starter/i.test(String(card.textContent || "")))
+    })
+    await page.fill("#marketGlobalSearch", "官方")
+    await page.waitForFunction(() => {
+      const cards = Array.from(document.querySelectorAll("#marketCatalogGrid .template-card"))
+      return cards.length >= 1 && cards.some((card) => /Official/i.test(String(card.textContent || "")))
+    })
+    await page.fill("#marketGlobalSearch", "profile/official-starter")
+    await page.waitForFunction(() => {
+      const cards = Array.from(document.querySelectorAll("#marketCatalogGrid .template-card"))
+      return cards.length >= 1
+    })
+    const initialLikeCount = Number(
+      await page.locator("#marketCatalogGrid [data-market-like-count]").first().textContent(),
+    )
+    await page.locator("#marketCatalogGrid [data-market-like-button]").first().click()
+    await page.waitForFunction((beforeCount) => {
+      const button = document.querySelector("#marketCatalogGrid [data-market-like-button]")
+      const count = Number(document.querySelector("#marketCatalogGrid [data-market-like-count]")?.textContent || "0")
+      return button && button.getAttribute("aria-pressed") === "true" && count === beforeCount + 1
+    }, initialLikeCount)
+    await page.click("#marketCatalogGrid .template-card .btn-ghost")
+    await page.waitForURL(/\/market\/packs\/profile\/official-starter/)
+    await page.waitForFunction(() => {
+      const detailArea = document.querySelector("#marketDetailArea")
+      const detailViewport = String(document.querySelector("#marketDetailVariantViewport")?.textContent || "")
+      const installOptions = document.querySelector("#marketDetailInstallOptionsShell")
+      const sectionList = document.querySelector("#marketInstallSectionList")
+      const actionList = document.querySelector(".market-detail-v3-action-list")
+      const trialButton = document.querySelector("#btnMarketDetailTrial")
+      const installButton = document.querySelector("#btnMarketDetailInstall")
+      const compareButton = document.querySelector("#btnMarketCatalogCompare")
+      const downloadButton = document.querySelector("#btnMarketCatalogDownload")
+      const installSectionSlot = document.querySelector('[data-market-detail-slot="install_sections"]')
+      const installOptionSlot = document.querySelector('[data-market-detail-slot="install_options"]')
+      const variantTabs = document.querySelector("#marketDetailVariantTabs")
+      const uploadDropzone = document.querySelector("#marketUploadDropzone")
+      return (
+        detailArea &&
+        !detailArea.classList.contains("hidden") &&
+        installOptions &&
+        sectionList &&
+        actionList &&
+        trialButton &&
+        installButton &&
+        compareButton &&
+        downloadButton &&
+        installSectionSlot &&
+        installOptionSlot &&
+        !document.querySelector("#marketDetailActionCluster") &&
+        !document.querySelector('[data-market-detail-slot="primary_actions"]') &&
+        actionList.contains(trialButton) &&
+        actionList.contains(installButton) &&
+        actionList.contains(compareButton) &&
+        actionList.contains(downloadButton) &&
+        installSectionSlot.contains(sectionList) &&
+        installOptionSlot.contains(installOptions) &&
+        !variantTabs &&
+        !uploadDropzone &&
+        /Public facts|公開情報|公开信息/.test(detailViewport)
+      )
+    })
 
     await page.goto(`${baseUrl}/reviewer`, { waitUntil: "networkidle" })
     await page.waitForFunction(() => {
@@ -802,77 +879,51 @@ async function main() {
     }
     await page.route(/\/api\/profile-pack\/catalog\/insights(?:\?.*)?$/, insightsDelay)
     await page.goto(`${baseUrl}/market`, { waitUntil: "networkidle" })
-    assert.equal(await page.locator("#marketUploadDropzone").isVisible(), true)
-    await page.fill("#marketTemplateId", "community/basic")
-    await page.selectOption("#marketInstallSourcePreference", "generated")
-    await page.click("#btnMarketTemplateInstall")
     await page.waitForFunction(() => {
-      const details = String(document.querySelector("#marketDetails")?.textContent || "")
-      return (
-        /"template_id":\s*"community\/basic"/.test(details) &&
-        /"source":\s*"generated"/.test(details)
-      )
+      const cards = document.querySelectorAll("#marketCatalogGrid .template-card")
+      return cards.length >= 1
     })
-    await page.click("#btnMarketRefreshInstallations")
-    await page.waitForFunction(() => {
-      const rows = document.querySelectorAll("#marketInstallationsList .member-install-item")
-      if (!rows.length) return false
-      return /community\/basic/i.test(String(rows[0].textContent || ""))
-    })
-    await page.click("#btnMarketListSubmissions")
-    await page.waitForFunction(() => {
-      const state = document.querySelector("#marketSubmissionsState")
-      const rows = document.querySelectorAll("#marketSubmissionsList .member-task-item")
-      if (!state) return false
-      if (/Failed to load/i.test(String(state.textContent || ""))) return false
-      return rows.length >= 1
-    })
-    await page.locator("#marketSubmissionsList .member-task-item").first().click()
-    await page.waitForFunction(() => {
-      const details = String(document.querySelector("#marketDetails")?.textContent || "")
-      return /"submission_id":\s*"/.test(details)
-    })
-    await page.click("#btnMarketListProfilePackSubmissions")
-    await page.waitForFunction(() => {
-      const state = document.querySelector("#marketProfilePackSubmissionsState")
-      const rows = document.querySelectorAll("#marketProfilePackSubmissionsList .member-task-item")
-      if (!state) return false
-      if (/Failed to load/i.test(String(state.textContent || ""))) return false
-      return rows.length >= 1
-    })
-    await page.locator("#marketProfilePackSubmissionsList .member-task-item").first().click()
-    await page.waitForFunction(() => {
-      const button = document.querySelector("#btnMarketDownloadProfilePackSubmission")
-      return Boolean(button) && button.disabled === false
-    })
-    await page.click("#btnMarketDownloadProfilePackSubmission")
-    await page.waitForFunction(
-      () => {
-        const details = String(document.querySelector("#marketDetails")?.textContent || "")
-        return /"status":\s*"downloaded"/.test(details) && /"submission_id":\s*"/.test(details)
-      },
-      { timeout: 60000 },
-    )
+    const selectedMarketPackId = String(
+      await page.locator("#marketCatalogGrid .template-card .template-card-pack-id").first().textContent(),
+    ).trim()
+    assert.ok(selectedMarketPackId.length > 0)
+    await page.locator("#marketCatalogGrid .template-card").first().click()
     await page.waitForFunction(() => {
       const panel = document.querySelector("#marketDetailPanel")
-      return Boolean(panel) && panel.open === false
+      return Boolean(panel) && panel.open === true
+    })
+    assert.equal(await page.locator("#marketUploadDropzone").count(), 0)
+    await page.goto(`${baseUrl}/member`, { waitUntil: "networkidle" })
+    await page.fill("#trialTemplateId", "community/basic")
+    await page.click("#btnInstall")
+    await page.click("#btnRefreshMemberInstallationsInline")
+    await page.waitForFunction(() => {
+      const rows = document.querySelectorAll("#memberInstallationsList .member-install-item")
+      return rows.length >= 1
+    })
+    const initialTaskCount = await page.locator("#memberTaskQueueList .member-task-item").count()
+    await page.locator('#memberInstallationsList [data-member-install-action="reinstall"]').first().click()
+    await page.waitForFunction((beforeCount) => {
+      return document.querySelectorAll("#memberTaskQueueList .member-task-item").length > beforeCount
+    }, initialTaskCount)
+    await page.locator('#memberInstallationsList [data-member-install-action="uninstall"]').first().click()
+    await page.waitForFunction(() => {
+      const rows = document.querySelectorAll("#memberInstallationsList .member-install-item")
+      return rows.length === 0
+    })
+    await page.goto(`${baseUrl}/market`, { waitUntil: "networkidle" })
+    await page.waitForFunction(() => {
+      const cards = document.querySelectorAll("#marketCatalogGrid .template-card")
+      return cards.length >= 1
     })
     await page.waitForFunction(() => {
       const facets = document.querySelectorAll('#marketFacetFilters input[type="checkbox"]')
       return facets.length >= 1
     })
     await page.waitForFunction(() => {
-      const metrics = document.querySelectorAll("#marketCatalogMetrics .market-metric-card")
-      return metrics.length >= 1
-    })
-    await page.waitForFunction(() => {
-      const cards = document.querySelectorAll("#marketCatalogGrid .template-card")
-      return cards.length >= 1
-    })
-    await page.waitForFunction(() => {
-      const featuredState = String(document.querySelector("#marketFeaturedState")?.textContent || "")
-      const trendingState = String(document.querySelector("#marketTrendingState")?.textContent || "")
-      return /ready/i.test(featuredState) && /ready/i.test(trendingState)
+      const total = Number(document.querySelector("#marketTotalCount")?.textContent || "0")
+      const shown = Number(document.querySelector("#marketResultCount")?.textContent || "0")
+      return total >= 1 && shown >= 1
     })
     const marketSnapshot = await page.evaluate(() => {
       const cards = Array.from(document.querySelectorAll("#marketCatalogGrid .template-card"))
@@ -890,6 +941,12 @@ async function main() {
       const packInput = document.querySelector("#marketPackId")
       return Boolean(panel) && panel.open === true && String(packInput?.value || "").trim().length > 0
     })
+    await page.goto(`${baseUrl}/market`, { waitUntil: "networkidle" })
+    await page.waitForFunction(() => {
+      const cards = document.querySelectorAll("#marketCatalogGrid .template-card")
+      const search = document.querySelector("#marketGlobalSearch")
+      return cards.length >= 1 && Boolean(search)
+    })
 
     await page.fill("#marketGlobalSearch", marketSnapshot.firstTitle)
     await page.waitForFunction(() => {
@@ -902,7 +959,7 @@ async function main() {
       return String(params.get("sort") || "") === "recent"
     })
     const openFilterDrawerBtn = page.locator("#btnMarketOpenFilterDrawer")
-    if (await openFilterDrawerBtn.count()) {
+    if ((await openFilterDrawerBtn.count()) && await openFilterDrawerBtn.first().isVisible()) {
       await openFilterDrawerBtn.first().click()
       await page.waitForFunction(() => {
         const sidebar = document.querySelector("#marketFilterSidebar")
@@ -912,17 +969,6 @@ async function main() {
         const rect = sidebar.getBoundingClientRect()
         return rect.right > 0
       })
-    }
-    const firstFacet = page.locator('#marketFacetFilters input[type="checkbox"]').first()
-    if (await firstFacet.count()) {
-      const facetGroup = await firstFacet.getAttribute("data-market-facet-group")
-      await firstFacet.check()
-      if (facetGroup) {
-        await page.waitForFunction((group) => {
-          const params = new URLSearchParams(location.search)
-          return params.has(`facet_${group}`)
-        }, facetGroup)
-      }
     }
     assert.ok(insightsRequestCount >= 1)
     await page.unroute(/\/api\/profile-pack\/catalog\/insights(?:\?.*)?$/, insightsDelay)

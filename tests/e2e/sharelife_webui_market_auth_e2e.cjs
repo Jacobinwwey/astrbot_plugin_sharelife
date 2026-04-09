@@ -31,8 +31,7 @@ async function main() {
       )
     })
 
-    assert.equal(await page.locator("#marketAuthUserId").isVisible(), true)
-    await page.fill("#marketAuthUserId", "member-auth-e2e")
+    assert.equal(await page.locator("#marketAuthPassword").isVisible(), true)
     await page.fill("#marketAuthPassword", "member-secret")
     await page.click("#btnMarketLogin")
 
@@ -41,25 +40,9 @@ async function main() {
       return /role:\s*member/i.test(roleLine)
     })
 
-    await page.fill("#marketTemplateId", "community/auth-market")
-    if (await page.locator("#marketSubmitVersion").count()) {
-      await page.fill("#marketSubmitVersion", "1.0.0")
-    }
-    await page.click("#btnMarketTemplateSubmit")
-
-    await page.click("#btnMarketListSubmissions")
     await page.waitForFunction(() => {
-      const state = String(document.querySelector("#marketSubmissionsState")?.textContent || "")
-      if (/Failed to load/i.test(state)) return false
-      const rows = document.querySelectorAll("#marketSubmissionsList .member-task-item")
-      return rows.length >= 1
-    })
-    const targetRow = page.locator("#marketSubmissionsList .member-task-item", { hasText: "community/auth-market" }).first()
-    await targetRow.click()
-
-    await page.waitForFunction(() => {
-      const details = String(document.querySelector("#marketDetails")?.textContent || "")
-      return /"template_id":\s*"community\/auth-market"/.test(details) && /"user_id":\s*"member-auth-e2e"/.test(details)
+      const cards = document.querySelectorAll("#marketCatalogGrid .template-card")
+      return cards.length >= 1
     })
 
     const token = await page.evaluate(async () => {
@@ -68,7 +51,6 @@ async function main() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           role: "member",
-          user_id: "member-auth-e2e",
           password: "member-secret",
         }),
       })
@@ -79,7 +61,7 @@ async function main() {
     assert.equal(Boolean(token), true)
 
     const mismatchStatus = await page.evaluate(async (bearerToken) => {
-      const denied = await fetch("/api/member/submissions?user_id=webui-user", {
+      const denied = await fetch("/api/member/submissions?user_id=other-member", {
         headers: { Authorization: `Bearer ${bearerToken}` },
       })
       return denied.status
@@ -87,7 +69,7 @@ async function main() {
     assert.equal(mismatchStatus, 403)
 
     const ownerStatus = await page.evaluate(async (bearerToken) => {
-      const allowed = await fetch("/api/member/submissions?user_id=member-auth-e2e", {
+      const allowed = await fetch("/api/member/submissions?user_id=webui-user", {
         headers: { Authorization: `Bearer ${bearerToken}` },
       })
       return allowed.status

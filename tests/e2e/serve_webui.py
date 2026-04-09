@@ -32,12 +32,16 @@ sys.modules.setdefault("astrbot.api", astrbot_api_module)
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_artifact_mirror import ArtifactMirrorService
+from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_preferences import PreferenceService
 from sharelife.application.services_profile_pack import ProfilePackService
 from sharelife.application.services_queue import RetryQueueService
+from sharelife.application.services_reviewer_auth import ReviewerAuthService
 from sharelife.application.services_storage_backup import StorageBackupService
+from sharelife.application.services_transfer_jobs import TransferJobService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
 from sharelife.infrastructure.json_state_store import JsonStateStore
@@ -86,7 +90,12 @@ def build_server(
         notifier=notifier,
     )
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=output_root, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=output_root,
+        clock=clock,
+        artifact_state_store=JsonStateStore(output_root / "artifact_state.json"),
+    )
     runtime = InMemoryRuntimeBridge(
         initial_state={
             "astrbot_core": {"name": "sharelife-e2e-bot"},
@@ -94,7 +103,11 @@ def build_server(
             "plugins": {"sharelife": {"enabled": True}},
         }
     )
-    apply = ApplyService(runtime=runtime)
+    continuity = ConfigContinuityService(
+        state_store=JsonStateStore(output_root / "continuity_state.json"),
+        clock=clock,
+    )
+    apply = ApplyService(runtime=runtime, continuity_service=continuity)
     profile_pack = ProfilePackService(
         runtime=runtime,
         apply_service=apply,
@@ -109,6 +122,17 @@ def build_server(
         clock=clock,
     )
     audit = AuditService(clock=clock)
+    reviewer_auth = ReviewerAuthService(
+        state_store=JsonStateStore(output_root / "identity_state.json"),
+    )
+    transfer_jobs = TransferJobService(
+        clock=clock,
+        state_store=JsonStateStore(output_root / "transfer_state.json"),
+    )
+    artifact_mirror = ArtifactMirrorService(
+        artifact_store=package.artifact_store,
+        clock=clock,
+    )
     api = SharelifeApiV1(
         preference_service=preferences,
         retry_queue_service=queue,
@@ -117,8 +141,11 @@ def build_server(
         package_service=package,
         apply_service=apply,
         audit_service=audit,
+        artifact_mirror_service=artifact_mirror,
         profile_pack_service=profile_pack,
+        reviewer_auth_service=reviewer_auth,
         storage_backup_service=storage_backup,
+        transfer_job_service=transfer_jobs,
     )
     web_api = SharelifeWebApiV1(api=api, notifier=notifier)
     web_root = REPO_ROOT / "sharelife" / "webui"

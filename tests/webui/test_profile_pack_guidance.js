@@ -8,6 +8,8 @@ const {
   resolveActionPrefill,
   resolveIssueActionCode,
   buildCompatibilityIssueView,
+  formatIssueLabel,
+  formatIssueLabels,
 } = require("../../sharelife/webui/profile_pack_guidance.js")
 
 test("describeSection exposes metadata for known and unknown sections", () => {
@@ -105,4 +107,40 @@ test("resolveIssueActionCode maps issue code to shortcut action", () => {
     "sync_knowledge_base_storage",
   )
   assert.equal(resolveIssueActionCode("signature_invalid"), "")
+})
+
+test("formatIssueLabel localizes known issues and preserves section context", () => {
+  const messages = {
+    "profile_pack.issue.astrbot_raw_import_converted": "Converted from raw AstrBot",
+    "profile_pack.issue.section_hash_mismatch_with_section": "Section mismatch: {section}",
+  }
+  const t = (key, fallback = "") => (Object.hasOwn(messages, key) ? messages[key] : fallback)
+  const f = (key, fallback = "", tokens = {}) =>
+    String(t(key, fallback)).replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, token) => String(tokens[token] ?? ""))
+
+  assert.equal(
+    formatIssueLabel("astrbot_raw_import_converted", { t, f }),
+    "Converted from raw AstrBot",
+  )
+  assert.equal(
+    formatIssueLabel("section_hash_mismatch:knowledge_base", { t, f }),
+    "Section mismatch: knowledge_base",
+  )
+  assert.equal(formatIssueLabel("unknown_new_issue", { t, f }), "unknown_new_issue")
+})
+
+test("formatIssueLabels deduplicates and formats issue lists", () => {
+  const messages = {
+    "profile_pack.issue.astrbot_raw_import_converted": "Converted from raw AstrBot",
+  }
+  const t = (key, fallback = "") => (Object.hasOwn(messages, key) ? messages[key] : fallback)
+
+  assert.deepEqual(
+    formatIssueLabels([
+      "astrbot_raw_import_converted",
+      "astrbot_raw_import_converted",
+      "unknown_new_issue",
+    ], { t }),
+    ["Converted from raw AstrBot", "unknown_new_issue"],
+  )
 })

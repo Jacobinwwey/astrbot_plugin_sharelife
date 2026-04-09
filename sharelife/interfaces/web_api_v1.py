@@ -118,7 +118,7 @@ class SharelifeWebApiV1:
             version=version,
             upload_options=upload_options,
         )
-        return self._ok(response, "template submitted")
+        return self._from_api_error_or_ok(response, default_message="template submitted")
 
     def submit_template_package(
         self,
@@ -172,7 +172,7 @@ class SharelifeWebApiV1:
                 status_code=413,
                 data=response,
             )
-        return self._ok(response, "template package submitted")
+        return self._from_api_error_or_ok(response, default_message="template package submitted")
 
     def request_trial(self, user_id: str, session_id: str, template_id: str) -> WebApiResult:
         if not template_id:
@@ -238,6 +238,65 @@ class SharelifeWebApiV1:
         response = self.api.refresh_member_installations(user_id=user_id, limit=limit)
         return self._ok(response, "member installations refreshed")
 
+    def list_member_tasks(self, user_id: str, limit: int = 50) -> WebApiResult:
+        response = self.api.list_member_tasks(user_id=user_id, limit=limit)
+        return self._ok(response, "member tasks listed")
+
+    def refresh_member_tasks(self, user_id: str, limit: int = 50) -> WebApiResult:
+        response = self.api.refresh_member_tasks(user_id=user_id, limit=limit)
+        return self._ok(response, "member tasks refreshed")
+
+    def list_member_transfer_jobs(
+        self,
+        user_id: str,
+        direction: str = "",
+        status: str = "",
+        limit: int = 50,
+    ) -> WebApiResult:
+        response = self.api.list_member_transfer_jobs(
+            user_id=user_id,
+            direction=direction,
+            status=status,
+            limit=limit,
+        )
+        return self._ok(response, "member transfers listed")
+
+    def refresh_member_transfer_jobs(
+        self,
+        user_id: str,
+        direction: str = "",
+        status: str = "",
+        limit: int = 50,
+    ) -> WebApiResult:
+        response = self.api.refresh_member_transfer_jobs(
+            user_id=user_id,
+            direction=direction,
+            status=status,
+            limit=limit,
+        )
+        return self._ok(response, "member transfers refreshed")
+
+    def uninstall_member_installation(self, user_id: str, template_id: str) -> WebApiResult:
+        response = self.api.uninstall_member_installation(
+            user_id=user_id,
+            template_id=template_id,
+        )
+        if response.get("error") == "template_id_required":
+            return self._error(
+                code="template_id_required",
+                message="template_id is required",
+                status_code=400,
+                data=response,
+            )
+        if response.get("error") == "member_installation_not_found":
+            return self._error(
+                code="member_installation_not_found",
+                message="member installation not found",
+                status_code=404,
+                data=response,
+            )
+        return self._ok(response, "member installation removed")
+
     def member_list_submissions(
         self,
         user_id: str,
@@ -267,14 +326,23 @@ class SharelifeWebApiV1:
         response = self.api.member_get_submission_detail(user_id=user_id, submission_id=submission_id)
         return self._from_api_error_or_ok(response, default_message="member submission detail ready")
 
-    def member_get_submission_package(self, user_id: str, submission_id: str) -> WebApiResult:
+    def member_get_submission_package(
+        self,
+        user_id: str,
+        submission_id: str,
+        idempotency_key: str = "",
+    ) -> WebApiResult:
         if not submission_id:
             return self._error(
                 code="submission_id_required",
                 message="submission_id is required",
                 status_code=400,
             )
-        response = self.api.member_get_submission_package(user_id=user_id, submission_id=submission_id)
+        response = self.api.member_get_submission_package(
+            user_id=user_id,
+            submission_id=submission_id,
+            idempotency_key=idempotency_key,
+        )
         return self._from_api_error_or_ok(response, default_message="member submission package ready")
 
     def generate_prompt_bundle(self, template_id: str) -> WebApiResult:
@@ -360,6 +428,26 @@ class SharelifeWebApiV1:
         return self._from_api_error_or_ok(
             response,
             default_message="member profile pack submissions listed",
+        )
+
+    def member_withdraw_profile_pack_submission(
+        self,
+        user_id: str,
+        submission_id: str,
+    ) -> WebApiResult:
+        if not submission_id:
+            return self._error(
+                code="submission_id_required",
+                message="submission_id is required",
+                status_code=400,
+            )
+        response = self.api.member_withdraw_profile_pack_submission(
+            user_id=user_id,
+            submission_id=submission_id,
+        )
+        return self._from_api_error_or_ok(
+            response,
+            default_message="member profile pack submission withdrawn",
         )
 
     def member_get_profile_pack_submission_detail(
@@ -606,6 +694,56 @@ class SharelifeWebApiV1:
             admin_id=admin_id,
         )
         return self._from_api_error_or_ok(response, default_message="storage restore cancelled")
+
+    def admin_list_artifacts(
+        self,
+        role: str,
+        artifact_kind: str = "",
+        limit: int = 50,
+    ) -> WebApiResult:
+        response = self.api.admin_list_artifacts(
+            role=role,
+            artifact_kind=artifact_kind,
+            limit=max(1, min(int(limit or 50), 200)),
+        )
+        return self._from_api_error_or_ok(response, default_message="artifacts listed")
+
+    def admin_mirror_artifact(
+        self,
+        role: str,
+        artifact_id: str,
+        admin_id: str = "admin",
+        remote_path: str = "",
+        rclone_binary: str = "rclone",
+        timeout_seconds: int = 300,
+        bwlimit: str = "",
+        encryption_required: bool = True,
+        remote_encryption_verified: bool = False,
+    ) -> WebApiResult:
+        if not artifact_id:
+            return self._error(
+                code="artifact_id_required",
+                message="artifact_id is required",
+                status_code=400,
+            )
+        if not remote_path:
+            return self._error(
+                code="remote_path_required",
+                message="remote_path is required",
+                status_code=400,
+            )
+        response = self.api.admin_mirror_artifact(
+            role=role,
+            artifact_id=artifact_id,
+            admin_id=admin_id,
+            remote_path=remote_path,
+            rclone_binary=rclone_binary,
+            timeout_seconds=int(timeout_seconds or 300),
+            bwlimit=bwlimit,
+            encryption_required=bool(encryption_required),
+            remote_encryption_verified=bool(remote_encryption_verified),
+        )
+        return self._from_api_error_or_ok(response, default_message="artifact mirrored")
 
     def admin_create_reviewer_invite(
         self,
@@ -881,7 +1019,7 @@ class SharelifeWebApiV1:
         return self._from_api_error_or_ok(response, default_message="plan rolled back")
 
     def admin_list_continuity(self, role: str, limit: int = 20) -> WebApiResult:
-        response = self.api.admin_list_continuity(role=role, limit=max(1, min(limit, 200)))
+        response = self.api.admin_list_continuity(role=role, limit=limit)
         return self._from_api_error_or_ok(response, default_message="continuity entries listed")
 
     def admin_get_continuity(self, role: str, plan_id: str) -> WebApiResult:
@@ -1030,13 +1168,55 @@ class SharelifeWebApiV1:
                 code="profile_pack_payload_required",
                 message="filename and package content are required",
                 status_code=400,
-            )
+        )
         response = self.api.admin_import_profile_pack(
             role=role,
             filename=filename,
             content_base64=content_base64,
         )
         return self._from_api_error_or_ok(response, default_message="profile pack imported")
+
+    def member_import_profile_pack(
+        self,
+        user_id: str,
+        filename: str,
+        content_base64: str,
+    ) -> WebApiResult:
+        if not filename or not content_base64:
+            return self._error(
+                code="profile_pack_payload_required",
+                message="filename and package content are required",
+                status_code=400,
+            )
+        response = self.api.member_import_profile_pack(
+            user_id=user_id,
+            filename=filename,
+            content_base64=content_base64,
+        )
+        return self._from_api_error_or_ok(response, default_message="member profile pack imported")
+
+    def member_import_local_astrbot_config(self, user_id: str) -> WebApiResult:
+        response = self.api.member_import_local_astrbot_config(user_id=user_id)
+        return self._from_api_error_or_ok(
+            response,
+            default_message="local AstrBot config imported",
+        )
+
+    def member_delete_profile_pack_import(self, user_id: str, import_id: str) -> WebApiResult:
+        if not import_id:
+            return self._error(
+                code="profile_import_not_found",
+                message="profile pack import record not found",
+                status_code=404,
+            )
+        response = self.api.member_delete_profile_pack_import(
+            user_id=user_id,
+            import_id=import_id,
+        )
+        return self._from_api_error_or_ok(
+            response,
+            default_message="member profile pack import deleted",
+        )
 
     def admin_import_profile_pack_from_export(self, role: str, artifact_id: str) -> WebApiResult:
         if not artifact_id:
@@ -1086,6 +1266,13 @@ class SharelifeWebApiV1:
     def admin_list_profile_pack_imports(self, role: str, limit: int = 50) -> WebApiResult:
         response = self.api.admin_list_profile_pack_imports(role=role, limit=max(1, min(limit, 200)))
         return self._from_api_error_or_ok(response, default_message="profile pack imports listed")
+
+    def member_list_profile_pack_imports(self, user_id: str, limit: int = 50) -> WebApiResult:
+        response = self.api.member_list_profile_pack_imports(
+            user_id=user_id,
+            limit=max(1, min(limit, 200)),
+        )
+        return self._from_api_error_or_ok(response, default_message="member profile pack imports listed")
 
     def admin_profile_pack_dryrun(
         self,
@@ -1294,10 +1481,14 @@ class SharelifeWebApiV1:
             "permission_denied": 403,
             "package_service_unavailable": 503,
             "profile_pack_service_unavailable": 503,
+            "astrbot_local_config_not_found": 404,
+            "astrbot_local_config_read_failed": 409,
             "reviewer_auth_service_unavailable": 503,
             "storage_service_unavailable": 503,
+            "artifact_service_unavailable": 503,
             "profile_pack_source_required": 400,
             "profile_pack_submission_not_found": 404,
+            "profile_pack_submission_state_invalid": 409,
             "submission_id_required": 400,
             "profile_pack_not_published": 404,
             "reviewer_id_required": 400,
@@ -1325,6 +1516,7 @@ class SharelifeWebApiV1:
             "plan_not_applied": 409,
             "profile_pack_not_found": 404,
             "profile_import_not_found": 404,
+            "profile_import_in_use": 409,
             "profile_pack_incompatible": 409,
             "profile_pack_plugin_install_confirm_required": 409,
             "profile_pack_plugin_not_in_plan": 400,
@@ -1358,17 +1550,25 @@ class SharelifeWebApiV1:
             "remote_sync_command_not_found": 409,
             "remote_encryption_required": 409,
             "artifact_not_found": 404,
+            "artifact_id_required": 400,
             "artifact_checksum_missing": 409,
             "artifact_checksum_mismatch": 409,
+            "remote_path_invalid": 400,
+            "remote_sync_timeout": 409,
+            "idempotency_key_conflict": 409,
         }
         message_map = {
             "permission_denied": "permission denied",
             "package_service_unavailable": "package service unavailable",
             "profile_pack_service_unavailable": "profile pack service unavailable",
+            "astrbot_local_config_not_found": "local AstrBot config not found",
+            "astrbot_local_config_read_failed": "local AstrBot config could not be read",
             "reviewer_auth_service_unavailable": "reviewer auth service unavailable",
             "storage_service_unavailable": "storage service unavailable",
+            "artifact_service_unavailable": "artifact service unavailable",
             "profile_pack_source_required": "profile pack source required",
             "profile_pack_submission_not_found": "profile pack submission not found",
+            "profile_pack_submission_state_invalid": "profile pack submission state does not allow this operation",
             "submission_id_required": "submission_id is required",
             "profile_pack_not_published": "profile pack not published",
             "reviewer_id_required": "reviewer_id is required",
@@ -1396,6 +1596,7 @@ class SharelifeWebApiV1:
             "plan_not_applied": "plan has not been applied yet",
             "profile_pack_not_found": "profile pack artifact not found",
             "profile_import_not_found": "profile pack import record not found",
+            "profile_import_in_use": "profile pack import is referenced by a submission",
             "profile_pack_incompatible": "profile pack blocked by compatibility gate",
             "profile_pack_plugin_install_confirm_required": "plugin install confirmation required for this import",
             "profile_pack_plugin_not_in_plan": "plugin id not found in install plan",
@@ -1429,8 +1630,12 @@ class SharelifeWebApiV1:
             "remote_sync_command_not_found": "rclone binary not found",
             "remote_encryption_required": "remote encryption required",
             "artifact_not_found": "artifact not found",
+            "artifact_id_required": "artifact_id is required",
             "artifact_checksum_missing": "artifact checksum missing",
             "artifact_checksum_mismatch": "artifact checksum mismatch",
+            "remote_path_invalid": "remote_path is invalid",
+            "remote_sync_timeout": "remote sync timed out",
+            "idempotency_key_conflict": "idempotency key conflict",
         }
         return self._error(
             code=str(error_code),

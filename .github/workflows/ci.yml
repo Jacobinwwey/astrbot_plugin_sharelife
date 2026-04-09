@@ -28,9 +28,11 @@ jobs:
         run: python3 scripts/check_superpowers_privacy.py
 
       - name: Fetch origin/main for promotion gate
+        if: github.repository == 'Jacobinwwey/astrbot_plugin_sharelife'
         run: git fetch --no-tags --depth=1 origin main
 
       - name: Check private->public promotion gate
+        if: github.repository == 'Jacobinwwey/astrbot_plugin_sharelife'
         run: python3 scripts/check_public_promotion_gate.py --from-ref origin/main --to-ref HEAD
 
       - name: Run Python tests

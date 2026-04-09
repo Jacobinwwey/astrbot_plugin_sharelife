@@ -52,6 +52,7 @@ ensure_astrbot_logger_stub()
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_artifact_mirror import ArtifactMirrorService
 from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
@@ -59,6 +60,8 @@ from sharelife.application.services_preferences import PreferenceService
 from sharelife.application.services_profile_pack import ProfilePackService
 from sharelife.application.services_profile_pack_bootstrap import ProfilePackBootstrapService
 from sharelife.application.services_queue import RetryQueueService
+from sharelife.application.services_reviewer_auth import ReviewerAuthService
+from sharelife.application.services_transfer_jobs import TransferJobService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
 from sharelife.infrastructure.json_state_store import JsonStateStore
@@ -157,6 +160,46 @@ def merge_env_auth(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def apply_standalone_auth_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    webui = config.setdefault("webui", {})
+    if not isinstance(webui, dict):
+        config["webui"] = {}
+        webui = config["webui"]
+    auth = webui.setdefault("auth", {})
+    if not isinstance(auth, dict):
+        webui["auth"] = {}
+        auth = webui["auth"]
+
+    has_any_auth_secret = any(
+        str(auth.get(key, "") or "").strip()
+        for key in ("member_password", "reviewer_password", "admin_password", "password")
+    )
+    if has_any_auth_secret and "allow_anonymous_member" not in auth:
+        auth["allow_anonymous_member"] = True
+    return config
+
+
+def apply_standalone_feature_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    webui = config.setdefault("webui", {})
+    if not isinstance(webui, dict):
+        config["webui"] = {}
+        webui = config["webui"]
+    features = webui.setdefault("features", {})
+    if not isinstance(features, dict):
+        webui["features"] = {}
+        features = webui["features"]
+
+    if "local_astrbot_import" not in features:
+        features["local_astrbot_import"] = False
+    if not _as_bool(str(features.get("local_astrbot_import", "false")), default=False):
+        features["local_astrbot_import"] = False
+        features["allow_anonymous_local_astrbot_import"] = False
+        return config
+    if "allow_anonymous_local_astrbot_import" not in features:
+        features["allow_anonymous_local_astrbot_import"] = False
+    return config
+
+
 def merge_env_state_store(config: dict[str, Any]) -> dict[str, Any]:
     raw = config.setdefault("state_store", {})
     state_store = raw if isinstance(raw, dict) else {}
@@ -186,6 +229,10 @@ def state_store_filenames() -> dict[str, str]:
         "market_state": "market_state.json",
         "audit_state": "audit_state.json",
         "profile_pack_state": "profile_pack_state.json",
+        "identity_state": "identity_state.json",
+        "reviewer_auth_state": "reviewer_auth_state.json",
+        "transfer_state": "transfer_state.json",
+        "artifact_state": "artifact_state.json",
         "continuity_state": "continuity_state.json",
     }
 
@@ -229,7 +276,16 @@ def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWe
         state_store=state_stores["trial_request_state"],
     )
     market = MarketService(clock=clock, state_store=state_stores["market_state"])
-    package = PackageService(market_service=market, output_root=output_root, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=output_root,
+        clock=clock,
+        artifact_state_store=state_stores["artifact_state"],
+    )
+    artifact_mirror = ArtifactMirrorService(
+        artifact_store=package.artifact_store,
+        clock=clock,
+    )
     runtime = InMemoryRuntimeBridge(
         initial_state={
             "astrbot_core": {"name": "sharelife-standalone"},
@@ -262,9 +318,23 @@ def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWe
         public_market_cfg.get("root", str(REPO_ROOT / "docs" / "public"))
         or str(REPO_ROOT / "docs" / "public")
     ).strip()
+    device_keys_cfg = (
+        webui_cfg.get("device_keys", {})
+        if isinstance(webui_cfg.get("device_keys"), dict)
+        else {}
+    )
     # Keep standalone market useful on first launch: always seed bundled official pack baseline.
     ProfilePackBootstrapService(profile_pack_service=profile_pack).sync()
     audit = AuditService(clock=clock, state_store=state_stores["audit_state"])
+    reviewer_auth = ReviewerAuthService(
+        state_store=state_stores["identity_state"],
+        legacy_state_store=state_stores["reviewer_auth_state"],
+        max_devices=int(device_keys_cfg.get("max_reviewer_devices", 3) or 3),
+    )
+    transfer_jobs = TransferJobService(
+        clock=clock,
+        state_store=state_stores["transfer_state"],
+    )
     api = SharelifeApiV1(
         preference_service=preferences,
         retry_queue_service=queue,
@@ -273,7 +343,10 @@ def build_server(output_root: Path, config: dict[str, Any]) -> tuple[SharelifeWe
         package_service=package,
         apply_service=apply,
         audit_service=audit,
+        artifact_mirror_service=artifact_mirror,
         profile_pack_service=profile_pack,
+        reviewer_auth_service=reviewer_auth,
+        transfer_job_service=transfer_jobs,
         public_market_auto_publish_profile_pack_approve=_as_bool(
             str(public_market_cfg.get("auto_publish_profile_pack_approve", "false")),
             default=False,
@@ -352,6 +425,8 @@ def main() -> None:
     config = load_config(config_path)
     config = merge_local_webui_auth_override(config, data_root=data_root)
     config = merge_env_auth(config)
+    config = apply_standalone_auth_defaults(config)
+    config = apply_standalone_feature_defaults(config)
     config = merge_env_state_store(config)
     pre_strip_auth = (
         config.get("webui", {}).get("auth", {})

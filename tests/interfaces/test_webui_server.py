@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import subprocess
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_artifact_mirror import ArtifactMirrorService
 from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
@@ -21,6 +23,7 @@ from sharelife.application.services_profile_pack import ProfilePackService
 from sharelife.application.services_queue import RetryQueueService
 from sharelife.application.services_reviewer_auth import ReviewerAuthService
 from sharelife.application.services_storage_backup import StorageBackupService
+from sharelife.application.services_transfer_jobs import TransferJobService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
 from sharelife.infrastructure.json_state_store import JsonStateStore
@@ -85,7 +88,12 @@ def build_server(tmp_path, config=None):
         notifier=notifier,
     )
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path,
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
     continuity = ConfigContinuityService(
         state_store=JsonStateStore(tmp_path / "continuity_state.json"),
         clock=clock,
@@ -125,6 +133,14 @@ def build_server(tmp_path, config=None):
         data_root=tmp_path,
         clock=clock,
     )
+    transfer_jobs = TransferJobService(
+        clock=clock,
+        state_store=InMemoryStateStore(),
+    )
+    artifact_mirror = ArtifactMirrorService(
+        artifact_store=package.artifact_store,
+        clock=clock,
+    )
     api = SharelifeApiV1(
         preference_service=preferences,
         retry_queue_service=queue,
@@ -133,9 +149,11 @@ def build_server(tmp_path, config=None):
         package_service=package,
         apply_service=apply,
         audit_service=audit,
+        artifact_mirror_service=artifact_mirror,
         profile_pack_service=profile_pack,
         reviewer_auth_service=reviewer_auth,
         storage_backup_service=storage_backup,
+        transfer_job_service=transfer_jobs,
         public_market_auto_publish_profile_pack_approve=bool(
             public_market_cfg.get("auto_publish_profile_pack_approve", False),
         ),
@@ -227,7 +245,7 @@ def test_webui_applies_security_headers_on_pages_and_api(tmp_path):
     server = build_server(tmp_path)
     client = TestClient(server.app)
 
-    page = client.get("/")
+    page = client.get("/member")
     assert page.status_code == 200
     assert_security_headers(page)
     assert page.headers.get("x-request-id")
@@ -245,6 +263,7 @@ def test_webui_applies_security_headers_on_auth_failures(tmp_path):
             "webui": {
                 "auth": {
                     "member_password": "member-secret",
+                    "reviewer_password": "reviewer-secret",
                     "admin_password": "admin-secret",
                 }
             }
@@ -256,6 +275,143 @@ def test_webui_applies_security_headers_on_auth_failures(tmp_path):
     assert unauthorized.status_code == 401
     assert unauthorized.json()["error"]["code"] == "unauthorized"
     assert_security_headers(unauthorized)
+
+
+def test_webui_page_routes_hide_privileged_shells_without_auth(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "reviewer_password": "reviewer-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code in {302, 307, 308}
+    assert root.headers["location"].rstrip("/") == "/member"
+
+    admin = client.get("/admin")
+    assert admin.status_code == 401
+    assert admin.json()["error"]["code"] == "unauthorized"
+
+    reviewer = client.get("/reviewer")
+    assert reviewer.status_code == 401
+    assert reviewer.json()["error"]["code"] == "unauthorized"
+
+    index_html = client.get("/index.html", follow_redirects=False)
+    assert index_html.status_code in {302, 307, 308}
+    assert index_html.headers["location"].rstrip("/") == "/member"
+
+    member_html = client.get("/member.html", follow_redirects=False)
+    assert member_html.status_code in {302, 307, 308}
+    assert member_html.headers["location"].rstrip("/") == "/member"
+
+    admin_html = client.get("/admin.html", follow_redirects=False)
+    assert admin_html.status_code in {302, 307, 308}
+    assert admin_html.headers["location"].rstrip("/") == "/admin"
+
+    reviewer_html = client.get("/reviewer.html", follow_redirects=False)
+    assert reviewer_html.status_code in {302, 307, 308}
+    assert reviewer_html.headers["location"].rstrip("/") == "/reviewer"
+
+
+def test_webui_root_routes_redirect_to_member_even_without_auth(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code in {302, 307, 308}
+    assert root.headers["location"].rstrip("/") == "/member"
+
+    index_html = client.get("/index.html", follow_redirects=False)
+    assert index_html.status_code in {302, 307, 308}
+    assert index_html.headers["location"].rstrip("/") == "/member"
+
+    member_html = client.get("/member.html", follow_redirects=False)
+    assert member_html.status_code in {302, 307, 308}
+    assert member_html.headers["location"].rstrip("/") == "/member"
+
+
+def test_webui_page_routes_allow_reviewer_shell_only_after_reviewer_login(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "reviewer_password": "reviewer-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    admin_login = client.post("/api/login", json={"role": "admin", "password": "admin-secret"})
+    assert admin_login.status_code == 200
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    invite = client.post(
+        "/api/reviewer/invites",
+        json={"role": "admin", "admin_id": "admin-1"},
+        headers=admin_headers,
+    )
+    assert invite.status_code == 200
+    invite_code = invite.json()["data"]["invite_code"]
+    client.post(
+        "/api/reviewer/redeem",
+        json={"invite_code": invite_code, "reviewer_id": "reviewer-1"},
+    )
+    register = client.post(
+        "/api/reviewer/devices/register",
+        json={
+            "reviewer_id": "reviewer-1",
+            "password": "reviewer-secret",
+        },
+    )
+    assert register.status_code == 200
+    device_key = register.json()["data"]["device_key"]
+    session = client.post(
+        "/api/login",
+        json={
+            "role": "reviewer",
+            "password": "reviewer-secret",
+            "reviewer_id": "reviewer-1",
+            "reviewer_device_key": device_key,
+        },
+    )
+    assert session.status_code == 200
+    reviewer_token = session.json()["token"]
+
+    reviewer = client.get("/reviewer", headers={"Authorization": f"Bearer {reviewer_token}"})
+    assert reviewer.status_code == 200
+    assert "text/html" in reviewer.headers["content-type"]
+
+    admin = client.get("/admin", headers={"Authorization": f"Bearer {reviewer_token}"})
+    assert admin.status_code == 403
+    assert admin.json()["error"]["code"] == "permission_denied"
+
+    reviewer_html = client.get(
+        "/reviewer.html",
+        headers={"Authorization": f"Bearer {reviewer_token}"},
+        follow_redirects=False,
+    )
+    assert reviewer_html.status_code in {302, 307, 308}
+    assert reviewer_html.headers["location"].rstrip("/") == "/reviewer"
+
+    admin_html = client.get(
+        "/admin.html",
+        headers={"Authorization": f"Bearer {reviewer_token}"},
+        follow_redirects=False,
+    )
+    assert admin_html.status_code in {302, 307, 308}
+    assert admin_html.headers["location"].rstrip("/") == "/admin"
 
 
 def test_webui_auth_enabled_allows_public_market_read_but_blocks_upload_writes(tmp_path):
@@ -376,6 +532,10 @@ def test_webui_auth_enabled_supports_anonymous_member_mode_with_owner_binding(tm
     )
     assert anonymous_install.status_code == 200
     assert anonymous_install.json()["data"]["status"] in {"installed", "trial_started"}
+    anonymous_cookie_subject = str(client.cookies.get("sharelife_anon_member", "") or "").strip()
+    assert anonymous_cookie_subject
+    assert anonymous_cookie_subject.startswith("anon-user")
+    assert anonymous_cookie_subject != "anon-user"
 
     anonymous_install_cross_owner = client.post(
         "/api/templates/install",
@@ -388,7 +548,7 @@ def test_webui_auth_enabled_supports_anonymous_member_mode_with_owner_binding(tm
     assert anonymous_install_cross_owner.status_code == 403
     assert anonymous_install_cross_owner.json()["error"]["code"] == "permission_denied"
 
-    anonymous_installations = client.get("/api/member/installations", params={"user_id": "anon-user"})
+    anonymous_installations = client.get("/api/member/installations")
     assert anonymous_installations.status_code == 200
     assert anonymous_installations.json()["data"]["count"] == 1
 
@@ -396,9 +556,9 @@ def test_webui_auth_enabled_supports_anonymous_member_mode_with_owner_binding(tm
     assert anonymous_installations_cross_owner.status_code == 403
     assert anonymous_installations_cross_owner.json()["error"]["code"] == "permission_denied"
 
-    anonymous_preferences = client.get("/api/preferences", params={"user_id": "anon-user"})
+    anonymous_preferences = client.get("/api/preferences")
     assert anonymous_preferences.status_code == 200
-    assert anonymous_preferences.json()["data"]["user_id"] == "anon-user"
+    assert anonymous_preferences.json()["data"]["user_id"] == anonymous_cookie_subject
 
     anonymous_preferences_cross_owner = client.get("/api/preferences", params={"user_id": "other-user"})
     assert anonymous_preferences_cross_owner.status_code == 403
@@ -662,6 +822,191 @@ def test_webui_ui_capabilities_route_reports_public_and_token_roles_with_auth(tm
     assert admin_caps.json()["role"] == "admin"
     assert "admin.apply.workflow" in admin_caps.json()["operations"]
     assert "admin.storage.jobs.run" in admin_caps.json()["operations"]
+
+
+def test_webui_ui_capabilities_route_uses_anonymous_member_subset_when_allowed(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    anonymous_caps = client.get("/api/ui/capabilities")
+    assert anonymous_caps.status_code == 200
+    assert anonymous_caps.json()["ok"] is True
+    assert anonymous_caps.json()["auth_required"] is True
+    assert anonymous_caps.json()["authenticated"] is False
+    assert anonymous_caps.json()["anonymous_member"] is True
+    assert anonymous_caps.json()["role"] == "member"
+    assert "member.installations.read" in anonymous_caps.json()["operations"]
+    assert "templates.install" in anonymous_caps.json()["operations"]
+    assert "profile_pack.catalog.read" in anonymous_caps.json()["operations"]
+    assert "member.profile_pack.imports.write" not in anonymous_caps.json()["operations"]
+    assert "profile_pack.community.submit" not in anonymous_caps.json()["operations"]
+    assert "member.submissions.read" not in anonymous_caps.json()["operations"]
+
+    reviewer_caps = client.get("/api/ui/capabilities", params={"page_mode": "reviewer"})
+    assert reviewer_caps.status_code == 200
+    assert reviewer_caps.json()["role"] == "public"
+    assert reviewer_caps.json()["authenticated"] is False
+    assert reviewer_caps.json()["anonymous_member"] is False
+    assert "member.installations.read" not in reviewer_caps.json()["operations"]
+
+
+def test_webui_ui_capabilities_route_surfaces_anonymous_local_astrbot_import_feature(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": True,
+                    "allow_anonymous_local_astrbot_import": True,
+                },
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    auth_info = client.get("/api/auth-info")
+    assert auth_info.status_code == 200
+    assert auth_info.json()["supports_local_astrbot_import"] is True
+    assert auth_info.json()["allow_anonymous_local_astrbot_import"] is True
+
+    anonymous_caps = client.get("/api/ui/capabilities")
+    assert anonymous_caps.status_code == 200
+    operations = anonymous_caps.json()["operations"]
+    assert "member.profile_pack.imports.local_astrbot" in operations
+    assert "member.profile_pack.imports.read" in operations
+    assert "member.profile_pack.imports.delete" in operations
+    assert "member.profile_pack.imports.package_upload" not in operations
+    assert "member.profile_pack.imports.write" not in operations
+
+    disabled_server = build_server(
+        tmp_path / "disabled",
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": False,
+                    "allow_anonymous_local_astrbot_import": True,
+                },
+            }
+        },
+    )
+    disabled_client = TestClient(disabled_server.app)
+    disabled_auth_info = disabled_client.get("/api/auth-info")
+    assert disabled_auth_info.status_code == 200
+    assert disabled_auth_info.json()["supports_local_astrbot_import"] is False
+    assert disabled_auth_info.json()["allow_anonymous_local_astrbot_import"] is False
+
+    disabled_caps = disabled_client.get("/api/ui/capabilities")
+    assert disabled_caps.status_code == 200
+    disabled_operations = disabled_caps.json()["operations"]
+    assert "member.profile_pack.imports.local_astrbot" not in disabled_operations
+    assert "member.profile_pack.imports.read" not in disabled_operations
+    assert "member.profile_pack.imports.delete" not in disabled_operations
+
+
+def test_webui_anonymous_local_astrbot_import_isolated_by_cookie_subject(tmp_path, monkeypatch):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": True,
+                    "allow_anonymous_local_astrbot_import": True,
+                },
+            }
+        },
+    )
+    local_config = tmp_path / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {
+                    "default_personality": "official-starter",
+                    "persona_pool": ["official-starter", "official-safe"],
+                    "websearch_tavily_key": ["tvly-secret"],
+                },
+                "persona": [{"name": "official-starter", "prompt": "starter"}],
+                "plugin_set": ["sharelife"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+
+    client_a = TestClient(server.app)
+    client_b = TestClient(server.app)
+
+    response_a = client_a.post(
+        "/api/member/profile-pack/imports/local-astrbot",
+        json={"user_id": "webui-user"},
+    )
+    assert response_a.status_code == 200
+    imported_a = response_a.json()["data"]
+    user_id_a = str(imported_a["user_id"])
+    assert user_id_a
+    assert user_id_a != "webui-user"
+    assert user_id_a == str(client_a.cookies.get("sharelife_anon_member", "") or "")
+
+    imports_a = client_a.get("/api/member/profile-pack/imports")
+    assert imports_a.status_code == 200
+    assert len(imports_a.json()["data"]["imports"]) == 1
+    assert imports_a.json()["data"]["imports"][0]["user_id"] == user_id_a
+
+    imports_b_before = client_b.get("/api/member/profile-pack/imports")
+    assert imports_b_before.status_code == 200
+    assert imports_b_before.json()["data"]["imports"] == []
+
+    response_b = client_b.post(
+        "/api/member/profile-pack/imports/local-astrbot",
+        json={"user_id": "webui-user"},
+    )
+    assert response_b.status_code == 200
+    imported_b = response_b.json()["data"]
+    user_id_b = str(imported_b["user_id"])
+    assert user_id_b
+    assert user_id_b != user_id_a
+    assert user_id_b == str(client_b.cookies.get("sharelife_anon_member", "") or "")
+
+    imports_b_after = client_b.get("/api/member/profile-pack/imports")
+    assert imports_b_after.status_code == 200
+    assert len(imports_b_after.json()["data"]["imports"]) == 1
+    assert imports_b_after.json()["data"]["imports"][0]["user_id"] == user_id_b
 
 
 def test_webui_admin_storage_routes_flow_and_enforce_auth(tmp_path):
@@ -1172,135 +1517,133 @@ def test_admin_reviewer_lifecycle_routes_cover_invites_accounts_and_devices(tmp_
 def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     server = build_server(tmp_path)
     client = TestClient(server.app)
-
-    page = client.get("/")
-    assert page.status_code == 200
-    assert 'id="templateCategoryFilter"' in page.text
-    assert 'id="templateTagFilter"' in page.text
-    assert 'id="templateSourceChannelFilter"' in page.text
-    assert 'id="templateReviewLabelFilter"' in page.text
-    assert 'id="templateWarningFlagFilter"' in page.text
-    assert 'id="submissionReviewLabelFilter"' in page.text
-    assert 'id="submissionWarningFlagFilter"' in page.text
-    assert 'id="compareHighlights"' in page.text
-    assert 'id="compareSections"' in page.text
-    assert 'src="/compare_panel.js"' in page.text
-    assert 'id="templateDetailSummary"' in page.text
-    assert 'id="submissionDetailSummary"' in page.text
-    assert 'id="riskGlossary"' in page.text
-    assert 'id="btnTemplateDetail"' in page.text
-    assert 'id="btnSubmissionDetail"' in page.text
-    assert 'src="/detail_panel.js"' in page.text
-    assert 'src="/table_interactions.js"' in page.text
-    assert 'id="workspaceRoute"' in page.text
-    assert 'id="btnReloadWorkspace"' in page.text
-    assert 'id="btnClearWorkspace"' in page.text
-    assert 'id="templateListState"' in page.text
-    assert 'id="submissionListState"' in page.text
-    assert 'id="trialStatusSummary"' in page.text
-    assert 'id="btnTrialStatus"' in page.text
-    assert 'id="btnToggleDeveloperMode"' in page.text
-    assert 'id="developerModeLine"' in page.text
-    assert 'id="scanEvidenceHint"' in page.text
-    assert 'id="scanEvidenceList"' in page.text
-    assert 'id="dryrunPlanId"' in page.text
-    assert 'id="btnDryrunPlan"' in page.text
-    assert 'id="btnApplyPlan"' in page.text
-    assert 'id="btnRollbackPlan"' in page.text
-    assert 'id="moderationWarnings"' in page.text
-    assert 'src="/workspace_state.js"' in page.text
-    assert 'id="templateDetailState"' in page.text
-    assert 'id="submissionDetailState"' in page.text
-    assert 'id="compareState"' in page.text
-    assert 'id="profilePackId"' in page.text
-    assert 'id="btnProfilePackExport"' in page.text
-    assert 'id="profilePackType"' in page.text
-    assert 'id="btnProfilePackImport"' in page.text
-    assert 'id="profilePackImportArtifactId"' in page.text
-    assert 'id="btnProfilePackImportFromExport"' in page.text
-    assert 'id="btnProfilePackImportDryrun"' in page.text
-    assert 'id="btnProfilePackDryrun"' in page.text
-    assert 'id="btnProfilePackPluginPlan"' in page.text
-    assert 'id="profilePackPluginIds"' in page.text
-    assert 'id="btnProfilePackPluginConfirm"' in page.text
-    assert 'id="profilePackPluginDryRun"' in page.text
-    assert 'id="btnProfilePackPluginExecute"' in page.text
-    assert 'id="btnProfilePackListImports"' in page.text
-    assert 'id="btnProfilePackListExports"' in page.text
-    assert 'id="profilePackSectionList"' in page.text
-    assert 'id="profilePackCompatibilitySummary"' in page.text
-    assert 'id="profilePackCompatibilityIssues"' in page.text
-    assert 'id="profilePackCompatibilityActions"' in page.text
-    assert 'id="profilePackCompatibilityActionStatus"' in page.text
-    assert 'id="profilePackCompatibilityDeveloper"' in page.text
-    assert 'id="profilePackRecords"' in page.text
-    assert 'id="profilePackRecordPackFilter"' in page.text
-    assert 'id="profilePackMaskPaths"' in page.text
-    assert 'id="profilePackDropPaths"' in page.text
-    assert 'id="profilePackSubmissionArtifactId"' in page.text
-    assert 'id="btnProfilePackSubmitCommunity"' in page.text
-    assert 'id="btnProfilePackListPackSubmissions"' in page.text
-    assert 'id="btnProfilePackDecideSubmission"' in page.text
-    assert 'id="profilePackSubmissionState"' in page.text
-    assert 'id="profilePackSubmissionPackTypeFilter"' in page.text
-    assert 'id="profilePackDecisionSubmissionId"' in page.text
-    assert 'id="profilePackDecisionReviewLabels"' in page.text
-    assert 'id="profilePackCatalogPackFilter"' in page.text
-    assert 'id="profilePackCatalogState"' in page.text
-    assert 'id="profilePackCatalogPackTypeFilter"' in page.text
-    assert 'id="btnProfilePackListCatalog"' in page.text
-    assert 'id="btnProfilePackCatalogDetail"' in page.text
-    assert 'id="profilePackCatalogCompareSections"' in page.text
-    assert 'id="btnProfilePackCatalogCompare"' in page.text
-    assert 'id="profilePackCatalogTable"' in page.text
-    assert 'id="profilePackMarketCompareShell"' in page.text
-    assert 'id="profilePackMarketCompareCards"' in page.text
-    assert 'id="profilePackMarketCompareTable"' in page.text
-    assert 'id="profilePackSubmissionTable"' in page.text
-    assert 'id="section-storage-backup"' in page.text
-    assert 'id="btnStorageSummary"' in page.text
-    assert 'id="btnStoragePoliciesGet"' in page.text
-    assert 'id="btnStoragePoliciesSet"' in page.text
-    assert 'id="btnStorageRunBackup"' in page.text
-    assert 'id="btnStorageJobsList"' in page.text
-    assert 'id="btnStorageJobGet"' in page.text
-    assert 'id="btnStorageRestorePrepare"' in page.text
-    assert 'id="btnStorageRestoreCommit"' in page.text
-    assert 'id="btnStorageRestoreCancel"' in page.text
-    assert 'id="btnStorageRestoreJobsList"' in page.text
-    assert 'id="btnStorageRestoreJobGet"' in page.text
-    assert 'id="section-continuity"' in page.text
-    assert 'id="btnContinuityList"' in page.text
-    assert 'id="btnContinuityGet"' in page.text
-    assert 'id="continuitySummaryOutput"' in page.text
-    assert 'id="continuityDetailOutput"' in page.text
-    assert 'id="storageSummaryOutput"' in page.text
-    assert 'id="storagePoliciesOutput"' in page.text
-    assert 'id="storageJobsOutput"' in page.text
-    assert 'id="storageRestoreOutput"' in page.text
-    assert 'id="storageRestoreJobsOutput"' in page.text
-    assert 'id="uiLocale"' in page.text
-    assert 'data-i18n-key="table.header.category"' in page.text
-    assert 'data-i18n-key="table.header.maintainer"' in page.text
-    assert 'id="featuredTemplateCard"' in page.text
-    assert 'id="trendingTemplateList"' in page.text
-    assert 'id="templateDrawer"' in page.text
-    assert 'id="submitWizardModal"' in page.text
-    assert 'data-scope-visibility="manual"' in page.text
-    assert 'src="/collection_state.js"' in page.text
-    assert 'src="/workspace_feedback.js"' in page.text
-    assert 'src="/collection_feedback.js"' in page.text
-    assert 'src="/workspace_payload.js"' in page.text
-    assert 'src="/profile_pack_panel.js"' in page.text
-    assert 'src="/profile_pack_guidance.js"' in page.text
-    assert 'src="/profile_pack_records.js"' in page.text
-    assert 'src="/profile_pack_market.js"' in page.text
-    assert 'src="/profile_pack_compare_view.js"' in page.text
-    assert 'src="/webui_i18n.js"' in page.text
-    assert 'href="/member"' in page.text
-    assert 'href="/reviewer"' in page.text
-    assert 'href="/admin"' in page.text
-    assert 'href="/market"' in page.text
+    page_text = (server.web_root / "index.html").read_text(encoding="utf-8")
+    assert 'id="templateCategoryFilter"' in page_text
+    assert 'id="templateTagFilter"' in page_text
+    assert 'id="templateSourceChannelFilter"' in page_text
+    assert 'id="templateReviewLabelFilter"' in page_text
+    assert 'id="templateWarningFlagFilter"' in page_text
+    assert 'id="submissionReviewLabelFilter"' in page_text
+    assert 'id="submissionWarningFlagFilter"' in page_text
+    assert 'id="compareHighlights"' in page_text
+    assert 'id="compareSections"' in page_text
+    assert 'src="/compare_panel.js"' in page_text
+    assert 'id="templateDetailSummary"' in page_text
+    assert 'id="submissionDetailSummary"' in page_text
+    assert 'id="riskGlossary"' in page_text
+    assert 'id="btnTemplateDetail"' in page_text
+    assert 'id="btnSubmissionDetail"' in page_text
+    assert 'src="/detail_panel.js"' in page_text
+    assert 'src="/table_interactions.js"' in page_text
+    assert 'id="workspaceRoute"' in page_text
+    assert 'id="btnReloadWorkspace"' in page_text
+    assert 'id="btnClearWorkspace"' in page_text
+    assert 'id="templateListState"' in page_text
+    assert 'id="submissionListState"' in page_text
+    assert 'id="trialStatusSummary"' in page_text
+    assert 'id="btnTrialStatus"' in page_text
+    assert 'id="btnToggleDeveloperMode"' in page_text
+    assert 'id="developerModeLine"' in page_text
+    assert 'id="scanEvidenceHint"' in page_text
+    assert 'id="scanEvidenceList"' in page_text
+    assert 'id="dryrunPlanId"' in page_text
+    assert 'id="btnDryrunPlan"' in page_text
+    assert 'id="btnApplyPlan"' in page_text
+    assert 'id="btnRollbackPlan"' in page_text
+    assert 'id="moderationWarnings"' in page_text
+    assert 'src="/workspace_state.js"' in page_text
+    assert 'id="templateDetailState"' in page_text
+    assert 'id="submissionDetailState"' in page_text
+    assert 'id="compareState"' in page_text
+    assert 'id="profilePackId"' in page_text
+    assert 'id="btnProfilePackExport"' in page_text
+    assert 'id="profilePackType"' in page_text
+    assert 'id="btnProfilePackImport"' in page_text
+    assert 'id="profilePackImportArtifactId"' in page_text
+    assert 'id="btnProfilePackImportFromExport"' in page_text
+    assert 'id="btnProfilePackImportDryrun"' in page_text
+    assert 'id="btnProfilePackDryrun"' in page_text
+    assert 'id="btnProfilePackPluginPlan"' in page_text
+    assert 'id="profilePackPluginIds"' in page_text
+    assert 'id="btnProfilePackPluginConfirm"' in page_text
+    assert 'id="profilePackPluginDryRun"' in page_text
+    assert 'id="btnProfilePackPluginExecute"' in page_text
+    assert 'id="btnProfilePackListImports"' in page_text
+    assert 'id="btnProfilePackListExports"' in page_text
+    assert 'id="profilePackSectionList"' in page_text
+    assert 'id="profilePackCompatibilitySummary"' in page_text
+    assert 'id="profilePackCompatibilityIssues"' in page_text
+    assert 'id="profilePackCompatibilityActions"' in page_text
+    assert 'id="profilePackCompatibilityActionStatus"' in page_text
+    assert 'id="profilePackCompatibilityDeveloper"' in page_text
+    assert 'id="profilePackRecords"' in page_text
+    assert 'id="profilePackRecordPackFilter"' in page_text
+    assert 'id="profilePackMaskPaths"' in page_text
+    assert 'id="profilePackDropPaths"' in page_text
+    assert 'id="profilePackSubmissionArtifactId"' in page_text
+    assert 'id="btnProfilePackSubmitCommunity"' in page_text
+    assert 'id="btnProfilePackListPackSubmissions"' in page_text
+    assert 'id="btnProfilePackDecideSubmission"' in page_text
+    assert 'id="profilePackSubmissionState"' in page_text
+    assert 'id="profilePackSubmissionPackTypeFilter"' in page_text
+    assert 'id="profilePackDecisionSubmissionId"' in page_text
+    assert 'id="profilePackDecisionReviewLabels"' in page_text
+    assert 'id="profilePackCatalogPackFilter"' in page_text
+    assert 'id="profilePackCatalogState"' in page_text
+    assert 'id="profilePackCatalogPackTypeFilter"' in page_text
+    assert 'id="btnProfilePackListCatalog"' in page_text
+    assert 'id="btnProfilePackCatalogDetail"' in page_text
+    assert 'id="profilePackCatalogCompareSections"' in page_text
+    assert 'id="btnProfilePackCatalogCompare"' in page_text
+    assert 'id="profilePackCatalogTable"' in page_text
+    assert 'id="profilePackMarketCompareShell"' in page_text
+    assert 'id="profilePackMarketCompareCards"' in page_text
+    assert 'id="profilePackMarketCompareTable"' in page_text
+    assert 'id="profilePackSubmissionTable"' in page_text
+    assert 'id="section-storage-backup"' in page_text
+    assert 'id="btnStorageSummary"' in page_text
+    assert 'id="btnStoragePoliciesGet"' in page_text
+    assert 'id="btnStoragePoliciesSet"' in page_text
+    assert 'id="btnStorageRunBackup"' in page_text
+    assert 'id="btnStorageJobsList"' in page_text
+    assert 'id="btnStorageJobGet"' in page_text
+    assert 'id="btnStorageRestorePrepare"' in page_text
+    assert 'id="btnStorageRestoreCommit"' in page_text
+    assert 'id="btnStorageRestoreCancel"' in page_text
+    assert 'id="btnStorageRestoreJobsList"' in page_text
+    assert 'id="btnStorageRestoreJobGet"' in page_text
+    assert 'id="section-continuity"' in page_text
+    assert 'id="btnContinuityList"' in page_text
+    assert 'id="btnContinuityGet"' in page_text
+    assert 'id="continuitySummaryOutput"' in page_text
+    assert 'id="continuityDetailOutput"' in page_text
+    assert 'id="storageSummaryOutput"' in page_text
+    assert 'id="storagePoliciesOutput"' in page_text
+    assert 'id="storageJobsOutput"' in page_text
+    assert 'id="storageRestoreOutput"' in page_text
+    assert 'id="storageRestoreJobsOutput"' in page_text
+    assert 'id="uiLocale"' in page_text
+    assert 'data-i18n-key="table.header.category"' in page_text
+    assert 'data-i18n-key="table.header.maintainer"' in page_text
+    assert 'id="featuredTemplateCard"' in page_text
+    assert 'id="trendingTemplateList"' in page_text
+    assert 'id="templateDrawer"' in page_text
+    assert 'id="submitWizardModal"' in page_text
+    assert 'data-scope-visibility="manual"' in page_text
+    assert 'src="/collection_state.js"' in page_text
+    assert 'src="/workspace_feedback.js"' in page_text
+    assert 'src="/collection_feedback.js"' in page_text
+    assert 'src="/workspace_payload.js"' in page_text
+    assert 'src="/profile_pack_panel.js"' in page_text
+    assert 'src="/profile_pack_guidance.js"' in page_text
+    assert 'src="/profile_pack_records.js"' in page_text
+    assert 'src="/profile_pack_market.js"' in page_text
+    assert 'src="/profile_pack_compare_view.js"' in page_text
+    assert 'src="/webui_i18n.js"' in page_text
+    assert 'href="/member"' in page_text
+    assert 'href="/reviewer"' in page_text
+    assert 'href="/admin"' in page_text
+    assert 'href="/market"' in page_text
 
     member_page = client.get("/member")
     assert member_page.status_code == 200
@@ -1310,9 +1653,16 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert 'id="marketConsoleLink"' in member_page.text
     assert 'id="memberSpotlightShell"' in member_page.text
     assert 'data-i18n-key="member.search.spotlight_hint"' in member_page.text
-    assert 'id="btnRefreshMemberInstallations"' in member_page.text
+    assert 'id="btnImportAstrbotConfig"' in member_page.text
+    assert 'id="btnRefreshMemberInstallationsInline"' in member_page.text
+    assert 'id="btnOpenMemberImportReview"' in member_page.text
     assert 'id="memberUploadDropzone"' in member_page.text
     assert 'id="memberUploadFileName"' in member_page.text
+    assert 'for="memberImportAstrbotConfigFile"' in member_page.text
+    assert 'id="memberImportDraftList"' in member_page.text
+    assert 'id="memberProfilePackUploadModal"' in member_page.text
+    assert 'id="memberUploadDetailSectionList"' in member_page.text
+    assert 'id="btnMemberProfilePackUploadDelete"' in member_page.text
     assert 'id="reviewerConsoleLink"' not in member_page.text
     assert 'id="adminConsoleLink"' not in member_page.text
     assert 'id="fullConsoleLink"' not in member_page.text
@@ -1322,31 +1672,12 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert 'src="/console_scope.js"' in member_page.text
 
     admin_page = client.get("/admin")
-    assert admin_page.status_code == 200
-    assert "<title>Sharelife Admin Console</title>" in admin_page.text
-    assert 'data-i18n-key="console.admin.subtitle"' in admin_page.text
-    assert 'id="adminConsoleLink"' in admin_page.text
-    assert 'id="section-reviewer-lifecycle"' in admin_page.text
-    assert 'id="btnReviewerInviteCreate"' in admin_page.text
-    assert 'id="btnReviewerInviteList"' in admin_page.text
-    assert 'id="btnReviewerAccountList"' in admin_page.text
-    assert 'id="btnReviewerDeviceList"' in admin_page.text
-    assert 'id="btnReviewerDeviceReset"' in admin_page.text
-    assert 'id="btnReviewerSessionList"' in admin_page.text
-    assert 'id="btnReviewerSessionRevoke"' in admin_page.text
-    assert 'id="reviewerInviteTable"' in admin_page.text
-    assert 'id="reviewerAccountTable"' in admin_page.text
-    assert 'id="reviewerDeviceTable"' in admin_page.text
-    assert 'id="reviewerSessionTable"' in admin_page.text
-    assert 'id="reviewerSessionId"' in admin_page.text
-    assert 'id="reviewerSessionState"' in admin_page.text
-    assert 'src="/console_scope.js"' in admin_page.text
+    assert admin_page.status_code == 403
+    assert admin_page.json()["error"]["code"] == "permission_denied"
 
     reviewer_page = client.get("/reviewer")
-    assert reviewer_page.status_code == 200
-    assert "<title>Sharelife Reviewer Console</title>" in reviewer_page.text
-    assert 'id="reviewerConsoleLink"' in reviewer_page.text
-    assert 'src="/console_scope.js"' in reviewer_page.text
+    assert reviewer_page.status_code == 403
+    assert reviewer_page.json()["error"]["code"] == "permission_denied"
 
 
 def test_webui_market_page_and_catalog_compare_route(tmp_path):
@@ -1355,24 +1686,55 @@ def test_webui_market_page_and_catalog_compare_route(tmp_path):
 
     market_page = client.get("/market")
     assert market_page.status_code == 200
-    assert 'id="marketMemberConsoleLink"' in market_page.text
-    assert 'id="marketReviewerConsoleLink"' in market_page.text
-    assert 'id="marketAdminConsoleLink"' in market_page.text
-    assert 'id="marketFullConsoleLink"' in market_page.text
-    assert 'id="btnMarketListCatalog"' in market_page.text
-    assert 'id="btnMarketRefreshInstallations"' in market_page.text
-    assert 'id="marketUploadDropzone"' in market_page.text
-    assert 'id="marketUploadFileName"' in market_page.text
-    assert 'id="btnMarketCatalogCompare"' in market_page.text
-    assert 'id="marketCompareShell"' in market_page.text
-    assert 'id="marketCompareCards"' in market_page.text
-    assert 'id="marketCompareTable"' in market_page.text
+    assert 'id="marketMemberConsoleLink" href="/member" class="market-link hidden"' in market_page.text
+    assert 'id="marketReviewerConsoleLink" href="/reviewer" class="market-link hidden"' in market_page.text
+    assert 'id="marketAdminConsoleLink" href="/admin" class="market-link hidden"' in market_page.text
+    assert 'id="marketFullConsoleLink" href="/" class="market-link hidden"' in market_page.text
+    assert 'id="btnMarketListCatalog" class="btn-ghost"' in market_page.text
+    assert 'id="btnMarketRefreshInstallations"' not in market_page.text
+    assert 'id="marketFilterSidebar"' in market_page.text
+    assert 'id="marketCompareStrip"' not in market_page.text
+    assert 'id="marketDetailArea"' not in market_page.text
+    assert 'id="btnMarketDetailRefreshInstallations"' not in market_page.text
+    assert 'id="marketUploadDropzone"' not in market_page.text
+    assert 'id="marketUploadFileName"' not in market_page.text
+    assert 'id="btnMarketCatalogCompare"' not in market_page.text
+    assert 'id="marketCompareShell"' not in market_page.text
+    assert 'id="marketCompareCards"' not in market_page.text
+    assert 'id="marketCompareTable"' not in market_page.text
     assert 'src="/profile_pack_compare_view.js"' in market_page.text
     assert 'src="/market_page.js"' in market_page.text
     market_auth_select = re.search(r'<select id="marketAuthRole">(.*?)</select>', market_page.text, re.S)
     assert market_auth_select is not None
     market_auth_options = re.findall(r'<option value="([^"]+)"', market_auth_select.group(1))
     assert market_auth_options == ["member"]
+
+    detail_page = client.get("/market/packs/profile/official-starter")
+    assert detail_page.status_code == 200
+    assert 'id="marketDetailArea"' in detail_page.text
+    assert 'id="marketDetailVariantTabs"' not in detail_page.text
+    assert 'id="marketDetailMemberActions"' not in detail_page.text
+    assert 'id="marketDetailPublicFacts"' not in detail_page.text
+    assert 'id="marketDetailActionRail"' not in detail_page.text
+    assert 'id="marketDetailControlStore"' in detail_page.text
+    assert 'id="marketMemberConsoleLink" href="/member" class="market-link hidden"' in detail_page.text
+    assert 'id="marketReviewerConsoleLink" href="/reviewer" class="market-link hidden"' in detail_page.text
+    assert 'id="marketAdminConsoleLink" href="/admin" class="market-link hidden"' in detail_page.text
+    assert 'id="marketFullConsoleLink" href="/" class="market-link hidden"' in detail_page.text
+    assert 'id="marketDetailActionCluster"' not in detail_page.text
+    assert 'id="marketDetailInstallOptionsShell"' in detail_page.text
+    assert 'id="btnMarketDetailRefreshInstallations"' not in detail_page.text
+    assert 'id="btnMarketDetailSubmitTemplate"' not in detail_page.text
+    assert 'id="btnMarketDetailSubmitProfilePack"' not in detail_page.text
+    assert 'id="marketUploadDropzone"' not in detail_page.text
+    assert 'id="marketUploadFileName"' not in detail_page.text
+    assert 'id="btnMarketDetailTrial"' not in detail_page.text
+    assert 'id="btnMarketDetailInstall"' not in detail_page.text
+    assert 'id="btnMarketCatalogCompare"' not in detail_page.text
+    assert 'id="btnMarketCatalogDownload"' not in detail_page.text
+    assert 'id="marketSummary"' not in detail_page.text
+    assert 'id="marketCompareShell"' in detail_page.text
+    assert 'src="/market_detail_page.js"' in detail_page.text
 
     exported = client.post(
         "/api/admin/profile-pack/export",
@@ -1458,7 +1820,6 @@ def test_webui_trial_status_and_apply_workflow_routes(tmp_path):
     )
     assert applied.status_code == 200
     assert applied.json()["data"]["status"] == "applied"
-    assert applied.json()["data"]["continuity"]["source_kind"] == "manual_patch"
 
     rolled_back = client.post(
         "/api/admin/rollback",
@@ -1466,7 +1827,6 @@ def test_webui_trial_status_and_apply_workflow_routes(tmp_path):
     )
     assert rolled_back.status_code == 200
     assert rolled_back.json()["data"]["status"] == "rolled_back"
-    assert rolled_back.json()["data"]["continuity"]["restore_verification"] == "matched"
 
     continuity = client.get(
         "/api/admin/continuity",
@@ -1494,17 +1854,12 @@ def test_route_scoped_login_selectors_are_role_fixed(tmp_path):
     assert re.findall(r'<option value="([^"]+)"', member_auth_select.group(1)) == ["member"]
 
     reviewer_page = client.get("/reviewer")
-    assert reviewer_page.status_code == 200
-    assert 'id="reviewerReadonlyNotice"' in reviewer_page.text
-    reviewer_auth_select = re.search(r'<select id="authRole">(.*?)</select>', reviewer_page.text, re.S)
-    assert reviewer_auth_select is not None
-    assert re.findall(r'<option value="([^"]+)"', reviewer_auth_select.group(1)) == ["member"]
+    assert reviewer_page.status_code == 403
+    assert reviewer_page.json()["error"]["code"] == "permission_denied"
 
     admin_page = client.get("/admin")
-    assert admin_page.status_code == 200
-    admin_auth_select = re.search(r'<select id="authRole">(.*?)</select>', admin_page.text, re.S)
-    assert admin_auth_select is not None
-    assert re.findall(r'<option value="([^"]+)"', admin_auth_select.group(1)) == ["admin"]
+    assert admin_page.status_code == 403
+    assert admin_page.json()["error"]["code"] == "permission_denied"
 
 
 def test_webui_member_installation_routes_support_refresh_and_install_options(tmp_path):
@@ -1584,6 +1939,38 @@ def test_webui_member_installation_routes_support_refresh_and_install_options(tm
     assert refreshed.status_code == 200
     assert refreshed.json()["data"]["count"] == 1
 
+    listed_tasks = client.get(
+        "/api/member/tasks",
+        params={"user_id": "u1", "limit": 20},
+    )
+    assert listed_tasks.status_code == 200
+    assert listed_tasks.json()["data"]["count"] >= 1
+    assert "template.installed" in [
+        str(item.get("action") or "")
+        for item in listed_tasks.json()["data"]["tasks"]
+    ]
+
+    refreshed_tasks = client.post(
+        "/api/member/tasks/refresh",
+        json={"user_id": "u1", "limit": 20},
+    )
+    assert refreshed_tasks.status_code == 200
+    assert refreshed_tasks.json()["data"]["count"] >= 1
+
+    uninstalled = client.post(
+        "/api/member/installations/uninstall",
+        json={"user_id": "u1", "template_id": "community/basic"},
+    )
+    assert uninstalled.status_code == 200
+    assert uninstalled.json()["data"]["status"] == "uninstalled"
+
+    listed_after = client.get(
+        "/api/member/installations",
+        params={"user_id": "u1", "limit": 10},
+    )
+    assert listed_after.status_code == 200
+    assert listed_after.json()["data"]["count"] == 0
+
 
 def test_webui_template_submit_replace_existing_retires_previous_pending_submission(tmp_path):
     server = build_server(tmp_path)
@@ -1628,6 +2015,43 @@ def test_webui_template_submit_replace_existing_retires_previous_pending_submiss
     assert [item["submission_id"] for item in pending_rows.json()["data"]["submissions"]] == [
         second.json()["data"]["submission_id"]
     ]
+
+
+def test_webui_template_submit_supports_idempotency_header_replay(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    first = client.post(
+        "/api/templates/submit",
+        headers={"Idempotency-Key": "member-upload-retry-1"},
+        json={
+            "user_id": "u1",
+            "template_id": "community/basic",
+            "version": "1.0.0",
+        },
+    )
+    assert first.status_code == 200
+    assert first.json()["data"]["upload_options"]["idempotency_key"] == "member-upload-retry-1"
+
+    second = client.post(
+        "/api/templates/submit",
+        headers={"Idempotency-Key": "member-upload-retry-1"},
+        json={
+            "user_id": "u1",
+            "template_id": "community/basic",
+            "version": "1.0.0",
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["data"]["submission_id"] == first.json()["data"]["submission_id"]
+    assert second.json()["data"]["idempotent_replay"] is True
+
+    listed = client.get(
+        "/api/member/submissions",
+        params={"user_id": "u1"},
+    )
+    assert listed.status_code == 200
+    assert len(listed.json()["data"]["submissions"]) == 1
 
 
 def test_webui_template_submit_rejects_payload_over_limit(tmp_path):
@@ -2314,6 +2738,30 @@ def test_webui_member_owner_binding_applies_to_upload_submission_and_installatio
     assert cross_refresh_installations.status_code == 403
     assert cross_refresh_installations.json()["error"]["code"] == "permission_denied"
 
+    own_tasks = client.get(
+        "/api/member/tasks",
+        params={"user_id": "owner-u1", "limit": 10},
+        headers=member_headers,
+    )
+    assert own_tasks.status_code == 200
+    assert own_tasks.json()["data"]["user_id"] == "owner-u1"
+
+    cross_tasks = client.get(
+        "/api/member/tasks",
+        params={"user_id": "owner-u2", "limit": 10},
+        headers=member_headers,
+    )
+    assert cross_tasks.status_code == 403
+    assert cross_tasks.json()["error"]["code"] == "permission_denied"
+
+    cross_refresh_tasks = client.post(
+        "/api/member/tasks/refresh",
+        json={"user_id": "owner-u2", "limit": 10},
+        headers=member_headers,
+    )
+    assert cross_refresh_tasks.status_code == 403
+    assert cross_refresh_tasks.json()["error"]["code"] == "permission_denied"
+
     own_submit = client.post(
         "/api/templates/submit",
         json={"user_id": "owner-u1", "template_id": "community/basic", "version": "1.0.0"},
@@ -2461,6 +2909,342 @@ def test_webui_member_owner_binding_applies_to_profile_pack_submission_managemen
     )
     assert cross_detail.status_code == 403
     assert cross_detail.json()["error"]["code"] == "permission_denied"
+
+
+def test_webui_member_can_withdraw_own_pending_profile_pack_submission(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+    member_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u1"},
+    )
+    other_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u2"},
+    )
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert member_login.status_code == 200
+    assert other_login.status_code == 200
+    assert admin_login.status_code == 200
+    member_headers = {"Authorization": f"Bearer {member_login.json()['token']}"}
+    other_headers = {"Authorization": f"Bearer {other_login.json()['token']}"}
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/member-withdraw-http",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+        headers=admin_headers,
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    submitted = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "owner-u1", "artifact_id": artifact_id},
+        headers=member_headers,
+    )
+    assert submitted.status_code == 200
+    submission_id = submitted.json()["data"]["submission_id"]
+
+    denied = client.post(
+        "/api/member/profile-pack/submissions/withdraw",
+        json={"user_id": "owner-u1", "submission_id": submission_id},
+        headers=other_headers,
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "permission_denied"
+
+    withdrawn = client.post(
+        "/api/member/profile-pack/submissions/withdraw",
+        json={"user_id": "owner-u1", "submission_id": submission_id},
+        headers=member_headers,
+    )
+    assert withdrawn.status_code == 200
+    assert withdrawn.json()["data"]["status"] == "withdrawn"
+
+    withdrawn_rows = client.get(
+        "/api/member/profile-pack/submissions",
+        params={"user_id": "owner-u1", "status": "withdrawn"},
+        headers=member_headers,
+    )
+    assert withdrawn_rows.status_code == 200
+    assert [item["submission_id"] for item in withdrawn_rows.json()["data"]["submissions"]] == [submission_id]
+
+
+def test_webui_member_profile_pack_import_rejects_non_sharelife_archive(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("astrbot-config.json", json.dumps({"provider": "openai"}))
+
+    response = client.post(
+        "/api/member/profile-pack/imports",
+        json={
+            "user_id": "member-1",
+            "filename": "astrbot-export.zip",
+            "content_base64": base64.b64encode(archive.getvalue()).decode("ascii"),
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_profile_pack_payload"
+
+
+def test_webui_member_profile_pack_import_converts_astrbot_backup_zip(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "astrbot_version": "4.16.0",
+                    "backup_time": "2026-04-07T12:00:00Z",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        zf.writestr(
+            "config/cmd_config.json",
+            json.dumps(
+                {
+                    "provider": [
+                        {
+                            "id": "test-openai",
+                            "type": "openai_chat_completion",
+                            "model": "gpt-4o-mini",
+                            "key": ["test-key"],
+                        }
+                    ],
+                    "provider_settings": {"websearch_tavily_key": ["tvly-secret"]},
+                    "dashboard": {"password": "dashboard-secret"},
+                    "admins_id": ["owner"],
+                    "plugin_set": ["*"],
+                    "timezone": "Asia/Shanghai",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
+    response = client.post(
+        "/api/member/profile-pack/imports",
+        json={
+            "user_id": "member-1",
+            "filename": "astrbot-backup.zip",
+            "content_base64": base64.b64encode(archive.getvalue()).decode("ascii"),
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["compatibility"] == "degraded"
+    assert "astrbot_raw_import_converted" in data["compatibility_issues"]
+    assert data["source_artifact_id"]
+
+
+def test_webui_member_profile_pack_import_detects_local_astrbot_config(tmp_path, monkeypatch):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    local_config = tmp_path / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {"websearch_tavily_key": ["tvly-secret"]},
+                "dashboard": {"password": "dashboard-secret"},
+                "admins_id": ["owner"],
+                "plugin_set": ["sharelife"],
+                "timezone": "Asia/Shanghai",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+
+    response = client.post(
+        "/api/member/profile-pack/imports/local-astrbot",
+        json={"user_id": "member-1"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["user_id"] == "member-1"
+    assert data["compatibility"] == "degraded"
+    assert "astrbot_raw_import_converted" in data["compatibility_issues"]
+    assert data["source_artifact_id"]
+
+
+def test_webui_member_profile_pack_import_draft_routes_are_owner_scoped(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+    member_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u1"},
+    )
+    other_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u2"},
+    )
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert member_login.status_code == 200
+    assert other_login.status_code == 200
+    assert admin_login.status_code == 200
+    member_headers = {"Authorization": f"Bearer {member_login.json()['token']}"}
+    other_headers = {"Authorization": f"Bearer {other_login.json()['token']}"}
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/member-owned-import",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+        headers=admin_headers,
+    )
+    assert exported.status_code == 200
+    archive_bytes = Path(exported.json()["data"]["path"]).read_bytes()
+    archive_b64 = base64.b64encode(archive_bytes).decode("ascii")
+
+    cross_import = client.post(
+        "/api/member/profile-pack/imports",
+        json={
+            "user_id": "owner-u2",
+            "filename": exported.json()["data"]["filename"],
+            "content_base64": archive_b64,
+        },
+        headers=member_headers,
+    )
+    assert cross_import.status_code == 403
+    assert cross_import.json()["error"]["code"] == "permission_denied"
+
+    own_import = client.post(
+        "/api/member/profile-pack/imports",
+        json={
+            "user_id": "owner-u1",
+            "filename": exported.json()["data"]["filename"],
+            "content_base64": archive_b64,
+        },
+        headers=member_headers,
+    )
+    assert own_import.status_code == 200
+    assert own_import.json()["data"]["user_id"] == "owner-u1"
+    source_artifact_id = own_import.json()["data"]["source_artifact_id"]
+
+    own_list = client.get(
+        "/api/member/profile-pack/imports",
+        params={"user_id": "owner-u1", "limit": 10},
+        headers=member_headers,
+    )
+    assert own_list.status_code == 200
+    assert own_list.json()["data"]["user_id"] == "owner-u1"
+    assert len(own_list.json()["data"]["imports"]) == 1
+
+    cross_list = client.get(
+        "/api/member/profile-pack/imports",
+        params={"user_id": "owner-u2", "limit": 10},
+        headers=member_headers,
+    )
+    assert cross_list.status_code == 403
+    assert cross_list.json()["error"]["code"] == "permission_denied"
+
+    denied_submit = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "owner-u2", "artifact_id": source_artifact_id},
+        headers=other_headers,
+    )
+    assert denied_submit.status_code == 403
+    assert denied_submit.json()["error"]["code"] == "permission_denied"
+
+    own_submit = client.post(
+        "/api/profile-pack/submit",
+        json={"user_id": "owner-u1", "artifact_id": source_artifact_id},
+        headers=member_headers,
+    )
+    assert own_submit.status_code == 200
+    assert own_submit.json()["data"]["artifact_id"] == source_artifact_id
+
+
+def test_webui_profile_pack_submit_supports_idempotency_header_replay(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/community-header-idempotent",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    first = client.post(
+        "/api/profile-pack/submit",
+        headers={"Idempotency-Key": "profile-pack-header-key-1"},
+        json={"user_id": "owner-u1", "artifact_id": artifact_id},
+    )
+    assert first.status_code == 200
+    assert first.json()["data"]["submit_options"]["idempotency_key"] == "profile-pack-header-key-1"
+
+    second = client.post(
+        "/api/profile-pack/submit",
+        headers={"Idempotency-Key": "profile-pack-header-key-1"},
+        json={"user_id": "owner-u1", "artifact_id": artifact_id},
+    )
+    assert second.status_code == 200
+    assert second.json()["data"]["submission_id"] == first.json()["data"]["submission_id"]
+    assert second.json()["data"]["idempotent_replay"] is True
 
 
 def test_webui_auth_rejects_query_token_by_default(tmp_path):
@@ -3264,10 +4048,38 @@ def test_webui_member_can_only_download_own_submission_package(tmp_path):
     own_download = client.get(
         "/api/member/submissions/package/download",
         params={"user_id": "member-1", "submission_id": own_id},
+        headers={"Idempotency-Key": "member-download-job-1"},
     )
     assert own_download.status_code == 200
     assert own_download.headers["content-type"] == "application/zip"
     assert own_download.headers["content-disposition"].endswith('filename="community-member-one.zip"')
+    assert own_download.headers["x-sharelife-transfer-job-id"]
+    assert own_download.headers["x-sharelife-transfer-status"] == "done"
+
+    transfers = client.get(
+        "/api/member/transfers",
+        params={"user_id": "member-1", "direction": "download"},
+    )
+    assert transfers.status_code == 200
+    assert transfers.json()["data"]["count"] == 1
+    assert transfers.json()["data"]["jobs"][0]["job_id"] == own_download.headers["x-sharelife-transfer-job-id"]
+    assert transfers.json()["data"]["jobs"][0]["retry_count"] == 0
+
+    replay = client.get(
+        "/api/member/submissions/package/download",
+        params={"user_id": "member-1", "submission_id": own_id},
+        headers={"Idempotency-Key": "member-download-job-1"},
+    )
+    assert replay.status_code == 200
+    assert replay.headers["x-sharelife-transfer-job-id"] == own_download.headers["x-sharelife-transfer-job-id"]
+
+    refreshed = client.post(
+        "/api/member/transfers/refresh",
+        json={"user_id": "member-1", "direction": "download"},
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()["data"]["jobs"][0]["attempt_count"] == 2
+    assert refreshed.json()["data"]["jobs"][0]["retry_count"] == 1
 
     denied = client.get(
         "/api/member/submissions/package/download",
@@ -3469,3 +4281,38 @@ def test_webui_server_exposes_template_and_submission_detail_routes(tmp_path):
     assert submission_detail.status_code == 200
     assert submission_detail.json()["data"]["status"] == "pending"
     assert submission_detail.json()["data"]["prompt_preview"].startswith("Ignore previous")
+
+
+def test_admin_artifact_list_and_mirror_routes(tmp_path, monkeypatch):
+    server = build_server(tmp_path)
+    server.api.api.market_service.publish_official_template(
+        template_id="community/basic",
+        version="1.0.0",
+        prompt_template="Official template",
+    )
+    artifact = server.api.api.package_service.export_template_package("community/basic")
+    calls: list[list[str]] = []
+
+    def _fake_run(command, **kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="copy ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    client = TestClient(server.app)
+
+    listed = client.get("/api/admin/artifacts", params={"role": "admin", "limit": 20})
+    assert listed.status_code == 200
+    assert any(row["artifact_id"] == artifact.artifact_id for row in listed.json()["data"]["artifacts"])
+
+    mirrored = client.post(
+        "/api/admin/artifacts/mirror",
+        json={
+            "role": "admin",
+            "admin_id": "admin-1",
+            "artifact_id": artifact.artifact_id,
+            "remote_path": "gdrive-crypt:/sharelife-artifacts",
+        },
+    )
+    assert mirrored.status_code == 200
+    assert mirrored.json()["data"]["mirror"]["status"] == "succeeded"
+    assert calls[0][0:2] == ["rclone", "copyto"]

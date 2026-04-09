@@ -1,6 +1,7 @@
 const state = {
   token: "",
   authRequired: false,
+  allowAnonymousMember: false,
   authRole: "",
   availableRoles: [],
   uiLocale: "en-US",
@@ -55,8 +56,14 @@ const state = {
   },
   capabilities: {
     role: "member",
+    authenticated: false,
+    anonymousMember: false,
     operations: [],
     availableRoles: ["member", "reviewer", "admin"],
+  },
+  runtimeFeatures: {
+    supportsLocalAstrbotImport: true,
+    allowAnonymousLocalAstrbotImport: false,
   },
   marketHub: {
     selectedTemplateId: "",
@@ -65,8 +72,12 @@ const state = {
   },
   memberPanel: {
     installations: [],
+    importDrafts: [],
     tasks: [],
     searchQuery: "",
+    selectedImportDraftId: "",
+    uploadSelectionTree: [],
+    uploadSelectedNodePath: "",
   },
   reviewerLifecycle: {
     invites: [],
@@ -95,7 +106,11 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnTrial: "templates.trial.request",
   btnTrialStatus: "templates.trial.status",
   btnInstall: "templates.install",
-  btnRefreshMemberInstallations: "member.installations.refresh",
+  btnImportAstrbotConfig: "member.profile_pack.imports.local_astrbot",
+  btnImportConfigPackFile: "member.profile_pack.imports.package_upload",
+  btnOpenMemberImportReview: "member.profile_pack.imports.read",
+  btnMemberProfilePackUploadDelete: "member.profile_pack.imports.delete",
+  btnRefreshMemberInstallationsInline: "member.installations.refresh",
   btnPrompt: "templates.prompt.generate",
   btnPackage: "templates.package.generate",
   btnPackageDownload: "templates.package.download",
@@ -128,8 +143,6 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnReviewerSessionRevoke: "admin.reviewer.lifecycle.manage",
   btnNotice: "notifications.read",
   btnStorageSummary: "admin.storage.local_summary.read",
-  btnContinuityList: "admin.apply.workflow",
-  btnContinuityGet: "admin.apply.workflow",
   btnStoragePoliciesGet: "admin.storage.policies.read",
   btnStoragePoliciesSet: "admin.storage.policies.write",
   btnStorageRunBackup: "admin.storage.jobs.run",
@@ -140,6 +153,8 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnStorageRestoreCancel: "admin.storage.restore.cancel",
   btnStorageRestoreJobsList: "admin.storage.restore.read",
   btnStorageRestoreJobGet: "admin.storage.restore.read",
+  btnContinuityList: "admin.apply.workflow",
+  btnContinuityGet: "admin.apply.workflow",
   btnProfilePackExport: "admin.profile_pack.manage",
   btnProfilePackDownloadExport: "member.profile_pack.submissions.export.download",
   btnProfilePackListExports: "admin.profile_pack.manage",
@@ -160,7 +175,30 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnProfilePackCatalogDetail: "profile_pack.catalog.read",
   btnProfilePackCatalogCompare: "profile_pack.catalog.read",
   btnProfilePackSetFeatured: "admin.profile_pack.featured.write",
+  btnMemberProfilePackUploadSubmit: "profile_pack.community.submit",
 })
+
+const ANONYMOUS_MEMBER_FALLBACK_OPERATIONS = Object.freeze([
+  "auth.info.read",
+  "auth.login",
+  "health.read",
+  "member.installations.read",
+  "member.installations.refresh",
+  "member.installations.uninstall",
+  "member.tasks.read",
+  "member.tasks.refresh",
+  "notifications.read",
+  "preferences.read",
+  "preferences.write",
+  "profile_pack.catalog.read",
+  "templates.detail",
+  "templates.install",
+  "templates.list",
+  "templates.package.download",
+  "templates.trial.request",
+  "templates.trial.status",
+  "ui.capabilities.read",
+])
 
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
@@ -178,6 +216,11 @@ const dialogFocusState = {
     resolveFallbackFocus: null,
   },
   submitWizard: {
+    keydownHandler: null,
+    restoreFocusTarget: null,
+    resolveFallbackFocus: null,
+  },
+  memberProfilePackUpload: {
     keydownHandler: null,
     restoreFocusTarget: null,
     resolveFallbackFocus: null,
@@ -474,6 +517,96 @@ function i18nFormat(key, fallback, tokens = {}) {
   })
 }
 
+function localizedProfilePackIssueLabels(values) {
+  const guidance = profilePackGuidanceHelpers()
+  const options = {
+    t: (key, fallback = "") => i18nMessage(key, fallback),
+    f: (key, fallback = "", tokens = {}) => i18nFormat(key, fallback, tokens),
+  }
+  if (guidance && guidance.formatIssueLabels) {
+    return guidance.formatIssueLabels(values, options)
+  }
+  const rows = Array.isArray(values) ? values : []
+  return rows
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item, index, all) => all.indexOf(item) === index)
+}
+
+function isRawAstrBotImportItem(item) {
+  const issues = Array.isArray(item && item.compatibility_issues) ? item.compatibility_issues : []
+  return issues.some((entry) => String(entry || "").trim().toLowerCase() === "astrbot_raw_import_converted")
+}
+
+function memberImportIssueSummary(values, limit = 2) {
+  const labels = localizedProfilePackIssueLabels(values)
+  if (!labels.length) return ""
+  const preview = labels.slice(0, Math.max(1, Number(limit) || 1)).join(" · ")
+  if (labels.length <= limit) return preview
+  return `${preview} +${labels.length - limit}`
+}
+
+function memberImportSourceLabel(item) {
+  if (isRawAstrBotImportItem(item)) {
+    return i18nMessage(
+      "member.upload_detail.import_source_astrbot_raw",
+      "Raw AstrBot export (converted)",
+    )
+  }
+  return i18nMessage(
+    "member.upload_detail.import_source_standard",
+    "Sharelife standard import",
+  )
+}
+
+function memberImportSummaryText(item) {
+  const summary = item && typeof item.import_summary === "object" && item.import_summary
+    ? item.import_summary
+    : {}
+  const parts = []
+  const defaultPersonality = String(summary.default_personality || "").trim()
+  const personaCount = Number(summary.persona_count || 0)
+  const subagentCount = Number(summary.subagent_count || 0)
+  const platformCount = Number(summary.platform_count || 0)
+  if (defaultPersonality) {
+    parts.push(
+      i18nFormat(
+        "member.imports.summary_default_personality",
+        "Persona: {value}",
+        { value: defaultPersonality },
+      ),
+    )
+  }
+  if (personaCount > 0) {
+    parts.push(
+      i18nFormat(
+        "member.imports.summary_persona_count",
+        "Personas: {count}",
+        { count: personaCount },
+      ),
+    )
+  }
+  if (subagentCount > 0) {
+    parts.push(
+      i18nFormat(
+        "member.imports.summary_subagent_count",
+        "Subagents: {count}",
+        { count: subagentCount },
+      ),
+    )
+  }
+  if (platformCount > 0) {
+    parts.push(
+      i18nFormat(
+        "member.imports.summary_platform_count",
+        "Platforms: {count}",
+        { count: platformCount },
+      ),
+    )
+  }
+  return parts.join(" · ")
+}
+
 function humanizeCodeValue(value) {
   const text = String(value || "").trim()
   if (!text) return "-"
@@ -544,6 +677,10 @@ function applyUiLocale(locale, options = {}) {
     updateProfilePackMarketPanel(state.profilePack.market.lastOperation)
     updateTemplatesTable(state.templates)
     updateProfilePackCatalogTable(state.profilePack.market.catalog)
+    renderMemberInstallations(state.memberPanel.installations)
+    renderMemberImportDrafts(state.memberPanel.importDrafts)
+    renderMemberTaskQueue()
+    syncMemberProfilePackUploadModal()
     updateReviewerInviteTable(state.reviewerLifecycle.invites)
     updateReviewerAccountTable(state.reviewerLifecycle.accounts)
     updateReviewerDeviceTable(state.reviewerLifecycle.devices)
@@ -626,6 +763,9 @@ function pageModeFromLocation() {
     return helper.pageModeFromPath(pathname)
   }
   const text = String(pathname || "").trim().toLowerCase()
+  if (text === "/member.html") return "member"
+  if (text === "/reviewer.html") return "reviewer"
+  if (text === "/admin.html") return "admin"
   if (text === "/user" || text === "/user/") return "member"
   if (text === "/member" || text === "/member/") return "member"
   if (text === "/reviewer" || text === "/reviewer/") return "reviewer"
@@ -855,6 +995,9 @@ function render(name, payload) {
     "package_download",
     "member_installations",
     "member_installations_refresh",
+    "member_installations_uninstall",
+    "member_profile_pack_import",
+    "member_profile_pack_submit",
     "profile_pack_submit",
   ])
   if (taskNames.has(String(name || ""))) {
@@ -877,6 +1020,10 @@ function apiData(response) {
     return response.data.data
   }
   return {}
+}
+
+function responseErrorCode(response) {
+  return String(response && response.data && response.data.error && response.data.error.code || "").trim()
 }
 
 function fixedRoleByPageMode() {
@@ -902,8 +1049,10 @@ function fallbackCapabilityRole() {
   return "member"
 }
 
-function fallbackCapabilityOperations(role) {
+function fallbackCapabilityOperations(role, options = {}) {
   const normalizedRole = String(role || "").trim().toLowerCase()
+  const authenticated = options.authenticated !== false
+  const allowAnonymousMember = options.allowAnonymousMember === true
   const base = [
     "auth.info.read",
     "auth.login",
@@ -913,11 +1062,20 @@ function fallbackCapabilityOperations(role) {
   const member = [
     "member.installations.read",
     "member.installations.refresh",
+    "member.installations.uninstall",
+    "member.profile_pack.imports.delete",
+    "member.profile_pack.imports.local_astrbot",
+    "member.profile_pack.imports.package_upload",
+    "member.profile_pack.imports.read",
+    "member.profile_pack.imports.write",
+    "member.tasks.read",
+    "member.tasks.refresh",
     "member.submissions.read",
     "member.submissions.detail.read",
     "member.submissions.package.download",
     "member.profile_pack.submissions.read",
     "member.profile_pack.submissions.detail.read",
+    "member.profile_pack.submissions.withdraw",
     "member.profile_pack.submissions.export.download",
     "notifications.read",
     "preferences.read",
@@ -973,6 +1131,9 @@ function fallbackCapabilityOperations(role) {
     return Array.from(new Set([...base, ...member, ...reviewer]))
   }
   if (normalizedRole === "member") {
+    if (!authenticated && allowAnonymousMember) {
+      return ANONYMOUS_MEMBER_FALLBACK_OPERATIONS.slice()
+    }
     return Array.from(new Set([...base, ...member]))
   }
   return base.slice()
@@ -981,14 +1142,27 @@ function fallbackCapabilityOperations(role) {
 function setCapabilities(payload, options = {}) {
   const data = payload && typeof payload === "object" ? payload : {}
   const role = String(data.role || fallbackCapabilityRole()).trim().toLowerCase()
+  const authenticated = typeof data.authenticated === "boolean"
+    ? data.authenticated
+    : (!state.authRequired || (Boolean(state.token) && state.token !== "no-auth"))
+  const anonymousMember = data.anonymous_member === true
   const operations = Array.isArray(data.operations)
     ? data.operations.map((item) => String(item || "").trim()).filter(Boolean)
-    : fallbackCapabilityOperations(role)
+    : fallbackCapabilityOperations(role, {
+      authenticated,
+      allowAnonymousMember: state.allowAnonymousMember,
+    })
   const availableRoles = Array.isArray(data.available_roles)
     ? data.available_roles.map((item) => String(item || "").trim()).filter(Boolean)
     : ["member", "reviewer", "admin"]
+  state.runtimeFeatures.supportsLocalAstrbotImport = data.supports_local_astrbot_import !== false
+  state.runtimeFeatures.allowAnonymousLocalAstrbotImport = Boolean(
+    data.allow_anonymous_local_astrbot_import,
+  )
   state.capabilities = {
     role: role || fallbackCapabilityRole(),
+    authenticated,
+    anonymousMember,
     operations: Array.from(new Set(operations)),
     availableRoles: availableRoles.length ? availableRoles : ["member", "reviewer", "admin"],
   }
@@ -1078,13 +1252,27 @@ async function refreshCapabilities(options = {}) {
       clearAdminAuthSession()
       updateAuthUi()
     }
-    const fallbackRole = state.authRequired && (!state.token || state.token === "no-auth")
-      ? "public"
-      : fallbackCapabilityRole()
+    const fallbackAnonymousMember = (
+      state.authRequired &&
+      state.allowAnonymousMember &&
+      !state.token &&
+      state.pageMode !== "reviewer" &&
+      state.pageMode !== "admin"
+    )
+    const fallbackRole = fallbackAnonymousMember
+      ? "member"
+      : (state.authRequired && (!state.token || state.token === "no-auth")
+        ? "public"
+        : fallbackCapabilityRole())
     setCapabilities(
       {
         role: fallbackRole,
-        operations: fallbackCapabilityOperations(fallbackRole),
+        authenticated: !fallbackAnonymousMember && (!state.authRequired || (Boolean(state.token) && state.token !== "no-auth")),
+        anonymous_member: fallbackAnonymousMember,
+        operations: fallbackCapabilityOperations(fallbackRole, {
+          authenticated: !fallbackAnonymousMember && (!state.authRequired || (Boolean(state.token) && state.token !== "no-auth")),
+          allowAnonymousMember: state.allowAnonymousMember,
+        }),
         available_roles: ["member", "reviewer", "admin"],
       },
       { updateScope: options.updateScope !== false },
@@ -6200,16 +6388,82 @@ function updateProfilePackSubmissionTable(rows) {
       : item.pack_id || ""
     tr.appendChild(cell(item.submission_id || item.id || ""))
     tr.appendChild(cell(packLabel))
-    tr.appendChild(cell(item.status || ""))
+    tr.appendChild(cell(enumLabelValue("status", item.status || "unknown")))
     tr.appendChild(pillCell("profile_pack_submission", "risk_level", item.risk_level ? [item.risk_level] : []))
     tr.appendChild(pillCell("profile_pack_submission", "review_label", item.review_labels))
     tr.appendChild(pillCell("profile_pack_submission", "warning_flag", item.warning_flags))
     tr.appendChild(cell(item.review_note || "-"))
+    tr.appendChild(profilePackSubmissionActionCell(item))
     bindInteractiveRow(tr, async () => {
       applyProfilePackMarketSubmissionSelection(item)
     })
     tbody.appendChild(tr)
   })
+}
+
+function canWithdrawProfilePackSubmission(item) {
+  const a = actor()
+  return (
+    hasCapability("member.profile_pack.submissions.withdraw") &&
+    String(a.role || "").trim().toLowerCase() === "member" &&
+    String(a.user_id || "").trim() !== "" &&
+    String(item && item.user_id || "").trim() === String(a.user_id || "").trim() &&
+    String(item && item.status || "").trim().toLowerCase() === "pending"
+  )
+}
+
+function profilePackSubmissionActionCell(item) {
+  const td = document.createElement("td")
+  if (!canWithdrawProfilePackSubmission(item)) {
+    td.textContent = "-"
+    return td
+  }
+  const button = document.createElement("button")
+  button.type = "button"
+  button.className = "btn-ghost"
+  button.textContent = i18nMessage("button.withdraw_submission", "Withdraw Submission")
+  button.addEventListener("click", (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void withdrawMemberProfilePackSubmission(item, button)
+  })
+  td.appendChild(button)
+  return td
+}
+
+async function withdrawMemberProfilePackSubmission(item, button) {
+  const submissionId = String(item && (item.submission_id || item.id) || "").trim()
+  if (!submissionId) {
+    return buildClientErrorResponse("submission_id_required", "submission_id is required", 400)
+  }
+  const a = actor()
+  if (button) {
+    button.disabled = true
+    button.setAttribute("aria-busy", "true")
+  }
+  try {
+    const response = await api("/api/member/profile-pack/submissions/withdraw", {
+      method: "POST",
+      body: {
+        user_id: a.user_id,
+        submission_id: submissionId,
+      },
+    })
+    render("member_withdraw_profile_pack_submission", response)
+    if (workspaceRequestFailed(response)) {
+      return response
+    }
+    const data = apiData(response)
+    await listProfilePackMarketSubmissions()
+    updateProfilePackMarketPanel(data)
+    applyProfilePackMarketSubmissionSelection(data)
+    return response
+  } finally {
+    if (button) {
+      button.disabled = false
+      button.setAttribute("aria-busy", "false")
+    }
+  }
 }
 
 function updateProfilePackCatalogTable(rows) {
@@ -6321,6 +6575,11 @@ async function refreshHealth() {
 async function initAuth() {
   const auth = await api("/api/auth-info")
   state.authRequired = Boolean(auth.data.auth_required)
+  state.allowAnonymousMember = Boolean(auth.data.allow_anonymous_member)
+  state.runtimeFeatures.supportsLocalAstrbotImport = auth.data.supports_local_astrbot_import !== false
+  state.runtimeFeatures.allowAnonymousLocalAstrbotImport = Boolean(
+    auth.data.allow_anonymous_local_astrbot_import,
+  )
   state.availableRoles = Array.isArray(auth.data.available_roles) ? auth.data.available_roles : []
   restoreAdminAuthSession()
   applyAuthOptions(state.availableRoles)
@@ -6365,6 +6624,15 @@ async function login() {
     applyAuthOptions(state.availableRoles)
     updateAuthUi()
     await refreshCapabilities({ updateScope: false })
+    if (byId("memberInstallationsList")) {
+      await loadMemberInstallations()
+    }
+    if (byId("memberImportDraftList")) {
+      await loadMemberProfilePackImports()
+    }
+    if (byId("memberTaskQueueList")) {
+      await loadMemberTasks()
+    }
   } else {
     persistAdminAuthSession()
   }
@@ -6427,7 +6695,10 @@ function uploadTooLargeResponse() {
 
 async function selectedPackagePayload() {
   const input = byId("submitPackageFile")
-  const file = input.files && input.files[0]
+  if (!input || !input.files) {
+    return {}
+  }
+  const file = input.files[0]
   if (!file) {
     return {}
   }
@@ -6451,29 +6722,41 @@ function readInstallOptionsFromForm() {
 }
 
 function readUploadOptionsFromForm() {
-  const scanModeNode = byId("uploadScanMode")
-  const visibilityNode = byId("uploadVisibility")
+  const helper = profilePackMarketHelpers()
+  const input = {
+    scanMode: String(byId("uploadScanMode")?.value || "balanced").trim() || "balanced",
+    visibility: String(byId("uploadVisibility")?.value || "community").trim() || "community",
+    replaceExisting: Boolean(byId("uploadReplaceExisting") && byId("uploadReplaceExisting").checked),
+  }
+  if (helper && typeof helper.buildUploadOptions === "function") {
+    return helper.buildUploadOptions(input)
+  }
   return {
-    scan_mode: scanModeNode ? String(scanModeNode.value || "balanced").trim() : "balanced",
-    visibility: visibilityNode ? String(visibilityNode.value || "community").trim() : "community",
-    replace_existing: Boolean(byId("uploadReplaceExisting") && byId("uploadReplaceExisting").checked),
+    scan_mode: input.scanMode,
+    visibility: input.visibility,
+    replace_existing: Boolean(input.replaceExisting),
   }
 }
 
 function readProfilePackSubmitOptionsFromForm() {
-  const packTypeNode = byId("submitPackType")
-  const redactionNode = byId("submitRedactionMode")
-  const selectedSectionsNode = byId("submitSelectedSections")
+  const helper = profilePackMarketHelpers()
+  const input = {
+    packType: String(byId("submitPackType")?.value || "bot_profile_pack").trim() || "bot_profile_pack",
+    redactionMode: String(byId("submitRedactionMode")?.value || "exclude_secrets").trim() || "exclude_secrets",
+    selectedSections: String(byId("submitSelectedSections")?.value || ""),
+    replaceExisting: Boolean(byId("submitReplaceExisting") && byId("submitReplaceExisting").checked),
+  }
+  if (helper && typeof helper.buildSubmitOptions === "function") {
+    return helper.buildSubmitOptions(input)
+  }
   return {
-    pack_type: packTypeNode ? String(packTypeNode.value || "bot_profile_pack").trim() : "bot_profile_pack",
-    redaction_mode: redactionNode ? String(redactionNode.value || "exclude_secrets").trim() : "exclude_secrets",
-    selected_sections: selectedSectionsNode
-      ? String(selectedSectionsNode.value || "")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean)
-      : [],
-    replace_existing: Boolean(byId("submitReplaceExisting") && byId("submitReplaceExisting").checked),
+    pack_type: input.packType,
+    redaction_mode: input.redactionMode,
+    selected_sections: input.selectedSections
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    replace_existing: Boolean(input.replaceExisting),
   }
 }
 
@@ -6510,28 +6793,216 @@ function setMemberInstallationsState(status, message) {
   node.textContent = message
 }
 
+function appendMemberCollectionLabel(container, key, fallback) {
+  if (!container) return
+  const label = document.createElement("div")
+  label.className = "member-install-group-label note"
+  label.textContent = i18nMessage(key, fallback)
+  container.appendChild(label)
+}
+
+function buildMemberImportDraftCard(item, options = {}) {
+  const importId = String(item.import_id || "").trim()
+  const packId = String(item.pack_id || "").trim() || String(item.filename || "").trim() || "-"
+  const version = String(item.version || "").trim() || "-"
+  const packType = enumLabelValue("pack_type", String(item.pack_type || "unknown").trim() || "unknown")
+  const compatibility = enumLabelValue("compatibility", String(item.compatibility || "unknown").trim() || "unknown")
+  const row = document.createElement("article")
+  row.className = "member-install-item member-import-item"
+  if (Boolean(options.selected) && importId && importId === String(state.memberPanel.selectedImportDraftId || "").trim()) {
+    row.classList.add("is-selected")
+  }
+  row.tabIndex = 0
+  row.setAttribute("role", "button")
+  row.addEventListener("click", () => {
+    openMemberProfilePackUploadModalById(importId)
+  })
+  row.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return
+    event.preventDefault()
+    openMemberProfilePackUploadModalById(importId)
+  })
+
+  const body = document.createElement("div")
+  body.className = "member-install-item-body"
+  const title = document.createElement("strong")
+  title.textContent = packId
+  body.appendChild(title)
+  const meta = document.createElement("span")
+  meta.textContent = i18nFormat(
+    "member.imports.meta",
+    "v{version} · {pack_type} · {compatibility}",
+    {
+      version,
+      pack_type: packType,
+      compatibility,
+    },
+  )
+  body.appendChild(meta)
+  const note = document.createElement("span")
+  note.className = "member-import-item-note"
+  note.textContent = String(item.filename || "").trim() || "-"
+  body.appendChild(note)
+  const summaryText = memberImportSummaryText(item)
+  if (summaryText) {
+    const summaryNote = document.createElement("span")
+    summaryNote.className = "member-import-item-note"
+    summaryNote.textContent = summaryText
+    body.appendChild(summaryNote)
+  }
+  const issueSummary = memberImportIssueSummary(item.compatibility_issues, 2)
+  if (issueSummary) {
+    const issueNote = document.createElement("span")
+    issueNote.className = "member-import-item-note member-import-item-note-warning"
+    issueNote.textContent = i18nFormat(
+      "member.imports.issue_summary",
+      "Review notes: {summary}",
+      { summary: issueSummary },
+    )
+    body.appendChild(issueNote)
+  }
+  row.appendChild(body)
+
+  const actions = document.createElement("div")
+  actions.className = "member-install-actions"
+  const submitButton = document.createElement("button")
+  submitButton.type = "button"
+  submitButton.className = "btn-ghost member-install-action"
+  submitButton.textContent = i18nMessage("member.imports.open_upload_detail", "Open Upload Details")
+  submitButton.disabled = false
+  submitButton.addEventListener("click", (event) => {
+    event.stopPropagation()
+    openMemberProfilePackUploadModalById(importId)
+  })
+  actions.appendChild(submitButton)
+  const deleteButton = document.createElement("button")
+  deleteButton.type = "button"
+  deleteButton.className = "btn-ghost member-install-action"
+  deleteButton.textContent = i18nMessage("button.delete_import_draft", "Delete Draft")
+  deleteButton.disabled = item.delete_allowed === false
+  if (deleteButton.disabled) {
+    deleteButton.title = i18nMessage(
+      "member.imports.delete_blocked",
+      "This draft is already referenced by a submission and cannot be deleted.",
+    )
+  }
+  deleteButton.addEventListener("click", (event) => {
+    event.stopPropagation()
+    void deleteMemberImportDraft(importId)
+  })
+  actions.appendChild(deleteButton)
+  row.appendChild(actions)
+  return row
+}
+
+function openMemberInstallation(item) {
+  const templateId = String(item && item.template_id || "").trim()
+  if (templateId) {
+    applyFieldPatches({
+      trialTemplateId: templateId,
+      submitTemplateId: templateId,
+      templateFilterId: templateId,
+    })
+  }
+  void loadTemplateDetail({ templateId, syncRoute: false })
+}
+
+function setMemberInstallationActionBusy(button, busy) {
+  if (!button) return
+  button.disabled = Boolean(busy)
+  button.setAttribute("aria-busy", busy ? "true" : "false")
+}
+
+async function reinstallMemberInstallation(item, button) {
+  const templateId = String(item && item.template_id || "").trim()
+  if (!templateId) return
+  const a = actor()
+  setMemberInstallationActionBusy(button, true)
+  const installOptions = item && typeof item.install_options === "object"
+    ? { ...item.install_options, force_reinstall: true }
+    : { force_reinstall: true }
+  const response = await api("/api/templates/install", {
+    method: "POST",
+    body: {
+      ...a,
+      template_id: templateId,
+      install_options: installOptions,
+    },
+  })
+  render("install", response)
+  await loadMemberInstallations()
+  setMemberInstallationActionBusy(button, false)
+}
+
+async function uninstallMemberInstallation(item, button) {
+  const templateId = String(item && item.template_id || "").trim()
+  if (!templateId) return
+  const a = actor()
+  setMemberInstallationActionBusy(button, true)
+  const response = await api("/api/member/installations/uninstall", {
+    method: "POST",
+    body: {
+      user_id: a.user_id,
+      template_id: templateId,
+    },
+  })
+  render("member_installations_uninstall", response)
+  await loadMemberInstallations()
+  setMemberInstallationActionBusy(button, false)
+}
+
 function renderMemberInstallations(rows) {
   const container = byId("memberInstallationsList")
   if (!container) return
   container.innerHTML = ""
+  const importItems = filteredMemberImportDrafts(state.memberPanel.importDrafts)
   const items = filteredMemberInstallations(rows)
-  if (!items.length) {
+  if (!importItems.length && !items.length) {
     container.textContent = memberSearchQuery()
-      ? i18nMessage("member.installations.empty_filtered", "No local installations matched the current search.")
-      : i18nMessage("member.installations.empty", "No local installations yet.")
+      ? i18nMessage("member.installations.empty_filtered", "No local installations or imported config packs matched the current search.")
+      : i18nMessage("member.installations.empty", "No local installations or imported config packs yet.")
     return
   }
+  if (importItems.length) {
+    appendMemberCollectionLabel(
+      container,
+      "member.installations.imported_heading",
+      "Imported Config Drafts",
+    )
+    importItems.forEach((item) => {
+      container.appendChild(buildMemberImportDraftCard(item, { selected: true }))
+    })
+  }
+  if (importItems.length && items.length) {
+    appendMemberCollectionLabel(
+      container,
+      "member.installations.current_heading",
+      "Installed Configs",
+    )
+  }
   items.forEach((item) => {
-    const row = document.createElement("button")
-    row.type = "button"
-    row.className = "member-install-item"
     const templateId = String(item.template_id || "").trim()
     const version = String(item.version || "").trim()
     const risk = String(item.risk_level || "unknown").trim()
     const installedAt = String(item.installed_at || "").trim()
+    const row = document.createElement("article")
+    row.className = "member-install-item"
+    row.tabIndex = 0
+    row.setAttribute("role", "button")
+    row.addEventListener("click", () => {
+      openMemberInstallation(item)
+    })
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return
+      event.preventDefault()
+      openMemberInstallation(item)
+    })
+
+    const body = document.createElement("div")
+    body.className = "member-install-item-body"
     const title = document.createElement("strong")
     title.textContent = templateId || "-"
-    row.appendChild(title)
+    body.appendChild(title)
     const meta = document.createElement("span")
     meta.textContent = i18nFormat(
       "member.installations.meta",
@@ -6542,24 +7013,1240 @@ function renderMemberInstallations(rows) {
         installed_at: installedAt || "-",
       },
     )
-    row.appendChild(meta)
-    row.addEventListener("click", () => {
-      if (templateId) {
-        applyFieldPatches({
-          trialTemplateId: templateId,
-          submitTemplateId: templateId,
-          templateFilterId: templateId,
-        })
-      }
-      void loadTemplateDetail({ templateId, syncRoute: false })
+    body.appendChild(meta)
+    row.appendChild(body)
+
+    const actions = document.createElement("div")
+    actions.className = "member-install-actions"
+
+    const reinstallButton = document.createElement("button")
+    reinstallButton.type = "button"
+    reinstallButton.className = "btn-ghost member-install-action"
+    reinstallButton.textContent = i18nMessage("member.installations.reinstall", "Reinstall")
+    reinstallButton.disabled = false
+    reinstallButton.setAttribute("data-member-install-action", "reinstall")
+    reinstallButton.addEventListener("click", (event) => {
+      event.stopPropagation()
+      void reinstallMemberInstallation(item, reinstallButton)
     })
+    actions.appendChild(reinstallButton)
+
+    const uninstallButton = document.createElement("button")
+    uninstallButton.type = "button"
+    uninstallButton.className = "btn-ghost member-install-action"
+    uninstallButton.textContent = i18nMessage("member.installations.uninstall", "Uninstall")
+    uninstallButton.disabled = false
+    uninstallButton.setAttribute("data-member-install-action", "uninstall")
+    uninstallButton.addEventListener("click", (event) => {
+      event.stopPropagation()
+      void uninstallMemberInstallation(item, uninstallButton)
+    })
+    actions.appendChild(uninstallButton)
+
+    row.appendChild(actions)
     container.appendChild(row)
   })
 }
 
-function pushMemberTask(name, payload) {
+function filteredMemberImportDrafts(rows) {
+  const items = Array.isArray(rows) ? rows : []
+  const query = memberSearchQuery()
+  if (!query) return items
+  return items.filter((item) => {
+    const packId = String(item.pack_id || "").toLowerCase()
+    const version = String(item.version || "").toLowerCase()
+    const filename = String(item.filename || "").toLowerCase()
+    const compatibility = String(item.compatibility || "").toLowerCase()
+    const packType = String(item.pack_type || "").toLowerCase()
+    return (
+      packId.includes(query) ||
+      version.includes(query) ||
+      filename.includes(query) ||
+      compatibility.includes(query) ||
+      packType.includes(query)
+    )
+  })
+}
+
+function setMemberImportDraftState(status, message) {
+  const node = byId("memberImportDraftState")
+  if (!node) return
+  node.classList.remove("is-neutral", "is-warning", "is-danger", "is-success")
+  if (status === "loading" || status === "warning") node.classList.add("is-warning")
+  else if (status === "error") node.classList.add("is-danger")
+  else if (status === "success") node.classList.add("is-success")
+  else node.classList.add("is-neutral")
+  node.textContent = message
+}
+
+function syncMemberImportReviewTrigger() {
+  const button = byId("btnOpenMemberImportReview")
+  if (!button) return
+  const count = Array.isArray(state.memberPanel.importDrafts) ? state.memberPanel.importDrafts.length : 0
+  const visible = count > 0 && hasCapability("member.profile_pack.imports.read")
+  button.classList.toggle("hidden", !visible)
+  button.disabled = !visible
+  button.textContent = visible
+    ? i18nFormat(
+        "button.review_imported_configs_with_count",
+        "Review Imported Config Packs ({count})",
+        { count },
+      )
+    : i18nMessage("button.review_imported_configs", "Review Imported Config Packs")
+}
+
+function selectedMemberImportDraft() {
+  const selectedId = String(state.memberPanel.selectedImportDraftId || "").trim()
+  if (!selectedId) return null
+  return state.memberPanel.importDrafts.find(
+    (item) => String(item && item.import_id || "").trim() === selectedId,
+  ) || null
+}
+
+function memberProfilePackUploadModalNode() {
+  return byId("memberProfilePackUploadModal")
+}
+
+function setMemberProfilePackUploadState(status, message) {
+  const node = byId("memberProfilePackUploadState")
+  if (!node) return
+  node.classList.remove("is-neutral", "is-warning", "is-danger", "is-success")
+  if (status === "loading" || status === "warning") node.classList.add("is-warning")
+  else if (status === "error") node.classList.add("is-danger")
+  else if (status === "success") node.classList.add("is-success")
+  else node.classList.add("is-neutral")
+  node.textContent = message
+}
+
+function appendMemberImportDetailCard(container, label, value) {
+  if (!container) return
+  const card = document.createElement("div")
+  card.className = "detail-card"
+  const labelNode = document.createElement("div")
+  labelNode.className = "detail-card-label"
+  labelNode.textContent = String(label || "")
+  card.appendChild(labelNode)
+  const valueNode = document.createElement("div")
+  valueNode.className = "detail-card-value"
+  valueNode.textContent = String(value || "-")
+  card.appendChild(valueNode)
+  container.appendChild(card)
+}
+
+function fallbackMemberUploadSelectionTree(item) {
+  const sections = Array.isArray(item && item.sections) ? item.sections : []
+  return sections.map((sectionName) => ({
+    name: String(sectionName || "").trim(),
+    path: String(sectionName || "").trim(),
+    items: [],
+  }))
+}
+
+function normalizeMemberUploadSelectionNode(rawNode, fallbackSectionName = "") {
+  const node = rawNode && typeof rawNode === "object" ? rawNode : {}
+  const sectionName = String(node.name || fallbackSectionName || "").trim()
+  const path = String(node.path || sectionName || "").trim()
+  if (!path) return null
+  const childRows = Array.isArray(node.items) ? node.items : Array.isArray(node.children) ? node.children : []
+  const children = childRows
+    .map((child) => normalizeMemberUploadSelectionNode(child, sectionName))
+    .filter(Boolean)
+  return {
+    name: sectionName || String(path.split(".", 1)[0] || "").trim(),
+    path,
+    label: String(node.label || node.title || sectionName || path).trim() || path,
+    kind: String(node.kind || "").trim() || (children.length ? "object" : "scalar"),
+    previewLines: Array.isArray(node.preview_lines)
+      ? node.preview_lines.map((item) => String(item || "")).filter((item) => item.trim())
+      : [],
+    previewTruncated: Boolean(node.preview_truncated),
+    children,
+    checked: true,
+    indeterminate: false,
+    expanded: false,
+  }
+}
+
+function buildMemberUploadSelectionState(item) {
+  const rawTree = Array.isArray(item && item.selection_tree) && item.selection_tree.length
+    ? item.selection_tree
+    : fallbackMemberUploadSelectionTree(item)
+  return rawTree
+    .map((node) => normalizeMemberUploadSelectionNode(node))
+    .filter(Boolean)
+}
+
+function setMemberUploadSelectionNodeChecked(node, checked) {
+  if (!node || typeof node !== "object") return
+  node.checked = Boolean(checked)
+  node.indeterminate = false
+  const children = Array.isArray(node.children) ? node.children : []
+  children.forEach((child) => setMemberUploadSelectionNodeChecked(child, checked))
+}
+
+function syncMemberUploadSelectionNodeState(node) {
+  if (!node || typeof node !== "object") return
+  const children = Array.isArray(node.children) ? node.children : []
+  if (!children.length) return
+  children.forEach((child) => syncMemberUploadSelectionNodeState(child))
+  const allChecked = children.every((child) => Boolean(child.checked) && !child.indeterminate)
+  const anyChecked = children.some((child) => Boolean(child.checked) || child.indeterminate)
+  node.checked = anyChecked
+  node.indeterminate = anyChecked && !allChecked
+}
+
+function updateMemberUploadSelectionNode(nodes, path, checked) {
+  const rows = Array.isArray(nodes) ? nodes : []
+  for (const node of rows) {
+    if (!node || typeof node !== "object") continue
+    if (node.path === path) {
+      setMemberUploadSelectionNodeChecked(node, checked)
+      return true
+    }
+    if (updateMemberUploadSelectionNode(node.children, path, checked)) {
+      syncMemberUploadSelectionNodeState(node)
+      return true
+    }
+  }
+  return false
+}
+
+function memberUploadPathCovers(parentPath, targetPath) {
+  const parent = String(parentPath || "").trim()
+  const target = String(targetPath || "").trim()
+  if (!parent || !target) return false
+  return (
+    target === parent ||
+    target.startsWith(`${parent}.`) ||
+    target.startsWith(`${parent}[`)
+  )
+}
+
+function findMemberUploadSelectionNode(nodes, path) {
+  const rows = Array.isArray(nodes) ? nodes : []
+  const target = String(path || "").trim()
+  if (!target) return null
+  for (const node of rows) {
+    if (!node || typeof node !== "object") continue
+    if (node.path === target) return node
+    const nested = findMemberUploadSelectionNode(node.children, target)
+    if (nested) return nested
+  }
+  return null
+}
+
+function expandMemberUploadSelectionAncestors(nodes, path) {
+  const rows = Array.isArray(nodes) ? nodes : []
+  const target = String(path || "").trim()
+  if (!target) return
+  rows.forEach((node) => {
+    if (!node || typeof node !== "object") return
+    if (!memberUploadPathCovers(node.path, target)) return
+    if (Array.isArray(node.children) && node.children.length) {
+      node.expanded = true
+      expandMemberUploadSelectionAncestors(node.children, target)
+    }
+  })
+}
+
+function selectedMemberUploadSelectionNode() {
+  const tree = Array.isArray(state.memberPanel.uploadSelectionTree) ? state.memberPanel.uploadSelectionTree : []
+  const current = findMemberUploadSelectionNode(tree, state.memberPanel.uploadSelectedNodePath)
+  if (current) return current
+  const fallback = tree[0] || null
+  state.memberPanel.uploadSelectedNodePath = fallback ? fallback.path : ""
+  return fallback
+}
+
+function selectMemberUploadSelectionNode(path) {
+  const tree = Array.isArray(state.memberPanel.uploadSelectionTree) ? state.memberPanel.uploadSelectionTree : []
+  const target = findMemberUploadSelectionNode(tree, path)
+  if (!target) return
+  state.memberPanel.uploadSelectedNodePath = target.path
+  expandMemberUploadSelectionAncestors(tree, target.path)
+}
+
+function toggleMemberUploadSelectionNodeExpanded(path) {
+  const tree = Array.isArray(state.memberPanel.uploadSelectionTree) ? state.memberPanel.uploadSelectionTree : []
+  const target = findMemberUploadSelectionNode(tree, path)
+  if (!target || !Array.isArray(target.children) || !target.children.length) return
+  target.expanded = !target.expanded
+}
+
+function memberUploadSelectionSectionMeta(sectionName) {
+  const guidance = profilePackGuidanceHelpers()
+  const normalized = String(sectionName || "").trim()
+  if (!guidance || !guidance.describeSection) return null
+  return guidance.describeSection(normalized)
+}
+
+function memberUploadSelectionNodeLabel(node) {
+  const path = String(node && node.path || "").trim()
+  const fallback = String(node && node.label || path || "Item").trim() || "Item"
+  if (path === "personas.runtime") {
+    return i18nMessage("member.upload_detail.node.personas_runtime", fallback)
+  }
+  if (path === "personas.entries") {
+    return i18nMessage("member.upload_detail.node.personas_entries", fallback)
+  }
+  if (path === "environment_manifest.subagent_orchestrator") {
+    return i18nMessage("member.upload_detail.node.subagent_orchestrator", fallback)
+  }
+  if (path === "environment_manifest.platform") {
+    return i18nMessage("member.upload_detail.node.platforms", fallback)
+  }
+  if (path === "environment_manifest.provider_sources") {
+    return i18nMessage("member.upload_detail.node.provider_sources", fallback)
+  }
+  if (path === "astrbot_core.provider_settings") {
+    return i18nMessage("member.upload_detail.node.provider_settings", fallback)
+  }
+  return fallback
+}
+
+function memberUploadSelectionStateLabel(node) {
+  if (!node || typeof node !== "object") {
+    return i18nMessage("member.upload_detail.selection_state_unchecked", "Not selected")
+  }
+  if (node.indeterminate) {
+    return i18nMessage("member.upload_detail.selection_state_partial", "Partially selected")
+  }
+  if (node.checked) {
+    return i18nMessage("member.upload_detail.selection_state_checked", "Selected")
+  }
+  return i18nMessage("member.upload_detail.selection_state_unchecked", "Not selected")
+}
+
+function memberUploadSelectionKindLabel(node) {
+  const kind = String(node && node.kind || "scalar").trim() || "scalar"
+  return i18nMessage(`member.upload_detail.kind.${kind}`, kind)
+}
+
+function memberUploadSelectionPreviewText(node) {
+  const lines = Array.isArray(node && node.previewLines) ? node.previewLines : []
+  if (!lines.length) {
+    return i18nMessage(
+      "member.upload_detail.preview_empty",
+      "No preview content is available for the current node.",
+    )
+  }
+  let text = lines.join("\n")
+  if (node && node.previewTruncated) {
+    text += `\n\n${i18nMessage("member.upload_detail.preview_truncated", "Preview truncated.")}`
+  }
+  return text
+}
+
+function memberUploadSelectionPreviewSnippet(node) {
+  const lines = Array.isArray(node && node.previewLines) ? node.previewLines : []
+  const normalized = lines
+    .map((line) => String(line || "").trim())
+    .filter(Boolean)
+    .filter((line) => !["{", "}", "[", "]"].includes(line))
+  const source = normalized[0] || String(lines[0] || "").trim()
+  if (!source) return ""
+  const cleaned = source.replace(/^"(.*)"[,]?$/, "$1")
+  if (cleaned.length <= 120) return cleaned
+  return `${cleaned.slice(0, 117)}...`
+}
+
+function renderMemberUploadSelectionNode(node, level, isSectionRoot) {
+  const wrapper = document.createElement("div")
+  wrapper.className = `member-upload-tree-node member-upload-tree-level-${Math.min(level, 4)}`
+  const row = document.createElement("div")
+  row.className = "member-upload-tree-row"
+  if (String(state.memberPanel.uploadSelectedNodePath || "").trim() === node.path) {
+    row.classList.add("is-selected")
+  }
+
+  const children = Array.isArray(node.children) ? node.children : []
+  if (children.length) {
+    const toggle = document.createElement("button")
+    toggle.type = "button"
+    toggle.className = "member-upload-tree-toggle"
+    toggle.setAttribute("aria-label", node.expanded ? "Collapse node" : "Expand node")
+    toggle.textContent = node.expanded ? "▾" : "▸"
+    toggle.addEventListener("click", () => {
+      toggleMemberUploadSelectionNodeExpanded(node.path)
+      renderMemberUploadDetailSections()
+    })
+    row.appendChild(toggle)
+  } else {
+    const spacer = document.createElement("span")
+    spacer.className = "member-upload-tree-spacer"
+    spacer.setAttribute("aria-hidden", "true")
+    row.appendChild(spacer)
+  }
+
+  const input = document.createElement("input")
+  input.type = "checkbox"
+  input.checked = Boolean(node.checked)
+  input.indeterminate = Boolean(node.indeterminate)
+  input.setAttribute("data-member-upload-path", node.path)
+  if (isSectionRoot) {
+    input.setAttribute("data-member-upload-section", node.name)
+  }
+  input.addEventListener("change", () => {
+    updateMemberUploadSelectionNode(state.memberPanel.uploadSelectionTree, node.path, input.checked)
+    state.memberPanel.uploadSelectionTree.forEach((sectionNode) => syncMemberUploadSelectionNodeState(sectionNode))
+    renderMemberUploadDetailSections()
+  })
+  row.appendChild(input)
+
+  const button = document.createElement("button")
+  button.type = "button"
+  button.className = "member-upload-tree-select"
+  button.addEventListener("click", () => {
+    selectMemberUploadSelectionNode(node.path)
+    renderMemberUploadDetailSections()
+  })
+
+  const body = document.createElement("span")
+  body.className = "profile-pack-section-body"
+  const titleRow = document.createElement("span")
+  titleRow.className = "profile-pack-section-title-row"
+
+  const title = document.createElement("span")
+  title.className = "profile-pack-section-title"
+  if (isSectionRoot) {
+    const sectionMeta = memberUploadSelectionSectionMeta(node.name)
+    title.textContent =
+      sectionMeta && sectionMeta.known && sectionMeta.titleKey
+        ? i18nMessage(sectionMeta.titleKey, node.label)
+        : node.label
+    if (sectionMeta && sectionMeta.stateful) {
+      appendPill(
+        titleRow,
+        i18nMessage("profile_pack.section.badge.stateful", "Stateful"),
+        "warning",
+      )
+    }
+    if (sectionMeta && sectionMeta.localData) {
+      appendPill(
+        titleRow,
+        i18nMessage("profile_pack.section.badge.local_data", "Local Data"),
+        "neutral",
+      )
+    }
+  } else {
+    title.textContent = memberUploadSelectionNodeLabel(node)
+  }
+  titleRow.appendChild(title)
+  body.appendChild(titleRow)
+
+  if (isSectionRoot) {
+    const sectionMeta = memberUploadSelectionSectionMeta(node.name)
+    if (sectionMeta && sectionMeta.known && sectionMeta.descriptionKey) {
+      const description = document.createElement("span")
+      description.className = "profile-pack-section-description"
+      description.textContent = i18nMessage(sectionMeta.descriptionKey, node.name)
+      body.appendChild(description)
+    }
+  } else {
+    const pathMeta = document.createElement("span")
+    pathMeta.className = "profile-pack-section-description"
+    pathMeta.textContent = node.path
+    body.appendChild(pathMeta)
+  }
+  button.appendChild(body)
+  row.appendChild(button)
+  wrapper.appendChild(row)
+
+  if (children.length && node.expanded) {
+    const childContainer = document.createElement("div")
+    childContainer.className = "member-upload-tree-children"
+    children.forEach((child) => {
+      childContainer.appendChild(renderMemberUploadSelectionNode(child, level + 1, false))
+    })
+    wrapper.appendChild(childContainer)
+  }
+  return wrapper
+}
+
+function renderMemberUploadDetailInspector() {
+  const headingNode = byId("memberUploadDetailInspectorHeading")
+  const pathNode = byId("memberUploadDetailInspectorPath")
+  const summaryNode = byId("memberUploadDetailInspectorSummary")
+  const previewNode = byId("memberUploadDetailInspectorPreview")
+  const childrenNode = byId("memberUploadDetailInspectorChildren")
+  if (!headingNode || !pathNode || !summaryNode || !previewNode || !childrenNode) return
+  clearNodeChildren(summaryNode)
+  clearNodeChildren(childrenNode)
+  const node = selectedMemberUploadSelectionNode()
+  if (!node) {
+    headingNode.textContent = i18nMessage("member.upload_detail.inspector_title", "Section Inspector")
+    pathNode.textContent = i18nMessage(
+      "member.upload_detail.inspector_empty",
+      "Select a section or item from the left to inspect it here.",
+    )
+    previewNode.textContent = i18nMessage(
+      "member.upload_detail.preview_empty",
+      "No preview content is available for the current node.",
+    )
+    return
+  }
+
+  const label = memberUploadSelectionNodeLabel(node)
+  headingNode.textContent = label
+  pathNode.textContent = i18nFormat(
+    "member.upload_detail.path_value",
+    "{label}: {path}",
+    {
+      label: i18nMessage("member.upload_detail.path_label", "Path"),
+      path: node.path,
+    },
+  )
+  appendMemberImportDetailCard(
+    summaryNode,
+    i18nMessage("member.upload_detail.kind_label", "Node Type"),
+    memberUploadSelectionKindLabel(node),
+  )
+  appendMemberImportDetailCard(
+    summaryNode,
+    i18nMessage("member.upload_detail.child_count_label", "Child Items"),
+    String(Array.isArray(node.children) ? node.children.length : 0),
+  )
+  appendMemberImportDetailCard(
+    summaryNode,
+    i18nMessage("member.upload_detail.selection_state_label", "Selection"),
+    memberUploadSelectionStateLabel(node),
+  )
+  previewNode.textContent = memberUploadSelectionPreviewText(node)
+
+  const children = Array.isArray(node.children) ? node.children : []
+  if (!children.length) {
+    const empty = document.createElement("div")
+    empty.className = "note"
+    empty.textContent = i18nMessage(
+      "member.upload_detail.children_empty",
+      "This item is already at the finest upload granularity.",
+    )
+    childrenNode.appendChild(empty)
+    return
+  }
+
+  children.forEach((child) => {
+    const card = document.createElement("article")
+    card.className = "member-upload-child-card"
+    if (String(state.memberPanel.uploadSelectedNodePath || "").trim() === child.path) {
+      card.classList.add("is-selected")
+    }
+
+    const head = document.createElement("div")
+    head.className = "member-upload-child-head"
+
+    const input = document.createElement("input")
+    input.type = "checkbox"
+    input.checked = Boolean(child.checked)
+    input.indeterminate = Boolean(child.indeterminate)
+    input.addEventListener("change", () => {
+      updateMemberUploadSelectionNode(state.memberPanel.uploadSelectionTree, child.path, input.checked)
+      state.memberPanel.uploadSelectionTree.forEach((sectionNode) => syncMemberUploadSelectionNodeState(sectionNode))
+      renderMemberUploadDetailSections()
+    })
+    head.appendChild(input)
+
+    const open = document.createElement("button")
+    open.type = "button"
+    open.className = "member-upload-child-open"
+    open.addEventListener("click", () => {
+      selectMemberUploadSelectionNode(child.path)
+      renderMemberUploadDetailSections()
+    })
+
+    const title = document.createElement("span")
+    title.className = "member-upload-child-title"
+    title.textContent = memberUploadSelectionNodeLabel(child)
+    open.appendChild(title)
+
+    const meta = document.createElement("span")
+    meta.className = "member-upload-child-meta"
+    meta.textContent = `${child.path} · ${memberUploadSelectionKindLabel(child)}`
+    open.appendChild(meta)
+    head.appendChild(open)
+
+    card.appendChild(head)
+    const preview = memberUploadSelectionPreviewSnippet(child)
+    if (preview) {
+      const previewNode = document.createElement("div")
+      previewNode.className = "member-upload-child-preview"
+      previewNode.textContent = preview
+      card.appendChild(previewNode)
+    }
+    childrenNode.appendChild(card)
+  })
+}
+
+function renderMemberUploadDetailSections() {
+  const container = byId("memberUploadDetailSectionList")
+  if (!container) return
+  clearNodeChildren(container)
+  const tree = Array.isArray(state.memberPanel.uploadSelectionTree) ? state.memberPanel.uploadSelectionTree : []
+  if (!tree.length) {
+    const empty = document.createElement("div")
+    empty.className = "note"
+    empty.textContent = i18nMessage(
+      "member.upload_detail.sections_empty",
+      "No selectable sections are available for this draft.",
+    )
+    container.appendChild(empty)
+    renderMemberUploadDetailInspector()
+    return
+  }
+  selectedMemberUploadSelectionNode()
+  tree.forEach((sectionNode) => {
+    container.appendChild(renderMemberUploadSelectionNode(sectionNode, 0, true))
+  })
+  renderMemberUploadDetailInspector()
+}
+
+function collectMemberUploadSelectionPaths(node, isSectionRoot) {
+  if (!node || !node.checked) return []
+  const children = Array.isArray(node.children) ? node.children : []
+  if (isSectionRoot) {
+    if (!node.indeterminate) return []
+    return children.flatMap((child) => collectMemberUploadSelectionPaths(child, false))
+  }
+  if (!children.length) {
+    return [node.path]
+  }
+  return children.flatMap((child) => collectMemberUploadSelectionPaths(child, false))
+}
+
+function readMemberUploadDetailSelection(item) {
+  const tree = Array.isArray(state.memberPanel.uploadSelectionTree) ? state.memberPanel.uploadSelectionTree : []
+  if (!tree.length) {
+    const fallbackSections = Array.isArray(item && item.sections) ? item.sections : []
+    return {
+      selectedSections: fallbackSections,
+      selectedItemPaths: [],
+    }
+  }
+  const selectedSections = []
+  const selectedItemPaths = []
+  tree.forEach((sectionNode) => {
+    if (!sectionNode || !sectionNode.checked) return
+    const sectionName = String(sectionNode.name || sectionNode.path || "").trim()
+    if (!sectionName) return
+    selectedSections.push(sectionName)
+    selectedItemPaths.push(...collectMemberUploadSelectionPaths(sectionNode, true))
+  })
+  return {
+    selectedSections,
+    selectedItemPaths,
+  }
+}
+
+function readMemberUploadDetailSections(item) {
+  return readMemberUploadDetailSelection(item).selectedSections
+}
+
+function syncMemberProfilePackUploadModal() {
+  const item = selectedMemberImportDraft()
+  const metaNode = byId("memberProfilePackUploadMeta")
+  const detailGrid = byId("memberProfilePackUploadDetailGrid")
+  const replaceExistingNode = byId("memberUploadDetailReplaceExisting")
+  const deleteButton = byId("btnMemberProfilePackUploadDelete")
+  const submitButton = byId("btnMemberProfilePackUploadSubmit")
+  if (!metaNode || !detailGrid || !replaceExistingNode || !submitButton || !deleteButton) return
+  clearNodeChildren(detailGrid)
+  if (!item) {
+    state.memberPanel.uploadSelectionTree = []
+    state.memberPanel.uploadSelectedNodePath = ""
+    metaNode.textContent = i18nMessage(
+      "member.upload_detail.meta_idle",
+      "Select an imported config pack to continue.",
+    )
+    renderMemberUploadDetailSections()
+    replaceExistingNode.checked = false
+    deleteButton.disabled = true
+    deleteButton.title = ""
+    submitButton.disabled = true
+    submitButton.title = ""
+    setMemberProfilePackUploadState(
+      "neutral",
+      i18nMessage("member.upload_detail.idle", "Select an imported config pack to continue."),
+    )
+    return
+  }
+  const packId = String(item.pack_id || "").trim() || String(item.filename || "").trim() || "-"
+  const version = String(item.version || "").trim() || "-"
+  const packType = enumLabelValue("pack_type", String(item.pack_type || "unknown").trim() || "unknown")
+  const compatibility = enumLabelValue("compatibility", String(item.compatibility || "unknown").trim() || "unknown")
+  const sections = Array.isArray(item.sections) ? item.sections : []
+  const issues = Array.isArray(item.compatibility_issues) ? item.compatibility_issues : []
+  const summary = item && typeof item.import_summary === "object" && item.import_summary
+    ? item.import_summary
+    : {}
+  const issueSummary = memberImportIssueSummary(issues, 3)
+  metaNode.textContent = i18nFormat(
+    "member.upload_detail.meta",
+    "{pack_id} · {pack_type} · {version}",
+    {
+      pack_id: packId,
+      pack_type: packType,
+      version,
+    },
+  )
+  appendMemberImportDetailCard(detailGrid, i18nMessage("field.profile_pack_id", "Profile Pack ID"), packId)
+  appendMemberImportDetailCard(detailGrid, i18nMessage("field.pack_type", "Pack Type"), packType)
+  appendMemberImportDetailCard(detailGrid, i18nMessage("field.version", "Version"), version)
+  appendMemberImportDetailCard(detailGrid, i18nMessage("detail.label.import_source", "Import source"), memberImportSourceLabel(item))
+  appendMemberImportDetailCard(detailGrid, i18nMessage("detail.label.compatibility", "Compatibility"), compatibility)
+  appendMemberImportDetailCard(
+    detailGrid,
+    i18nMessage("detail.label.compatibility_notes", "Compatibility notes"),
+    issueSummary || "-",
+  )
+  if (String(summary.default_personality || "").trim()) {
+    appendMemberImportDetailCard(
+      detailGrid,
+      i18nMessage("detail.label.default_personality", "Default Persona"),
+      String(summary.default_personality || "").trim(),
+    )
+  }
+  if (Number(summary.persona_count || 0) > 0) {
+    appendMemberImportDetailCard(
+      detailGrid,
+      i18nMessage("detail.label.persona_entries", "Persona entries"),
+      String(summary.persona_count || 0),
+    )
+  }
+  if (Number(summary.subagent_count || 0) > 0) {
+    appendMemberImportDetailCard(
+      detailGrid,
+      i18nMessage("detail.label.enabled_subagents", "Enabled subagents"),
+      String(summary.subagent_count || 0),
+    )
+  }
+  if (Number(summary.platform_count || 0) > 0) {
+    appendMemberImportDetailCard(
+      detailGrid,
+      i18nMessage("detail.label.platforms", "Platforms"),
+      String(summary.platform_count || 0),
+    )
+  }
+  appendMemberImportDetailCard(detailGrid, i18nMessage("detail.label.sections", "Sections"), sections.length ? sections.join(", ") : "-")
+  appendMemberImportDetailCard(detailGrid, i18nMessage("detail.label.filename", "Filename"), String(item.filename || "").trim() || "-")
+  state.memberPanel.uploadSelectionTree = buildMemberUploadSelectionState(item)
+  state.memberPanel.uploadSelectedNodePath = String(
+    state.memberPanel.uploadSelectionTree[0] && state.memberPanel.uploadSelectionTree[0].path || "",
+  ).trim()
+  renderMemberUploadDetailSections()
+  replaceExistingNode.checked = false
+  deleteButton.disabled = item.delete_allowed === false
+  deleteButton.title = deleteButton.disabled
+    ? i18nMessage(
+        "member.imports.delete_blocked",
+        "This draft is already referenced by a submission and cannot be deleted.",
+      )
+    : ""
+  setMemberProfilePackUploadState(
+    issues.length ? "warning" : "success",
+    issues.length
+      ? i18nFormat(
+          "member.upload_detail.warning_with_issue",
+          "Compatibility issues: {count}. First issue: {issue}",
+          {
+            count: issues.length,
+            issue: memberImportIssueSummary(issues, 1),
+          },
+        )
+      : i18nMessage(
+          "member.upload_detail.ready",
+          "Import is ready for submission.",
+        ),
+  )
+  const allowed = hasCapability("profile_pack.community.submit")
+  submitButton.disabled = !allowed
+  submitButton.title = allowed ? "" : capabilityLockedHint("profile_pack.community.submit")
+}
+
+function openMemberProfilePackUploadModalById(importId) {
+  const normalized = String(importId || "").trim()
+  const fallbackImportId = normalized || String(state.memberPanel.selectedImportDraftId || "").trim()
+  const nextImportId = fallbackImportId || String(state.memberPanel.importDrafts[0] && state.memberPanel.importDrafts[0].import_id || "").trim()
+  if (!nextImportId) return
+  state.memberPanel.selectedImportDraftId = nextImportId
+  renderMemberImportDrafts(state.memberPanel.importDrafts)
+  const modal = memberProfilePackUploadModalNode()
+  if (!modal) return
+  syncMemberProfilePackUploadModal()
+  modal.setAttribute("role", "dialog")
+  modal.setAttribute("aria-modal", "true")
+  modal.classList.remove("hidden")
+  modal.setAttribute("aria-hidden", "false")
+  activateDialogFocus("memberProfilePackUpload", modal, {
+    close: closeMemberProfilePackUploadModal,
+    resolveFallbackFocus: () => byId("btnOpenMemberImportReview") || byId("btnImportAstrbotConfig"),
+  })
+}
+
+function closeMemberProfilePackUploadModal() {
+  const modal = memberProfilePackUploadModalNode()
+  if (!modal) return
+  modal.classList.add("hidden")
+  modal.setAttribute("aria-hidden", "true")
+  deactivateDialogFocus("memberProfilePackUpload", modal)
+}
+
+function renderMemberImportDrafts(rows) {
+  const container = byId("memberImportDraftList")
+  if (!container) return
+  container.innerHTML = ""
+  const items = filteredMemberImportDrafts(rows)
+  if (!items.length) {
+    container.textContent = memberSearchQuery()
+      ? i18nMessage("member.imports.empty_filtered", "No imported config packs matched the current search.")
+      : i18nMessage("member.imports.empty", "No imported config packs yet.")
+    syncMemberImportReviewTrigger()
+    return
+  }
+  items.forEach((item) => {
+    container.appendChild(buildMemberImportDraftCard(item, { selected: true }))
+  })
+  syncMemberImportReviewTrigger()
+}
+
+async function loadMemberProfilePackImports(options = {}) {
+  const container = byId("memberImportDraftList")
+  if (!container) return null
+  if (!hasCapability("member.profile_pack.imports.read")) {
+    state.memberPanel.importDrafts = []
+    state.memberPanel.selectedImportDraftId = ""
+    renderMemberImportDrafts([])
+    renderMemberInstallations(state.memberPanel.installations)
+    setMemberImportDraftState(
+      "warning",
+      i18nMessage(
+        "member.imports.locked",
+        "Login is required before importing or managing AstrBot config packs.",
+      ),
+    )
+    syncMemberImportReviewTrigger()
+    syncMemberProfilePackUploadModal()
+    return buildClientErrorResponse("permission_denied", "permission denied", 403)
+  }
+  const selectedImportId = String(options.selectedImportId || "").trim()
+  setMemberImportDraftState(
+    "loading",
+    i18nMessage("member.imports.loading", "Loading imported config packs..."),
+  )
+  const a = actor()
+  const response = await api(`/api/member/profile-pack/imports${queryString({
+    user_id: a.user_id,
+    limit: 50,
+  })}`)
+  const data = apiData(response)
+  const rows = Array.isArray(data.imports) ? data.imports : []
+  state.memberPanel.importDrafts = rows
+  if (selectedImportId && rows.some((item) => String(item && item.import_id || "").trim() === selectedImportId)) {
+    state.memberPanel.selectedImportDraftId = selectedImportId
+  } else if (!rows.some((item) => String(item && item.import_id || "").trim() === String(state.memberPanel.selectedImportDraftId || "").trim())) {
+    state.memberPanel.selectedImportDraftId = String(rows[0] && rows[0].import_id || "").trim()
+  }
+  renderMemberImportDrafts(rows)
+  renderMemberInstallations(state.memberPanel.installations)
+  if (workspaceRequestFailed(response)) {
+    setMemberImportDraftState(
+      "error",
+      i18nFormat("member.imports.error", "Failed to load imported config packs: {message}", {
+        message: errorMessageForCollection("profilePackSubmissions", response),
+      }),
+    )
+  } else {
+    setMemberImportDraftState(
+      rows.length ? "success" : "neutral",
+      i18nFormat("member.imports.ready", "Imported config packs: {count}", { count: rows.length }),
+    )
+  }
+  syncMemberImportReviewTrigger()
+  syncMemberProfilePackUploadModal()
+  return response
+}
+
+function promptMemberProfilePackImport() {
+  if (!hasCapability("member.profile_pack.imports.package_upload")) return
+  const input = byId("memberImportAstrbotConfigFile")
+  if (!input) return
+  input.value = ""
+  input.click()
+}
+
+async function importMemberLocalAstrbotConfig() {
+  if (!hasCapability("member.profile_pack.imports.local_astrbot")) return null
+  const trigger = byId("btnImportAstrbotConfig")
+  if (trigger) {
+    trigger.disabled = true
+    trigger.setAttribute("aria-busy", "true")
+  }
+  let response = null
+  try {
+    const a = actor()
+    response = await api("/api/member/profile-pack/imports/local-astrbot", {
+      method: "POST",
+      body: {
+        user_id: a.user_id,
+      },
+    })
+    render("member_profile_pack_import_local_astrbot", response)
+    if (!workspaceRequestFailed(response)) {
+      const data = apiData(response)
+      const importId = String(data.import_id || "").trim()
+      await loadMemberProfilePackImports({ selectedImportId: importId })
+      if (importId) {
+        openMemberProfilePackUploadModalById(importId)
+      }
+      setMemberImportDraftState(
+        "success",
+        i18nMessage(
+          "member.imports.local_import_ready",
+          "Local AstrBot config imported. Review upload details before submission.",
+        ),
+      )
+    } else {
+      const errorCode = responseErrorCode(response)
+      const errorMessage = errorMessageForCollection("profilePackSubmissions", response)
+      setMemberImportDraftState(
+        "error",
+        errorCode === "astrbot_local_config_not_found"
+          ? i18nMessage(
+              "member.imports.local_import_not_found",
+              "No local AstrBot config was detected on this host.",
+            )
+          : i18nFormat(
+              "member.imports.local_import_failed",
+              "Failed to import the local AstrBot config: {message}",
+              { message: errorMessage },
+            ),
+      )
+    }
+  } finally {
+    if (trigger) {
+      trigger.disabled = false
+      trigger.setAttribute("aria-busy", "false")
+    }
+  }
+  return response
+}
+
+async function importMemberProfilePackFromSelection() {
+  const input = byId("memberImportAstrbotConfigFile")
+  const trigger = byId("btnImportConfigPackFile")
+  if (!input || !input.files || !input.files[0]) return
+  const file = input.files[0]
+  if (trigger) {
+    trigger.disabled = true
+    trigger.setAttribute("aria-busy", "true")
+  }
+  try {
+    assertUploadFileAllowed(file)
+  } catch (_error) {
+    render("member_profile_pack_import", uploadTooLargeResponse())
+    setMemberImportDraftState(
+      "error",
+      i18nFormat(
+        "upload.error.package_too_large",
+        "Package exceeds the {limit} limit.",
+        { limit: uploadLimitLabel() },
+      ),
+    )
+    if (trigger) {
+      trigger.disabled = false
+      trigger.setAttribute("aria-busy", "false")
+    }
+    input.value = ""
+    return
+  }
+
+  let response = null
+  try {
+    const a = actor()
+    response = await api("/api/member/profile-pack/imports", {
+      method: "POST",
+      body: {
+        user_id: a.user_id,
+        filename: String(file.name || "profile-pack.zip"),
+        content_base64: await readFileAsBase64(file),
+      },
+    })
+    render("member_profile_pack_import", response)
+    if (!workspaceRequestFailed(response)) {
+      const data = apiData(response)
+      const importId = String(data.import_id || "").trim()
+      await loadMemberProfilePackImports({ selectedImportId: importId })
+      if (importId) {
+        openMemberProfilePackUploadModalById(importId)
+      }
+    } else if (responseErrorCode(response) === "invalid_profile_pack_payload") {
+      setMemberImportDraftState(
+        "error",
+        i18nMessage(
+          "member.imports.invalid_format",
+          "Import failed. Accepted inputs are Sharelife standard zip, AstrBot backup zip, cmd_config.json, or abconf_*.json.",
+        ),
+      )
+    } else {
+      setMemberImportDraftState(
+        "error",
+        i18nFormat("member.imports.error", "Failed to load imported config packs: {message}", {
+          message: String(
+            response && response.data && response.data.error && response.data.error.message || response.status || "request failed",
+          ),
+        }),
+      )
+    }
+  } finally {
+    if (trigger) {
+      trigger.disabled = false
+      trigger.setAttribute("aria-busy", "false")
+    }
+    input.value = ""
+    updateSelectedFileName(
+      "memberImportAstrbotConfigFile",
+      "memberUploadFileName",
+      "member.upload.file_idle",
+      "No file selected. Max 20 MiB. Sharelife standard zip, AstrBot backup zip, cmd_config.json, and abconf_*.json are supported.",
+    )
+  }
+  return response
+}
+
+function memberProfilePackSubmitOptionsFromModal(item) {
+  const selection = readMemberUploadDetailSelection(item)
+  return {
+    pack_type: String(item && item.pack_type || "bot_profile_pack").trim() || "bot_profile_pack",
+    selected_sections: selection.selectedSections,
+    selected_item_paths: selection.selectedItemPaths,
+    replace_existing: Boolean(byId("memberUploadDetailReplaceExisting") && byId("memberUploadDetailReplaceExisting").checked),
+    source: "member_import",
+  }
+}
+
+async function submitSelectedMemberImportDraft() {
+  const item = selectedMemberImportDraft()
+  const button = byId("btnMemberProfilePackUploadSubmit")
+  if (!item || !button) return null
+  if (!hasCapability("profile_pack.community.submit")) {
+    setMemberProfilePackUploadState(
+      "warning",
+      capabilityLockedHint("profile_pack.community.submit"),
+    )
+    return buildClientErrorResponse("permission_denied", "permission denied", 403)
+  }
+  const artifactId = String(item.source_artifact_id || "").trim()
+  if (!artifactId) {
+    setMemberProfilePackUploadState(
+      "error",
+      i18nMessage(
+        "member.upload_detail.error_missing_artifact",
+        "Imported config pack is missing its source artifact.",
+      ),
+    )
+    return buildClientErrorResponse("artifact_id_required", "artifact_id is required", 400)
+  }
+  const submitOptions = memberProfilePackSubmitOptionsFromModal(item)
+  if (!Array.isArray(submitOptions.selected_sections) || !submitOptions.selected_sections.length) {
+    setMemberProfilePackUploadState(
+      "warning",
+      i18nMessage(
+        "member.upload_detail.sections_empty",
+        "No selectable sections are available for this draft.",
+      ),
+    )
+    return buildClientErrorResponse("invalid_profile_section", "invalid profile section", 400)
+  }
+  button.disabled = true
+  button.setAttribute("aria-busy", "true")
+  const a = actor()
+  const response = await api("/api/profile-pack/submit", {
+    method: "POST",
+    body: {
+      user_id: a.user_id,
+      artifact_id: artifactId,
+      submit_options: submitOptions,
+    },
+  })
+  render("member_profile_pack_submit", response)
+  if (!workspaceRequestFailed(response)) {
+    setMemberProfilePackUploadState(
+      "success",
+      i18nMessage("member.upload_detail.submitted", "Config pack submitted successfully."),
+    )
+    closeMemberProfilePackUploadModal()
+    if (byId("btnProfilePackListPackSubmissions")) {
+      await listProfilePackMarketSubmissions()
+    }
+  } else {
+    setMemberProfilePackUploadState(
+      "error",
+      i18nFormat("member.upload_detail.error", "Submission failed: {message}", {
+        message: errorMessageForCollection("profilePackSubmissions", response),
+      }),
+    )
+  }
+  button.disabled = !hasCapability("profile_pack.community.submit")
+  button.setAttribute("aria-busy", "false")
+  return response
+}
+
+async function deleteMemberImportDraft(importId = "") {
+  const normalizedImportId = String(importId || "").trim()
+  const item = normalizedImportId
+    ? state.memberPanel.importDrafts.find((entry) => String(entry && entry.import_id || "").trim() === normalizedImportId) || null
+    : selectedMemberImportDraft()
+  const button = byId("btnMemberProfilePackUploadDelete")
+  if (!item || !button) return null
+  if (item.delete_allowed === false) {
+    setMemberProfilePackUploadState(
+      "warning",
+      i18nMessage(
+        "member.imports.delete_blocked",
+        "This draft is already referenced by a submission and cannot be deleted.",
+      ),
+    )
+    return buildClientErrorResponse("profile_import_in_use", "profile import in use", 409)
+  }
+  button.disabled = true
+  button.setAttribute("aria-busy", "true")
+  try {
+    const a = actor()
+    const response = await api(
+      `/api/member/profile-pack/imports/${encodeURIComponent(String(item.import_id || "").trim())}${queryString({ user_id: a.user_id })}`,
+      { method: "DELETE" },
+    )
+    render("member_profile_pack_import_delete", response)
+    if (!workspaceRequestFailed(response)) {
+      await loadMemberProfilePackImports()
+      if (!state.memberPanel.importDrafts.length) {
+        closeMemberProfilePackUploadModal()
+      } else {
+        syncMemberProfilePackUploadModal()
+      }
+      setMemberImportDraftState(
+        "success",
+        i18nMessage("member.imports.deleted", "Imported config draft deleted."),
+      )
+    } else {
+      setMemberProfilePackUploadState(
+        "error",
+        i18nFormat("member.upload_detail.error", "Submission failed: {message}", {
+          message: errorMessageForCollection("profilePackSubmissions", response),
+        }),
+      )
+    }
+    return response
+  } finally {
+    button.setAttribute("aria-busy", "false")
+    const currentItem = selectedMemberImportDraft()
+    button.disabled = !currentItem || currentItem.delete_allowed === false
+  }
+}
+
+function memberTaskQueueNodes() {
   const queueNode = byId("memberTaskQueueList")
   const stateNode = byId("memberTaskQueueState")
+  return { queueNode, stateNode }
+}
+
+function memberTaskSortValue(value) {
+  const parsed = Date.parse(String(value || ""))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function memberTaskKey(item) {
+  if (!item || typeof item !== "object") return ""
+  const taskId = String(item.task_id || item.id || "").trim()
+  if (taskId) return `id:${taskId}`
+  return [
+    String(item.name || "operation").trim(),
+    String(item.at || "").trim(),
+    String(item.status || "").trim(),
+    String(item.message || "").trim(),
+  ].join("|")
+}
+
+function normalizeMemberTaskEntry(raw) {
+  if (!raw || typeof raw !== "object") return null
+  const at = String(raw.at || raw.created_at || new Date().toISOString()).trim() || new Date().toISOString()
+  const statusText = String(raw.status || "").trim()
+  const okRaw = raw.ok
+  const ok = typeof okRaw === "boolean"
+    ? okRaw
+    : !["failed", "error", "conflict", "denied", "rejected"].includes(statusText.toLowerCase())
+  return {
+    task_id: String(raw.task_id || raw.id || "").trim(),
+    name: String(raw.name || raw.action || "operation").trim() || "operation",
+    action: String(raw.action || "").trim(),
+    ok,
+    status: statusText,
+    message: String(raw.message || "").trim(),
+    at,
+  }
+}
+
+function mergeMemberTasks(entries, limit = 24) {
+  const rows = Array.isArray(entries) ? entries : []
+  const out = []
+  const seen = new Set()
+  rows
+    .map((item) => normalizeMemberTaskEntry(item))
+    .filter(Boolean)
+    .sort((left, right) => memberTaskSortValue(right.at) - memberTaskSortValue(left.at))
+    .forEach((item) => {
+      const key = memberTaskKey(item)
+      if (!key || seen.has(key)) return
+      seen.add(key)
+      out.push(item)
+    })
+  return out.slice(0, Math.max(1, Number(limit || 24)))
+}
+
+function renderMemberTaskQueue() {
+  const { queueNode, stateNode } = memberTaskQueueNodes()
+  if (!queueNode || !stateNode) return
+  queueNode.innerHTML = ""
+  if (!state.memberPanel.tasks.length) {
+    stateNode.textContent = i18nMessage("member.tasks.idle", "Task queue is idle.")
+    return
+  }
+  state.memberPanel.tasks.forEach((item) => {
+    const line = document.createElement("div")
+    line.className = `member-task-item ${item.ok ? "is-success" : "is-warning"}`
+    line.textContent = `${item.at} | ${item.name} | ${item.status} | ${item.message || (item.ok ? "ok" : "failed")}`
+    queueNode.appendChild(line)
+  })
+  stateNode.textContent = i18nFormat(
+    "member.tasks.summary",
+    "Task queue updated: {count}",
+    { count: state.memberPanel.tasks.length },
+  )
+}
+
+async function loadMemberTasks(options = {}) {
+  const { queueNode, stateNode } = memberTaskQueueNodes()
+  if (!queueNode || !stateNode) return null
+  if (!hasCapability("member.tasks.read")) return null
+  const shouldRefresh = Boolean(options.refresh)
+  const a = actor()
+  const response = shouldRefresh
+    ? await api("/api/member/tasks/refresh", {
+      method: "POST",
+      body: { user_id: a.user_id, limit: 50 },
+    })
+    : await api(`/api/member/tasks${queryString({ user_id: a.user_id, limit: 50 })}`)
+  if (workspaceRequestFailed(response)) {
+    return response
+  }
+  const data = apiData(response)
+  const serverRows = Array.isArray(data.tasks) ? data.tasks : []
+  state.memberPanel.tasks = mergeMemberTasks([...serverRows, ...state.memberPanel.tasks], 24)
+  renderMemberTaskQueue()
+  return response
+}
+
+function pushMemberTask(name, payload) {
+  const { queueNode, stateNode } = memberTaskQueueNodes()
   if (!queueNode || !stateNode) return
   const response = payload && typeof payload === "object" ? payload : {}
   const ok = Boolean(response.data && response.data.ok)
@@ -6572,19 +8259,9 @@ function pushMemberTask(name, payload) {
     message,
     at: new Date().toISOString(),
   }
-  state.memberPanel.tasks = [entry, ...state.memberPanel.tasks].slice(0, 12)
-  queueNode.innerHTML = ""
-  state.memberPanel.tasks.forEach((item) => {
-    const line = document.createElement("div")
-    line.className = `member-task-item ${item.ok ? "is-success" : "is-warning"}`
-    line.textContent = `${item.at} | ${item.name} | ${item.status} | ${item.message || (item.ok ? "ok" : "failed")}`
-    queueNode.appendChild(line)
-  })
-  stateNode.textContent = i18nFormat(
-    "member.tasks.summary",
-    "Task queue updated: {count}",
-    { count: state.memberPanel.tasks.length },
-  )
+  state.memberPanel.tasks = mergeMemberTasks([entry, ...state.memberPanel.tasks], 24)
+  renderMemberTaskQueue()
+  void loadMemberTasks()
 }
 
 function updateSelectedFileName(inputId, outputId, emptyKey, emptyFallback) {
@@ -6627,6 +8304,7 @@ function bindUploadDropZone({ zoneId, inputId, outputId, emptyKey, emptyFallback
       Array.from(files).forEach((file) => transfer.items.add(file))
       input.files = transfer.files
       syncFileName()
+      input.dispatchEvent(new Event("change", { bubbles: true }))
     } catch (_error) {
       syncFileName()
     }
@@ -6635,6 +8313,19 @@ function bindUploadDropZone({ zoneId, inputId, outputId, emptyKey, emptyFallback
 }
 
 async function loadMemberInstallations(options = {}) {
+  if (!hasCapability("member.installations.read")) {
+    state.memberPanel.installations = []
+    renderMemberInstallations([])
+    setMemberInstallationsState(
+      "warning",
+      i18nFormat(
+        "capability.locked_hint",
+        "Requires capability: {capability}",
+        { capability: "member.installations.read" },
+      ),
+    )
+    return buildClientErrorResponse("permission_denied", "permission denied", 403)
+  }
   const shouldRefresh = Boolean(options.refresh)
   const a = actor()
   setMemberInstallationsState(
@@ -7332,6 +9023,7 @@ function bindButtons() {
       const packQuery = memberSpotlightProfilePackQuery(value)
       state.memberPanel.searchQuery = value
       renderMemberInstallations(state.memberPanel.installations)
+      renderMemberImportDrafts(state.memberPanel.importDrafts)
       const templateFilter = byId("templateFilterId")
       const categoryFilter = byId("templateCategoryFilter")
       if (templateFilter) {
@@ -7374,18 +9066,66 @@ function bindButtons() {
       )
     })
   }
-  const refreshInstallationsButton = byId("btnRefreshMemberInstallations")
-  if (refreshInstallationsButton) {
-    refreshInstallationsButton.addEventListener("click", () => {
+  const importAstrbotButton = byId("btnImportAstrbotConfig")
+  if (importAstrbotButton) {
+    importAstrbotButton.addEventListener("click", () => {
+      void importMemberLocalAstrbotConfig()
+    })
+  }
+  const importConfigPackButton = byId("btnImportConfigPackFile")
+  if (importConfigPackButton) {
+    importConfigPackButton.addEventListener("click", () => {
+      promptMemberProfilePackImport()
+    })
+  }
+  const openMemberImportReviewButton = byId("btnOpenMemberImportReview")
+  if (openMemberImportReviewButton) {
+    openMemberImportReviewButton.addEventListener("click", () => {
+      openMemberProfilePackUploadModalById("")
+    })
+  }
+  const importAstrbotInput = byId("memberImportAstrbotConfigFile")
+  if (importAstrbotInput) {
+    importAstrbotInput.addEventListener("change", () => {
+      void importMemberProfilePackFromSelection()
+    })
+  }
+  const refreshMemberInstallationsButton = byId("btnRefreshMemberInstallationsInline")
+  if (refreshMemberInstallationsButton) {
+    refreshMemberInstallationsButton.addEventListener("click", () => {
       void loadMemberInstallations({ refresh: true })
+    })
+  }
+  const memberProfilePackUploadClose = byId("btnCloseMemberProfilePackUploadModal")
+  if (memberProfilePackUploadClose) {
+    memberProfilePackUploadClose.addEventListener("click", closeMemberProfilePackUploadModal)
+  }
+  const memberProfilePackUploadCancel = byId("btnMemberProfilePackUploadCancel")
+  if (memberProfilePackUploadCancel) {
+    memberProfilePackUploadCancel.addEventListener("click", closeMemberProfilePackUploadModal)
+  }
+  const memberProfilePackUploadBackdrop = byId("memberProfilePackUploadBackdrop")
+  if (memberProfilePackUploadBackdrop) {
+    memberProfilePackUploadBackdrop.addEventListener("click", closeMemberProfilePackUploadModal)
+  }
+  const memberProfilePackUploadSubmit = byId("btnMemberProfilePackUploadSubmit")
+  if (memberProfilePackUploadSubmit) {
+    memberProfilePackUploadSubmit.addEventListener("click", () => {
+      void submitSelectedMemberImportDraft()
+    })
+  }
+  const memberProfilePackUploadDelete = byId("btnMemberProfilePackUploadDelete")
+  if (memberProfilePackUploadDelete) {
+    memberProfilePackUploadDelete.addEventListener("click", () => {
+      void deleteMemberImportDraft()
     })
   }
   bindUploadDropZone({
     zoneId: "memberUploadDropzone",
-    inputId: "submitPackageFile",
+    inputId: "memberImportAstrbotConfigFile",
     outputId: "memberUploadFileName",
     emptyKey: "member.upload.file_idle",
-    emptyFallback: "No file selected. Generated package submit is also supported.",
+    emptyFallback: "No file selected. Max 20 MiB. Sharelife standard zip, AstrBot backup zip, cmd_config.json, and abconf_*.json are supported.",
   })
   marketChipButtons().forEach((node) => {
     node.addEventListener("click", () => {
@@ -7923,13 +9663,25 @@ async function bootstrap() {
   if (byId("memberInstallationsList")) {
     await loadMemberInstallations()
   }
+  if (byId("memberImportDraftList")) {
+    await loadMemberProfilePackImports()
+  }
+  if (byId("memberTaskQueueList")) {
+    await loadMemberTasks()
+  }
   if (state.pageMode === "member" && byId("btnTemplates") && isInlineMemberMarketVisible()) {
-    await listTemplates()
+    if (hasCapability("templates.list")) {
+      await listTemplates()
+    }
     if (byId("btnListSubmissions")) {
-      await listSubmissions()
+      if (hasCapability("member.submissions.read") || hasCapability("admin.submissions.read")) {
+        await listSubmissions()
+      }
     }
     if (byId("btnProfilePackListPackSubmissions")) {
-      await listProfilePackMarketSubmissions()
+      if (hasCapability("member.profile_pack.submissions.read") || hasCapability("admin.profile_pack.market.review")) {
+        await listProfilePackMarketSubmissions()
+      }
     }
   }
   await syncWorkspaceFromHash()

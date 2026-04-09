@@ -24,6 +24,23 @@
     return out
   }
 
+  function normalizeSelectionPaths(value) {
+    const rawItems = Array.isArray(value)
+      ? value
+      : textValue(value)
+          .split(",")
+          .map((item) => item.trim())
+    const out = []
+    const seen = new Set()
+    rawItems.forEach((item) => {
+      const text = textValue(item)
+      if (!text || seen.has(text)) return
+      seen.add(text)
+      out.push(text)
+    })
+    return out
+  }
+
   function buildExportPayload(input) {
     const data = input || {}
     return {
@@ -135,6 +152,7 @@
 
   const api = {
     normalizeSectionList,
+    normalizeSelectionPaths,
     buildExportPayload,
     buildSelectedSections,
     buildDryrunPayload,

@@ -1,8 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_market import MarketService
+from sharelife.application.services_package import PackageService
 from sharelife.application.services_preferences import PreferenceService
 from sharelife.application.services_queue import RetryQueueService
+from sharelife.application.services_transfer_jobs import TransferJobService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
 from sharelife.infrastructure.json_state_store import JsonStateStore
@@ -160,6 +163,66 @@ def test_retry_queue_state_persists_with_sqlite(tmp_path):
     assert loaded.state == "queued"
 
 
+def test_transfer_job_state_persists(tmp_path):
+    store = JsonStateStore(tmp_path / "transfer-state.json")
+    clock = FrozenClock(datetime(2026, 4, 7, 12, 0, tzinfo=UTC))
+
+    service1 = TransferJobService(clock=clock, state_store=store)
+    claim = service1.claim_job(
+        direction="upload",
+        job_type="template_submission_package",
+        actor_id="u1",
+        actor_role="member",
+        user_id="u1",
+        logical_key="upload:u1:community/basic:1.0.0:key-1",
+        template_id="community/basic",
+        max_attempts=3,
+    )
+    service1.mark_running(claim.job.job_id)
+    service1.mark_done(
+        claim.job.job_id,
+        submission_id="sub-1",
+        filename="community-basic.zip",
+        size_bytes=128,
+    )
+
+    service2 = TransferJobService(clock=clock, state_store=store)
+    jobs = service2.list_jobs(user_id="u1", direction="upload")
+    assert len(jobs) == 1
+    assert jobs[0].submission_id == "sub-1"
+    assert jobs[0].status == "done"
+
+
+def test_transfer_job_state_persists_with_sqlite(tmp_path):
+    store = SqliteStateStore(tmp_path / "sharelife_state.sqlite3", store_key="transfer_state")
+    clock = FrozenClock(datetime(2026, 4, 7, 12, 0, tzinfo=UTC))
+
+    service1 = TransferJobService(clock=clock, state_store=store)
+    claim = service1.claim_job(
+        direction="download",
+        job_type="member_submission_package",
+        actor_id="u1",
+        actor_role="member",
+        user_id="u1",
+        logical_key="download:u1:submission:sub-1:key-1",
+        submission_id="sub-1",
+        max_attempts=2,
+    )
+    service1.mark_running(claim.job.job_id)
+    service1.mark_failed(
+        claim.job.job_id,
+        failure_reason="artifact_missing",
+        failure_detail="submission package missing",
+    )
+
+    service2 = TransferJobService(clock=clock, state_store=store)
+    jobs = service2.list_jobs(user_id="u1", direction="download")
+    assert len(jobs) == 1
+    assert jobs[0].submission_id == "sub-1"
+    assert jobs[0].status == "failed"
+    assert jobs[0].failure_reason == "artifact_missing"
+
+
 def test_trial_state_persists_with_sqlite(tmp_path):
     store = SqliteStateStore(tmp_path / "sharelife_state.sqlite3", store_key="trial_state")
     clock = FrozenClock(datetime(2026, 3, 25, 12, 0, tzinfo=UTC))
@@ -191,3 +254,55 @@ def test_audit_state_persists_with_sqlite(tmp_path):
     events = audit2.list_events(limit=10)
     assert len(events) == 1
     assert events[0].id == event.id
+
+
+def test_package_artifact_state_persists_with_json(tmp_path):
+    clock = FrozenClock(datetime(2026, 4, 7, 12, 0, tzinfo=UTC))
+    market = MarketService(clock=clock)
+    sub = market.submit_template(user_id="u1", template_id="community/basic", version="1.0.0")
+    market.decide_submission(submission_id=sub.id, reviewer_id="admin-1", decision="approve")
+    store = JsonStateStore(tmp_path / "artifact_state.json")
+
+    service1 = PackageService(
+        market_service=market,
+        output_root=tmp_path / "packages",
+        clock=clock,
+        artifact_state_store=store,
+    )
+    artifact = service1.export_template_package("community/basic")
+
+    service2 = PackageService(
+        market_service=market,
+        output_root=tmp_path / "packages",
+        clock=clock,
+        artifact_state_store=store,
+    )
+    resolved = service2.resolve_package_artifact_metadata({"artifact_id": artifact.artifact_id})
+    assert resolved["artifact_id"] == artifact.artifact_id
+    assert resolved["path"] == str(artifact.path)
+
+
+def test_package_artifact_state_persists_with_sqlite(tmp_path):
+    clock = FrozenClock(datetime(2026, 4, 7, 12, 0, tzinfo=UTC))
+    market = MarketService(clock=clock)
+    sub = market.submit_template(user_id="u1", template_id="community/basic", version="1.0.0")
+    market.decide_submission(submission_id=sub.id, reviewer_id="admin-1", decision="approve")
+    store = SqliteStateStore(tmp_path / "sharelife_state.sqlite3", store_key="artifact_state")
+
+    service1 = PackageService(
+        market_service=market,
+        output_root=tmp_path / "packages",
+        clock=clock,
+        artifact_state_store=store,
+    )
+    artifact = service1.export_template_package("community/basic")
+
+    service2 = PackageService(
+        market_service=market,
+        output_root=tmp_path / "packages",
+        clock=clock,
+        artifact_state_store=store,
+    )
+    resolved = service2.resolve_package_artifact_metadata({"artifact_id": artifact.artifact_id})
+    assert resolved["artifact_id"] == artifact.artifact_id
+    assert resolved["path"] == str(artifact.path)

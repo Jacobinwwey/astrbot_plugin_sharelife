@@ -2,13 +2,15 @@ import base64
 import io
 import json
 from pathlib import Path
+import subprocess
 import zipfile
 from datetime import UTC, datetime, timedelta
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
-from sharelife.application.services_capability_gateway import CapabilityGateway
+from sharelife.application.services_artifact_mirror import ArtifactMirrorService
 from sharelife.application.services_continuity import ConfigContinuityService
+from sharelife.application.services_capability_gateway import CapabilityGateway
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
 from sharelife.application.services_pipeline import PipelineOrchestrator, builtin_pipeline_plugins
@@ -17,6 +19,7 @@ from sharelife.application.services_protocol_contracts import ProtocolContractSe
 from sharelife.application.services_queue import RetryQueueService
 from sharelife.application.services_reviewer_auth import ReviewerAuthService
 from sharelife.application.services_storage_backup import StorageBackupService
+from sharelife.application.services_transfer_jobs import TransferJobService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
 from sharelife.infrastructure.notifier import InMemoryNotifier
@@ -56,7 +59,12 @@ def build_api(tmp_path):
         notifier=notifier,
     )
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path,
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
     continuity = ConfigContinuityService(
         state_store=JsonStateStore(tmp_path / "continuity_state.json"),
         clock=clock,
@@ -71,6 +79,11 @@ def build_api(tmp_path):
         data_root=tmp_path,
         clock=clock,
     )
+    transfer_jobs = TransferJobService(
+        clock=clock,
+        state_store=JsonStateStore(tmp_path / "transfer_state.json"),
+    )
+    artifact_mirror = ArtifactMirrorService(artifact_store=package.artifact_store, clock=clock)
     return SharelifeApiV1(
         preference_service=preferences,
         retry_queue_service=queue,
@@ -80,9 +93,12 @@ def build_api(tmp_path):
         apply_service=apply,
         audit_service=audit,
         reviewer_auth_service=ReviewerAuthService(
-            state_store=JsonStateStore(tmp_path / "reviewer_auth_state.json"),
+            state_store=JsonStateStore(tmp_path / "identity_state.json"),
+            legacy_state_store=JsonStateStore(tmp_path / "reviewer_auth_state.json"),
         ),
+        artifact_mirror_service=artifact_mirror,
         storage_backup_service=storage_backup,
+        transfer_job_service=transfer_jobs,
     )
 
 
@@ -177,6 +193,37 @@ def test_api_install_preflight_and_member_installations_surface(tmp_path):
     assert any(item["action"] == "member.installations.refreshed" for item in events["events"])
 
 
+def test_api_member_task_queue_surface(tmp_path):
+    api = build_api(tmp_path)
+    submit = api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+    )
+    api.admin_decide_submission(
+        role="admin",
+        submission_id=submit["submission_id"],
+        decision="approve",
+    )
+    installed = api.install_template(
+        user_id="u1",
+        session_id="s1",
+        template_id="community/basic",
+    )
+    assert installed["status"] == "trial_started"
+
+    listed = api.list_member_tasks(user_id="u1", limit=20)
+    assert listed["count"] >= 1
+    actions = [str(item.get("action") or "") for item in listed["tasks"]]
+    assert "template.installed" in actions
+    assert all(str(item.get("name") or "").strip() for item in listed["tasks"])
+
+    refreshed = api.refresh_member_tasks(user_id="u1", limit=20)
+    assert refreshed["count"] >= 1
+    events = api.admin_list_audit(role="admin", limit=40)
+    assert any(item["action"] == "member.tasks.refreshed" for item in events["events"])
+
+
 def test_api_upload_replace_existing_retires_previous_pending_submission(tmp_path):
     api = build_api(tmp_path)
 
@@ -209,6 +256,123 @@ def test_api_upload_replace_existing_retires_previous_pending_submission(tmp_pat
 
     audit = api.admin_list_audit(role="admin", limit=20)
     assert any(item["action"] == "submission.pending_replaced" for item in audit["events"])
+
+
+def test_api_upload_idempotency_key_replays_existing_submission(tmp_path):
+    api = build_api(tmp_path)
+    payload = base64.b64encode(
+        build_bundle_zip(
+            {
+                "template_id": "community/basic",
+                "version": "1.0.0",
+                "prompt": "idempotency baseline prompt",
+            }
+        )
+    ).decode("ascii")
+    first = api.submit_template_package(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+        filename="community-basic.zip",
+        content_base64=payload,
+        upload_options={"idempotency_key": "upload-retry-key-1"},
+    )
+    second = api.submit_template_package(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+        filename="community-basic-retry.zip",
+        content_base64=payload,
+        upload_options={"idempotency_key": "upload-retry-key-1"},
+    )
+    assert second["submission_id"] == first["submission_id"]
+    assert second["idempotent_replay"] is True
+    rows = api.member_list_submissions(user_id="u1")
+    assert rows["user_id"] == "u1"
+    assert len(rows["submissions"]) == 1
+    assert first["transfer_job"]["direction"] == "upload"
+    assert first["transfer_job"]["status"] == "done"
+    assert second["transfer_job"]["job_id"] == first["transfer_job"]["job_id"]
+    assert second["transfer_job"]["attempt_count"] == 2
+    assert second["transfer_job"]["retry_count"] == 1
+    transfers = api.list_member_transfer_jobs(user_id="u1", direction="upload")
+    assert transfers["count"] == 1
+    assert transfers["jobs"][0]["job_id"] == first["transfer_job"]["job_id"]
+    events = api.admin_list_audit(role="admin", limit=30)
+    assert any(item["action"] == "submission.idempotency_replayed" for item in events["events"])
+
+
+def test_api_upload_idempotency_key_conflict_is_rejected(tmp_path):
+    api = build_api(tmp_path)
+    first = api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+        upload_options={"idempotency_key": "upload-scope-key-1"},
+    )
+    assert first["status"] == "pending"
+
+    conflict = api.submit_template(
+        user_id="u1",
+        template_id="community/other",
+        version="1.0.0",
+        upload_options={"idempotency_key": "upload-scope-key-1"},
+    )
+    assert conflict["error"] == "idempotency_key_conflict"
+    assert conflict["existing_submission_id"] == first["submission_id"]
+
+    rows = api.member_list_submissions(user_id="u1")
+    assert len(rows["submissions"]) == 1
+    events = api.admin_list_audit(role="admin", limit=30)
+    assert any(item["action"] == "submission.idempotency_conflict" for item in events["events"])
+
+
+def test_api_failed_upload_marks_transfer_job_failure_reason(tmp_path):
+    api = build_api(tmp_path)
+
+    failed = api.submit_template_package(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+        filename="community-basic.zip",
+        content_base64="%%%not-base64%%%",
+        upload_options={"idempotency_key": "upload-invalid-payload-1"},
+    )
+
+    assert failed["error"] == "invalid_package_payload"
+    assert failed["transfer_job"]["direction"] == "upload"
+    assert failed["transfer_job"]["status"] == "failed"
+    assert failed["transfer_job"]["failure_reason"] == "invalid_payload"
+
+    transfers = api.list_member_transfer_jobs(user_id="u1", direction="upload")
+    assert transfers["count"] == 1
+    assert transfers["jobs"][0]["status"] == "failed"
+    assert transfers["jobs"][0]["failure_reason"] == "invalid_payload"
+
+
+def test_api_member_installation_uninstall_removes_latest_visible_install(tmp_path):
+    api = build_api(tmp_path)
+    submit = api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+    )
+    api.admin_decide_submission(
+        role="admin",
+        submission_id=submit["submission_id"],
+        decision="approve",
+    )
+    api.install_template(user_id="u1", session_id="s1", template_id="community/basic")
+
+    uninstalled = api.uninstall_member_installation(user_id="u1", template_id="community/basic")
+    assert uninstalled["status"] == "uninstalled"
+    assert uninstalled["template_id"] == "community/basic"
+
+    listed = api.list_member_installations(user_id="u1")
+    assert listed["count"] == 0
+
+    events = api.admin_list_audit(role="admin", limit=20)
+    assert any(item["action"] == "template.uninstalled" for item in events["events"])
 
 
 def test_api_rejects_non_admin_decision(tmp_path):
@@ -353,8 +517,14 @@ def test_api_exposes_trial_status_and_apply_rollback_cycle(tmp_path):
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back["continuity"]["restore_verification"] == "matched"
 
-    continuity = api.admin_get_continuity(role="admin", plan_id="plan-community-basic")
-    assert continuity["entry"]["restore_verification"] == "matched"
+    continuity = api.admin_list_continuity(role="admin", limit=10)
+    assert continuity["entries"]
+    assert continuity["entries"][0]["plan_id"] == "plan-community-basic"
+    assert continuity["entries"][0]["status"] == "rolled_back"
+
+    detail = api.admin_get_continuity(role="admin", plan_id="plan-community-basic")
+    assert detail["entry"]["source_kind"] == "manual_patch"
+    assert detail["entry"]["restore_verification"] == "matched"
 
 
 def test_api_submit_template_package_uses_uploaded_artifact_after_approval(tmp_path):
@@ -835,6 +1005,47 @@ def test_api_can_load_template_and_submission_detail(tmp_path):
     assert "prompt_injection_detected" in submission_detail["review_labels"]
 
 
+def test_api_member_submission_download_reuses_transfer_job_record(tmp_path):
+    api = build_api(tmp_path)
+    submission_id = api.submit_template_package(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+        filename="community-basic.zip",
+        content_base64=base64.b64encode(
+            build_bundle_zip(
+                {
+                    "template_id": "community/basic",
+                    "version": "1.0.0",
+                    "prompt": "Baseline prompt.",
+                }
+            )
+        ).decode("ascii"),
+        upload_options={"idempotency_key": "upload-download-seed"},
+    )["submission_id"]
+
+    first = api.member_get_submission_package(
+        user_id="u1",
+        submission_id=submission_id,
+        idempotency_key="download-key-1",
+    )
+    second = api.member_get_submission_package(
+        user_id="u1",
+        submission_id=submission_id,
+        idempotency_key="download-key-1",
+    )
+
+    assert first["transfer_job"]["direction"] == "download"
+    assert first["transfer_job"]["status"] == "done"
+    assert second["transfer_job"]["job_id"] == first["transfer_job"]["job_id"]
+    assert second["transfer_job"]["attempt_count"] == 2
+    assert second["transfer_job"]["retry_count"] == 1
+
+    transfers = api.list_member_transfer_jobs(user_id="u1", direction="download")
+    assert transfers["count"] == 1
+    assert transfers["jobs"][0]["submission_id"] == submission_id
+
+
 def test_api_exposes_template_engagement_in_list_and_detail(tmp_path):
     api = build_api(tmp_path)
     api.market_service.publish_official_template(
@@ -925,7 +1136,12 @@ def test_api_admin_run_pipeline_happy_path(tmp_path):
         notifier=notifier,
     )
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path,
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
     apply = ApplyService(runtime=InMemoryRuntimeBridge(initial_state={}))
     audit = AuditService(clock=clock)
     orchestrator = build_pipeline_orchestrator(clock=clock)
@@ -1002,7 +1218,12 @@ def test_api_admin_run_pipeline_returns_error_on_invalid_contract(tmp_path):
         notifier=notifier,
     )
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path,
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
     apply = ApplyService(runtime=InMemoryRuntimeBridge(initial_state={}))
     audit = AuditService(clock=clock)
     orchestrator = build_pipeline_orchestrator(clock=clock)
@@ -1023,3 +1244,53 @@ def test_api_admin_run_pipeline_returns_error_on_invalid_contract(tmp_path):
         run_id="run-invalid",
     )
     assert response["error"] == "invalid_pipeline_contract"
+
+
+def test_api_admin_can_list_and_mirror_artifacts(tmp_path, monkeypatch):
+    api = build_api(tmp_path)
+    api.market_service.publish_official_template(
+        template_id="community/basic",
+        version="1.0.0",
+        prompt_template="Official template",
+    )
+    artifact = api.package_service.export_template_package("community/basic")
+    calls: list[list[str]] = []
+
+    def _fake_run(command, **kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="copy ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    listed = api.admin_list_artifacts(role="admin", limit=20)
+    assert listed["count"] >= 1
+    assert any(row["artifact_id"] == artifact.artifact_id for row in listed["artifacts"])
+
+    mirrored = api.admin_mirror_artifact(
+        role="admin",
+        artifact_id=artifact.artifact_id,
+        admin_id="admin-1",
+        remote_path="gdrive-crypt:/sharelife-artifacts",
+    )
+    assert "error" not in mirrored
+    assert mirrored["mirror"]["status"] == "succeeded"
+    assert calls[0][0:2] == ["rclone", "copyto"]
+
+
+def test_api_admin_mirror_artifact_requires_admin_role(tmp_path):
+    api = build_api(tmp_path)
+    api.market_service.publish_official_template(
+        template_id="community/basic",
+        version="1.0.0",
+        prompt_template="Official template",
+    )
+    artifact = api.package_service.export_template_package("community/basic")
+
+    denied = api.admin_mirror_artifact(
+        role="member",
+        artifact_id=artifact.artifact_id,
+        admin_id="u1",
+        remote_path="gdrive-crypt:/sharelife-artifacts",
+    )
+
+    assert denied["error"] == "permission_denied"

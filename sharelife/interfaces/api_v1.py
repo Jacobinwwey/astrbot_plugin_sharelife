@@ -6,14 +6,17 @@ import base64
 import binascii
 import hashlib
 import json
+import os
 import shutil
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ..application.services_apply import ApplyService
 from ..application.services_audit import AuditService
+from ..application.services_artifact_mirror import ArtifactMirrorService
 from ..application.services_market import MarketService
 from ..application.services_package import PackageService
 from ..application.services_preferences import PreferenceService
@@ -22,10 +25,49 @@ from ..application.services_profile_pack import ProfilePackService
 from ..application.services_queue import RetryQueueService
 from ..application.services_reviewer_auth import ReviewerAuthService
 from ..application.services_storage_backup import StorageBackupService
+from ..application.services_transfer_jobs import TransferJob, TransferJobService
 from ..application.services_trial_request import TrialRequestService
 
 
 class SharelifeApiV1:
+    _IDEMPOTENCY_KEY_MAX_LEN = 128
+    _MEMBER_TASK_ACTIONS: set[str] = {
+        "submission.created",
+        "submission.package_uploaded",
+        "submission.pending_replaced",
+        "submission.idempotency_replayed",
+        "submission.idempotency_conflict",
+        "trial.requested",
+        "template.installed",
+        "template.uninstalled",
+        "member.installations.refreshed",
+        "member.tasks.refreshed",
+        "member.transfers.refreshed",
+        "profile_pack.exported",
+        "profile_pack.imported",
+        "profile_pack.import_deleted",
+        "profile_pack.imported_from_export",
+        "profile_pack.dryrun_prepared",
+        "profile_pack.plugin_install_plan_viewed",
+        "profile_pack.plugin_install_confirmed",
+        "profile_pack.plugin_install_executed",
+        "profile_pack.applied",
+        "profile_pack.rolled_back",
+        "profile_pack.submission_created",
+        "profile_pack.submission.pending_replaced",
+        "profile_pack.submission_withdrawn",
+        "profile_pack.submission.idempotency_replayed",
+        "profile_pack.submission.idempotency_conflict",
+    }
+    _MEMBER_TASK_ERROR_STATUSES: set[str] = {
+        "error",
+        "failed",
+        "conflict",
+        "denied",
+        "rejected",
+        "not_found",
+    }
+
     def __init__(
         self,
         preference_service: PreferenceService,
@@ -38,7 +80,9 @@ class SharelifeApiV1:
         profile_pack_service: ProfilePackService | None = None,
         pipeline_orchestrator: PipelineOrchestrator | None = None,
         reviewer_auth_service: ReviewerAuthService | None = None,
+        artifact_mirror_service: ArtifactMirrorService | None = None,
         storage_backup_service: StorageBackupService | None = None,
+        transfer_job_service: TransferJobService | None = None,
         public_market_auto_publish_profile_pack_approve: bool = False,
         public_market_root: Path | str | None = None,
         public_market_rebuild_snapshot_on_publish: bool = True,
@@ -53,7 +97,9 @@ class SharelifeApiV1:
         self.audit_service = audit_service
         self.pipeline_orchestrator = pipeline_orchestrator
         self.reviewer_auth_service = reviewer_auth_service
+        self.artifact_mirror_service = artifact_mirror_service
         self.storage_backup_service = storage_backup_service
+        self.transfer_job_service = transfer_job_service
         self.public_market_auto_publish_profile_pack_approve = bool(
             public_market_auto_publish_profile_pack_approve,
         )
@@ -111,6 +157,181 @@ class SharelifeApiV1:
         padding = len(text) - len(text.rstrip("="))
         return max(0, (len(text) * 3) // 4 - padding)
 
+    @classmethod
+    def _normalize_idempotency_key(cls, value: object) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        allowed = []
+        for ch in text:
+            if ch.isalnum() or ch in {"-", "_", ".", ":"}:
+                allowed.append(ch)
+        normalized = "".join(allowed).strip()
+        if not normalized:
+            return ""
+        return normalized[: cls._IDEMPOTENCY_KEY_MAX_LEN]
+
+    @classmethod
+    def _idempotency_key_fingerprint(cls, value: object) -> str:
+        normalized = cls._normalize_idempotency_key(value)
+        if not normalized:
+            return ""
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _transfer_job_payload(job: TransferJob) -> dict[str, Any]:
+        return {
+            "job_id": job.job_id,
+            "direction": job.direction,
+            "job_type": job.job_type,
+            "actor_id": job.actor_id,
+            "actor_role": job.actor_role,
+            "user_id": job.user_id,
+            "template_id": job.template_id,
+            "submission_id": job.submission_id,
+            "status": job.status,
+            "filename": job.filename,
+            "size_bytes": job.size_bytes,
+            "sha256": job.sha256,
+            "attempt_count": job.attempt_count,
+            "retry_count": job.retry_count,
+            "max_attempts": job.max_attempts,
+            "idempotency_key": job.idempotency_key,
+            "failure_reason": job.failure_reason,
+            "failure_detail": job.failure_detail,
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+            "started_at": job.started_at.isoformat() if job.started_at is not None else "",
+            "finished_at": job.finished_at.isoformat() if job.finished_at is not None else "",
+            "metadata": dict(job.metadata or {}),
+        }
+
+    def _attach_transfer_job(self, payload: dict[str, Any], job: TransferJob | None) -> dict[str, Any]:
+        if job is not None:
+            payload["transfer_job"] = self._transfer_job_payload(job)
+        return payload
+
+    def _claim_transfer_job(
+        self,
+        *,
+        direction: str,
+        job_type: str,
+        actor_id: str,
+        actor_role: str,
+        user_id: str = "",
+        logical_key: str = "",
+        template_id: str = "",
+        submission_id: str = "",
+        filename: str = "",
+        idempotency_key: str = "",
+        max_attempts: int = 1,
+        metadata: dict[str, Any] | None = None,
+    ):
+        if self.transfer_job_service is None:
+            return None
+        return self.transfer_job_service.claim_job(
+            direction=direction,
+            job_type=job_type,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            user_id=user_id,
+            logical_key=logical_key,
+            template_id=template_id,
+            submission_id=submission_id,
+            filename=filename,
+            idempotency_key=idempotency_key,
+            max_attempts=max_attempts,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _new_transfer_logical_key(prefix: str) -> str:
+        return f"{prefix}:{uuid4()}"
+
+    def _find_existing_submission_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        template_id: str,
+        version: str,
+        idempotency_key: str,
+    ):
+        normalized_key = self._normalize_idempotency_key(idempotency_key)
+        if not normalized_key:
+            return None
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_template_id = str(template_id or "").strip()
+        normalized_version = str(version or "").strip()
+        matches = []
+        for item in self.market_service.list_submissions():
+            if str(getattr(item, "user_id", "") or "").strip() != normalized_user_id:
+                continue
+            if str(getattr(item, "template_id", "") or "").strip() != normalized_template_id:
+                continue
+            if str(getattr(item, "version", "") or "").strip() != normalized_version:
+                continue
+            options = item.upload_options if isinstance(item.upload_options, dict) else {}
+            if self._normalize_idempotency_key(options.get("idempotency_key")) != normalized_key:
+                continue
+            matches.append(item)
+        if not matches:
+            return None
+        matches.sort(key=lambda row: row.updated_at, reverse=True)
+        return matches[0]
+
+    def _find_any_template_submission_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+    ):
+        normalized_key = self._normalize_idempotency_key(idempotency_key)
+        if not normalized_key:
+            return None
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        matches = []
+        for item in self.market_service.list_submissions():
+            if str(getattr(item, "user_id", "") or "").strip() != normalized_user_id:
+                continue
+            options = item.upload_options if isinstance(item.upload_options, dict) else {}
+            if self._normalize_idempotency_key(options.get("idempotency_key")) != normalized_key:
+                continue
+            matches.append(item)
+        if not matches:
+            return None
+        matches.sort(key=lambda row: row.updated_at, reverse=True)
+        return matches[0]
+
+    @staticmethod
+    def _template_idempotency_scope_matches(*, submission, template_id: str, version: str) -> bool:
+        normalized_template_id = str(template_id or "").strip()
+        normalized_version = str(version or "").strip()
+        return (
+            str(getattr(submission, "template_id", "") or "").strip() == normalized_template_id
+            and str(getattr(submission, "version", "") or "").strip() == normalized_version
+        )
+
+    def _find_any_profile_pack_submission_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+    ):
+        if self.profile_pack_service is None:
+            return None
+        normalized_key = self._normalize_idempotency_key(idempotency_key)
+        if not normalized_key:
+            return None
+        normalized_user_id = str(user_id or "").strip() or "member"
+        for item in self.profile_pack_service.list_submissions():
+            if str(getattr(item, "user_id", "") or "").strip() != normalized_user_id:
+                continue
+            options = item.submit_options if isinstance(item.submit_options, dict) else {}
+            if self._normalize_idempotency_key(options.get("idempotency_key")) != normalized_key:
+                continue
+            return item
+        return None
+
     def get_preferences(self, user_id: str) -> dict:
         pref = self.preference_service.get(user_id=user_id)
         return {
@@ -159,6 +380,104 @@ class SharelifeApiV1:
         upload_options: dict | None = None,
     ) -> dict:
         normalized_upload_options = self._normalize_upload_options(upload_options)
+        normalized_idempotency_key = self._normalize_idempotency_key(
+            normalized_upload_options.get("idempotency_key"),
+        )
+        transfer_claim = self._claim_transfer_job(
+            direction="upload",
+            job_type="template_submission",
+            actor_id=user_id,
+            actor_role="member",
+            user_id=user_id,
+            logical_key=(
+                f"upload:{user_id}:{template_id}:{version}:{normalized_idempotency_key}"
+                if normalized_idempotency_key
+                else self._new_transfer_logical_key(f"upload:{user_id}:{template_id}:{version}")
+            ),
+            template_id=template_id,
+            idempotency_key=normalized_idempotency_key,
+            max_attempts=3,
+            metadata={"version": version},
+        )
+        if transfer_claim is not None and transfer_claim.should_execute:
+            self.transfer_job_service.mark_running(transfer_claim.job.job_id)
+        if normalized_idempotency_key:
+            existing_any = self._find_any_template_submission_by_idempotency(
+                user_id=user_id,
+                idempotency_key=normalized_idempotency_key,
+            )
+            if existing_any is not None and not self._template_idempotency_scope_matches(
+                submission=existing_any,
+                template_id=template_id,
+                version=version,
+            ):
+                self._audit(
+                    action="submission.idempotency_conflict",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=str(getattr(existing_any, "id", "") or ""),
+                    status="conflict",
+                    detail={
+                        "template_id": template_id,
+                        "version": version,
+                        "existing_template_id": str(getattr(existing_any, "template_id", "") or ""),
+                        "existing_version": str(getattr(existing_any, "version", "") or ""),
+                        "idempotency_key_fingerprint": self._idempotency_key_fingerprint(
+                            normalized_idempotency_key,
+                        ),
+                    },
+                )
+                payload = {
+                    "error": "idempotency_key_conflict",
+                    "template_id": template_id,
+                    "version": version,
+                    "existing_submission_id": str(getattr(existing_any, "id", "") or ""),
+                }
+                if transfer_claim is not None:
+                    self.transfer_job_service.mark_failed(
+                        transfer_claim.job.job_id,
+                        failure_reason="idempotency_conflict",
+                        failure_detail="submission idempotency scope conflict",
+                        template_id=template_id,
+                        submission_id=str(getattr(existing_any, "id", "") or ""),
+                    )
+                    self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+                return payload
+            existing = self._find_existing_submission_by_idempotency(
+                user_id=user_id,
+                template_id=template_id,
+                version=version,
+                idempotency_key=normalized_idempotency_key,
+            )
+            if existing is not None:
+                self._audit(
+                    action="submission.idempotency_replayed",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=existing.id,
+                    status=existing.status,
+                    detail={
+                        "template_id": template_id,
+                        "version": version,
+                        "idempotency_key_fingerprint": self._idempotency_key_fingerprint(
+                            normalized_idempotency_key,
+                        ),
+                        "submission_id": existing.id,
+                    },
+                )
+                payload = self._submission_payload(existing)
+                payload["idempotent_replay"] = True
+                payload["replaced_submission_ids"] = []
+                payload["replaced_submission_count"] = 0
+                if transfer_claim is not None:
+                    self.transfer_job_service.mark_done(
+                        transfer_claim.job.job_id,
+                        template_id=template_id,
+                        submission_id=existing.id,
+                        metadata={"idempotent_replay": True},
+                    )
+                    self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+                return payload
         replaced_submission_ids: list[str] = []
         if normalized_upload_options.get("replace_existing"):
             replaced_submission_ids = self.market_service.replace_pending_submissions(
@@ -201,6 +520,14 @@ class SharelifeApiV1:
         payload = self._submission_payload(sub)
         payload["replaced_submission_ids"] = list(replaced_submission_ids)
         payload["replaced_submission_count"] = len(replaced_submission_ids)
+        if transfer_claim is not None:
+            self.transfer_job_service.mark_done(
+                transfer_claim.job.job_id,
+                template_id=template_id,
+                submission_id=sub.id,
+                metadata={"replaced_submission_count": len(replaced_submission_ids)},
+            )
+            self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
         return payload
 
     def submit_template_package(
@@ -215,26 +542,159 @@ class SharelifeApiV1:
         if self.package_service is None:
             return {"error": "package_service_unavailable", "template_id": template_id}
         normalized_upload_options = self._normalize_upload_options(upload_options)
+        normalized_idempotency_key = self._normalize_idempotency_key(
+            normalized_upload_options.get("idempotency_key"),
+        )
+        transfer_claim = self._claim_transfer_job(
+            direction="upload",
+            job_type="template_submission_package",
+            actor_id=user_id,
+            actor_role="member",
+            user_id=user_id,
+            logical_key=(
+                f"upload:{user_id}:{template_id}:{version}:{normalized_idempotency_key}"
+                if normalized_idempotency_key
+                else self._new_transfer_logical_key(f"upload:{user_id}:{template_id}:{version}")
+            ),
+            template_id=template_id,
+            filename=filename,
+            idempotency_key=normalized_idempotency_key,
+            max_attempts=3,
+            metadata={"version": version},
+        )
+        if transfer_claim is not None and transfer_claim.should_execute:
+            self.transfer_job_service.mark_running(transfer_claim.job.job_id)
+        if normalized_idempotency_key:
+            existing_any = self._find_any_template_submission_by_idempotency(
+                user_id=user_id,
+                idempotency_key=normalized_idempotency_key,
+            )
+            if existing_any is not None and not self._template_idempotency_scope_matches(
+                submission=existing_any,
+                template_id=template_id,
+                version=version,
+            ):
+                self._audit(
+                    action="submission.idempotency_conflict",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=str(getattr(existing_any, "id", "") or ""),
+                    status="conflict",
+                    detail={
+                        "template_id": template_id,
+                        "version": version,
+                        "existing_template_id": str(getattr(existing_any, "template_id", "") or ""),
+                        "existing_version": str(getattr(existing_any, "version", "") or ""),
+                        "idempotency_key_fingerprint": self._idempotency_key_fingerprint(
+                            normalized_idempotency_key,
+                        ),
+                        "filename": str(filename or "").strip(),
+                    },
+                )
+                payload = {
+                    "error": "idempotency_key_conflict",
+                    "template_id": template_id,
+                    "version": version,
+                    "existing_submission_id": str(getattr(existing_any, "id", "") or ""),
+                }
+                if transfer_claim is not None:
+                    self.transfer_job_service.mark_failed(
+                        transfer_claim.job.job_id,
+                        failure_reason="idempotency_conflict",
+                        failure_detail="submission idempotency scope conflict",
+                        template_id=template_id,
+                        submission_id=str(getattr(existing_any, "id", "") or ""),
+                        filename=filename,
+                    )
+                    self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+                return payload
+            existing = self._find_existing_submission_by_idempotency(
+                user_id=user_id,
+                template_id=template_id,
+                version=version,
+                idempotency_key=normalized_idempotency_key,
+            )
+            if existing is not None:
+                self._audit(
+                    action="submission.idempotency_replayed",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=existing.id,
+                    status=existing.status,
+                    detail={
+                        "template_id": template_id,
+                        "version": version,
+                        "idempotency_key_fingerprint": self._idempotency_key_fingerprint(
+                            normalized_idempotency_key,
+                        ),
+                        "submission_id": existing.id,
+                        "filename": str(filename or "").strip(),
+                    },
+                )
+                payload = self._submission_payload(existing)
+                payload["idempotent_replay"] = True
+                payload["replaced_submission_ids"] = []
+                payload["replaced_submission_count"] = 0
+                if transfer_claim is not None:
+                    self.transfer_job_service.mark_done(
+                        transfer_claim.job.job_id,
+                        template_id=template_id,
+                        submission_id=existing.id,
+                        filename=str(filename or "").strip(),
+                        metadata={"idempotent_replay": True},
+                    )
+                    self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+                return payload
         max_size_bytes = self._submission_package_limit_bytes()
         estimated_size_bytes = self._estimate_base64_decoded_size(content_base64)
         if estimated_size_bytes > max_size_bytes:
-            return {
+            payload = {
                 "error": "package_too_large",
                 "template_id": template_id,
                 "max_size_bytes": max_size_bytes,
                 "estimated_size_bytes": estimated_size_bytes,
             }
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="payload_too_large",
+                    failure_detail="submission package exceeds configured limit",
+                    template_id=template_id,
+                    filename=filename,
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
         try:
             content = base64.b64decode(content_base64.encode("ascii"), validate=True)
         except (binascii.Error, ValueError):
-            return {"error": "invalid_package_payload", "template_id": template_id}
+            payload = {"error": "invalid_package_payload", "template_id": template_id}
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="invalid_payload",
+                    failure_detail="invalid base64 payload",
+                    template_id=template_id,
+                    filename=filename,
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
         if len(content) > max_size_bytes:
-            return {
+            payload = {
                 "error": "package_too_large",
                 "template_id": template_id,
                 "max_size_bytes": max_size_bytes,
                 "estimated_size_bytes": len(content),
             }
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="payload_too_large",
+                    failure_detail="submission package exceeds configured limit",
+                    template_id=template_id,
+                    filename=filename,
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
         try:
             uploaded = self.package_service.ingest_submission_package(
                 template_id=template_id,
@@ -244,12 +704,22 @@ class SharelifeApiV1:
             )
         except ValueError as exc:
             if str(exc) == "PACKAGE_TOO_LARGE":
-                return {
+                payload = {
                     "error": "package_too_large",
                     "template_id": template_id,
                     "max_size_bytes": max_size_bytes,
                     "estimated_size_bytes": len(content),
                 }
+                if transfer_claim is not None:
+                    self.transfer_job_service.mark_failed(
+                        transfer_claim.job.job_id,
+                        failure_reason="payload_too_large",
+                        failure_detail="submission package exceeds configured limit",
+                        template_id=template_id,
+                        filename=filename,
+                    )
+                    self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+                return payload
             raise
         replaced_submission_ids: list[str] = []
         if normalized_upload_options.get("replace_existing"):
@@ -276,7 +746,7 @@ class SharelifeApiV1:
             version=version,
             prompt_template=uploaded.prompt_template,
             package_artifact={
-                "path": str(uploaded.path),
+                "artifact_id": uploaded.artifact_id,
                 "sha256": uploaded.sha256,
                 "filename": uploaded.filename,
                 "source": "uploaded_submission",
@@ -306,6 +776,17 @@ class SharelifeApiV1:
         payload = self._submission_payload(sub)
         payload["replaced_submission_ids"] = list(replaced_submission_ids)
         payload["replaced_submission_count"] = len(replaced_submission_ids)
+        if transfer_claim is not None:
+            self.transfer_job_service.mark_done(
+                transfer_claim.job.job_id,
+                template_id=template_id,
+                submission_id=sub.id,
+                filename=uploaded.filename,
+                size_bytes=uploaded.size_bytes,
+                sha256=uploaded.sha256,
+                metadata={"replaced_submission_count": len(replaced_submission_ids)},
+            )
+            self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
         return payload
 
     def request_trial(self, user_id: str, session_id: str, template_id: str) -> dict:
@@ -429,6 +910,122 @@ class SharelifeApiV1:
             "installations": rows,
         }
 
+    def list_member_tasks(self, user_id: str, limit: int = 50) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_limit = max(1, min(int(limit or 50), 200))
+        rows = self._member_tasks_payload(user_id=normalized_user_id, limit=normalized_limit)
+        return {
+            "user_id": normalized_user_id,
+            "count": len(rows),
+            "tasks": rows,
+        }
+
+    def refresh_member_tasks(self, user_id: str, limit: int = 50) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_limit = max(1, min(int(limit or 50), 200))
+        rows = self._member_tasks_payload(user_id=normalized_user_id, limit=normalized_limit)
+        refreshed_at = self.audit_service.clock.utcnow().isoformat()
+        self._audit(
+            action="member.tasks.refreshed",
+            actor_id=normalized_user_id,
+            actor_role="member",
+            target_id=normalized_user_id,
+            status="ok",
+            detail={"count": len(rows), "limit": normalized_limit},
+        )
+        return {
+            "user_id": normalized_user_id,
+            "count": len(rows),
+            "refreshed_at": refreshed_at,
+            "tasks": rows,
+        }
+
+    def list_member_transfer_jobs(
+        self,
+        user_id: str,
+        direction: str = "",
+        status: str = "",
+        limit: int = 50,
+    ) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_limit = max(1, min(int(limit or 50), 200))
+        if self.transfer_job_service is None:
+            return {"user_id": normalized_user_id, "count": 0, "jobs": []}
+        rows = [
+            self._transfer_job_payload(item)
+            for item in self.transfer_job_service.list_jobs(
+                user_id=normalized_user_id,
+                direction=direction,
+                status=status,
+                limit=normalized_limit,
+            )
+        ]
+        return {
+            "user_id": normalized_user_id,
+            "count": len(rows),
+            "jobs": rows,
+        }
+
+    def refresh_member_transfer_jobs(
+        self,
+        user_id: str,
+        direction: str = "",
+        status: str = "",
+        limit: int = 50,
+    ) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_limit = max(1, min(int(limit or 50), 200))
+        payload = self.list_member_transfer_jobs(
+            user_id=normalized_user_id,
+            direction=direction,
+            status=status,
+            limit=normalized_limit,
+        )
+        refreshed_at = self.audit_service.clock.utcnow().isoformat()
+        self._audit(
+            action="member.transfers.refreshed",
+            actor_id=normalized_user_id,
+            actor_role="member",
+            target_id=normalized_user_id,
+            status="ok",
+            detail={
+                "count": int(payload.get("count", 0) or 0),
+                "limit": normalized_limit,
+                "direction": str(direction or "").strip().lower(),
+                "status_filter": str(status or "").strip().lower(),
+            },
+        )
+        payload["refreshed_at"] = refreshed_at
+        return payload
+
+    def uninstall_member_installation(self, user_id: str, template_id: str) -> dict:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_template_id = str(template_id or "").strip()
+        if not normalized_template_id:
+            return {"error": "template_id_required"}
+        visible = self._member_installations_payload(user_id=normalized_user_id, limit=200)
+        if not any(str(item.get("template_id") or "") == normalized_template_id for item in visible):
+            return {
+                "error": "member_installation_not_found",
+                "user_id": normalized_user_id,
+                "template_id": normalized_template_id,
+            }
+        uninstalled_at = self.audit_service.clock.utcnow().isoformat()
+        self._audit(
+            action="template.uninstalled",
+            actor_id=normalized_user_id,
+            actor_role="member",
+            target_id=normalized_template_id,
+            status="uninstalled",
+            detail={},
+        )
+        return {
+            "user_id": normalized_user_id,
+            "template_id": normalized_template_id,
+            "status": "uninstalled",
+            "uninstalled_at": uninstalled_at,
+        }
+
     def install_template(
         self,
         user_id: str,
@@ -477,6 +1074,7 @@ class SharelifeApiV1:
                 source_preference=normalized_install_options["source_preference"],
             )
             result["package_artifact"] = {
+                "artifact_id": artifact.artifact_id,
                 "path": str(artifact.path),
                 "sha256": artifact.sha256,
                 "version": artifact.version,
@@ -519,6 +1117,7 @@ class SharelifeApiV1:
             return {"error": "template_not_installable", "template_id": template_id}
         self.market_service.record_template_event(template_id=template_id, event="package_generation")
         return {
+            "artifact_id": artifact.artifact_id,
             "template_id": artifact.template_id,
             "version": artifact.version,
             "path": str(artifact.path),
@@ -741,6 +1340,81 @@ class SharelifeApiV1:
         )
         return result
 
+    def admin_list_artifacts(
+        self,
+        role: str,
+        artifact_kind: str = "",
+        limit: int = 50,
+    ) -> dict:
+        if not self._is_admin_role(role):
+            return {"error": "permission_denied"}
+        if self.artifact_mirror_service is None:
+            return {"error": "artifact_service_unavailable"}
+        result = self.artifact_mirror_service.list_artifacts(
+            artifact_kind=artifact_kind,
+            limit=limit,
+        )
+        self._audit(
+            action="artifact.list.read",
+            actor_id="admin",
+            actor_role="admin",
+            target_id="artifacts",
+            status="ok",
+            detail={"artifact_kind": str(artifact_kind or "").strip().lower(), "limit": int(limit or 50)},
+        )
+        return result
+
+    def admin_mirror_artifact(
+        self,
+        role: str,
+        artifact_id: str,
+        admin_id: str = "admin",
+        remote_path: str = "",
+        rclone_binary: str = "rclone",
+        timeout_seconds: int = 300,
+        bwlimit: str = "",
+        encryption_required: bool = True,
+        remote_encryption_verified: bool = False,
+    ) -> dict:
+        normalized_artifact_id = str(artifact_id or "").strip()
+        if not self._is_admin_role(role):
+            return {"error": "permission_denied", "artifact_id": normalized_artifact_id}
+        if self.artifact_mirror_service is None:
+            return {"error": "artifact_service_unavailable", "artifact_id": normalized_artifact_id}
+        result = self.artifact_mirror_service.mirror_artifact(
+            artifact_id=normalized_artifact_id,
+            remote_path=remote_path,
+            actor_id=admin_id or "admin",
+            rclone_binary=rclone_binary,
+            timeout_seconds=timeout_seconds,
+            bwlimit=bwlimit,
+            encryption_required=encryption_required,
+            remote_encryption_verified=remote_encryption_verified,
+        )
+        if result.get("error"):
+            self._audit(
+                action="artifact.remote_mirror",
+                actor_id=admin_id or "admin",
+                actor_role="admin",
+                target_id=normalized_artifact_id or "artifact",
+                status="failed",
+                detail={
+                    "error": str(result.get("error", "") or ""),
+                    "remote_path": str(remote_path or "").strip(),
+                },
+            )
+            return result
+        mirror = result.get("mirror") if isinstance(result.get("mirror"), dict) else {}
+        self._audit(
+            action="artifact.remote_mirror",
+            actor_id=admin_id or "admin",
+            actor_role="admin",
+            target_id=normalized_artifact_id or "artifact",
+            status=str(mirror.get("status", "") or "succeeded"),
+            detail={"remote_path": str(mirror.get("remote_path", "") or "")},
+        )
+        return result
+
     def admin_export_profile_pack(
         self,
         role: str,
@@ -849,6 +1523,106 @@ class SharelifeApiV1:
         )
         return self._profile_pack_import_payload(imported)
 
+    def member_import_profile_pack(
+        self,
+        user_id: str,
+        filename: str,
+        content_base64: str,
+    ) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable"}
+        try:
+            content = base64.b64decode(content_base64.encode("ascii"), validate=True)
+        except (binascii.Error, ValueError):
+            return {"error": "invalid_profile_pack_payload"}
+        try:
+            imported = self.profile_pack_service.import_member_profile_pack(
+                user_id=user_id,
+                filename=filename,
+                content=content,
+            )
+        except ValueError as exc:
+            return self._profile_pack_error_payload(exc=exc, fallback_id=filename)
+        self._audit(
+            action="profile_pack.imported",
+            actor_id=str(user_id or "").strip() or "member",
+            actor_role="member",
+            target_id=imported.import_id,
+            status=imported.compatibility,
+            detail={
+                "filename": imported.filename,
+                "source_artifact_id": imported.source_artifact_id,
+            },
+        )
+        return self._profile_pack_import_payload(imported)
+
+    def member_import_local_astrbot_config(self, user_id: str) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable"}
+        try:
+            config_path = self._detect_local_astrbot_config_path()
+        except FileNotFoundError:
+            return {"error": "astrbot_local_config_not_found"}
+        try:
+            content = config_path.read_bytes()
+        except OSError:
+            return {"error": "astrbot_local_config_read_failed"}
+        try:
+            imported = self.profile_pack_service.import_member_profile_pack(
+                user_id=user_id,
+                filename=config_path.name,
+                content=content,
+                import_origin="local_astrbot_detected",
+                source_fingerprint=self._local_astrbot_source_fingerprint(config_path),
+                refresh_existing=True,
+            )
+        except ValueError as exc:
+            return self._profile_pack_error_payload(exc=exc, fallback_id=config_path.name)
+        self._audit(
+            action="profile_pack.imported",
+            actor_id=str(user_id or "").strip() or "member",
+            actor_role="member",
+            target_id=imported.import_id,
+            status=imported.compatibility,
+            detail={
+                "filename": imported.filename,
+                "source_artifact_id": imported.source_artifact_id,
+                "source": "local_astrbot_config",
+            },
+        )
+        return self._profile_pack_import_payload(imported)
+
+    def member_delete_profile_pack_import(self, user_id: str, import_id: str) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable"}
+        normalized_user_id = str(user_id or "").strip() or "member"
+        normalized_import_id = str(import_id or "").strip()
+        if not normalized_import_id:
+            return {"error": "profile_import_not_found", "import_id": normalized_import_id}
+        try:
+            deleted = self.profile_pack_service.delete_import(
+                user_id=normalized_user_id,
+                import_id=normalized_import_id,
+            )
+        except ValueError as exc:
+            return self._profile_pack_error_payload(exc=exc, fallback_id=normalized_import_id)
+        self._audit(
+            action="profile_pack.import_deleted",
+            actor_id=normalized_user_id,
+            actor_role="member",
+            target_id=deleted.import_id,
+            status="deleted",
+            detail={
+                "pack_id": deleted.manifest.pack_id,
+                "source_artifact_id": deleted.source_artifact_id,
+            },
+        )
+        return {
+            "deleted": True,
+            "import_id": deleted.import_id,
+            "user_id": normalized_user_id,
+        }
+
     def admin_import_profile_pack_from_export(
         self,
         role: str,
@@ -882,6 +1656,43 @@ class SharelifeApiV1:
         payload = self._profile_pack_import_payload(imported)
         payload["source_artifact_id"] = artifact_id
         return payload
+
+    @classmethod
+    def _detect_local_astrbot_config_path(cls) -> Path:
+        configured_path = str(os.getenv("SHARELIFE_ASTRBOT_CONFIG_PATH", "") or "").strip()
+        repo_root = Path(__file__).resolve().parents[2]
+        workspace_root = Path(__file__).resolve().parents[3]
+        home_root = Path.home()
+        search_roots = [
+            repo_root,
+            repo_root.parent,
+            workspace_root,
+            home_root,
+            home_root / "astrbot",
+        ]
+        candidate_paths: list[Path] = []
+        if configured_path:
+            candidate_paths.append(Path(configured_path).expanduser())
+        for root in search_roots:
+            candidate_paths.extend(
+                [
+                    root / "data" / "cmd_config.json",
+                    root / "astrbot" / "data" / "cmd_config.json",
+                    root / "cmd_config.json",
+                    root / "config" / "cmd_config.json",
+                ]
+            )
+
+        seen: set[str] = set()
+        for candidate in candidate_paths:
+            resolved = candidate.expanduser()
+            normalized = str(resolved)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            if resolved.is_file():
+                return resolved.resolve()
+        raise FileNotFoundError("local AstrBot cmd_config.json not found")
 
     def admin_import_profile_pack_and_dryrun(
         self,
@@ -943,6 +1754,23 @@ class SharelifeApiV1:
         if self.profile_pack_service is None:
             return {"error": "profile_pack_service_unavailable"}
         return {"imports": self.profile_pack_service.list_imports(limit=limit)}
+
+    def member_list_profile_pack_imports(self, user_id: str, limit: int = 50) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable"}
+        normalized_user_id = str(user_id or "").strip() or "member"
+        return {
+            "user_id": normalized_user_id,
+            "imports": self.profile_pack_service.list_imports(
+                limit=limit,
+                user_id=normalized_user_id,
+            ),
+        }
+
+    @staticmethod
+    def _local_astrbot_source_fingerprint(config_path: Path) -> str:
+        normalized = str(config_path.expanduser().resolve())
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     def admin_profile_pack_dryrun(
         self,
@@ -1140,6 +1968,54 @@ class SharelifeApiV1:
         if not normalized_artifact_id:
             return {"error": "profile_pack_source_required"}
         normalized_submit_options = self._normalize_profile_pack_submit_options(submit_options)
+        normalized_idempotency_key = self._normalize_idempotency_key(
+            normalized_submit_options.get("idempotency_key"),
+        )
+        if normalized_idempotency_key:
+            existing = self._find_any_profile_pack_submission_by_idempotency(
+                user_id=user_id,
+                idempotency_key=normalized_idempotency_key,
+            )
+            if existing is not None:
+                existing_artifact_id = str(getattr(existing, "artifact_id", "") or "").strip()
+                if existing_artifact_id != normalized_artifact_id:
+                    self._audit(
+                        action="profile_pack.submission.idempotency_conflict",
+                        actor_id=user_id,
+                        actor_role="member",
+                        target_id=str(getattr(existing, "submission_id", "") or ""),
+                        status="conflict",
+                        detail={
+                            "artifact_id": normalized_artifact_id,
+                            "existing_artifact_id": existing_artifact_id,
+                            "idempotency_key_fingerprint": self._idempotency_key_fingerprint(
+                                normalized_idempotency_key,
+                            ),
+                        },
+                    )
+                    return {
+                        "error": "idempotency_key_conflict",
+                        "artifact_id": normalized_artifact_id,
+                        "existing_submission_id": str(getattr(existing, "submission_id", "") or ""),
+                    }
+                self._audit(
+                    action="profile_pack.submission.idempotency_replayed",
+                    actor_id=user_id,
+                    actor_role="member",
+                    target_id=str(getattr(existing, "submission_id", "") or ""),
+                    status=str(getattr(existing, "status", "pending") or "pending"),
+                    detail={
+                        "artifact_id": normalized_artifact_id,
+                        "idempotency_key_fingerprint": self._idempotency_key_fingerprint(
+                            normalized_idempotency_key,
+                        ),
+                    },
+                )
+                payload = self._profile_pack_submission_payload(existing)
+                payload["idempotent_replay"] = True
+                payload["replaced_submission_ids"] = []
+                payload["replaced_submission_count"] = 0
+                return payload
         try:
             submission = self.profile_pack_service.submit_export_artifact(
                 user_id=user_id,
@@ -1490,6 +2366,37 @@ class SharelifeApiV1:
             rows.append(self._profile_pack_submission_payload(item))
         return {"user_id": normalized_user_id, "submissions": rows}
 
+    def member_withdraw_profile_pack_submission(
+        self,
+        user_id: str,
+        submission_id: str,
+    ) -> dict:
+        if self.profile_pack_service is None:
+            return {"error": "profile_pack_service_unavailable", "submission_id": submission_id}
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        normalized_submission_id = str(submission_id or "").strip()
+        if not normalized_submission_id:
+            return {"error": "submission_id_required"}
+        try:
+            submission = self.profile_pack_service.withdraw_submission(
+                user_id=normalized_user_id,
+                submission_id=normalized_submission_id,
+            )
+        except ValueError as exc:
+            return self._profile_pack_error_payload(exc=exc, fallback_id=normalized_submission_id)
+        self._audit(
+            action="profile_pack.submission_withdrawn",
+            actor_id=normalized_user_id,
+            actor_role="member",
+            target_id=submission.submission_id,
+            status=submission.status,
+            detail={
+                "pack_id": submission.pack_id,
+                "version": submission.version,
+            },
+        )
+        return self._profile_pack_submission_payload(submission)
+
     def member_get_profile_pack_submission_detail(
         self,
         user_id: str,
@@ -1780,24 +2687,93 @@ class SharelifeApiV1:
             return {"error": "permission_denied", "submission_id": normalized_submission_id}
         return self._submission_detail_payload(submission)
 
-    def member_get_submission_package(self, user_id: str, submission_id: str) -> dict:
+    def member_get_submission_package(
+        self,
+        user_id: str,
+        submission_id: str,
+        idempotency_key: str = "",
+    ) -> dict:
         normalized_user_id = str(user_id or "").strip() or "webui-user"
         normalized_submission_id = str(submission_id or "").strip()
+        normalized_idempotency_key = self._normalize_idempotency_key(idempotency_key)
+        transfer_claim = self._claim_transfer_job(
+            direction="download",
+            job_type="member_submission_package",
+            actor_id=normalized_user_id,
+            actor_role="member",
+            user_id=normalized_user_id,
+            logical_key=(
+                f"download:{normalized_user_id}:submission:{normalized_submission_id}:{normalized_idempotency_key}"
+                if normalized_idempotency_key
+                else self._new_transfer_logical_key(
+                    f"download:{normalized_user_id}:submission:{normalized_submission_id}"
+                )
+            ),
+            submission_id=normalized_submission_id,
+            idempotency_key=normalized_idempotency_key,
+            max_attempts=2,
+        )
+        if transfer_claim is not None and transfer_claim.should_execute:
+            self.transfer_job_service.mark_running(transfer_claim.job.job_id)
         if not normalized_submission_id:
-            return {"error": "submission_id_required"}
+            payload = {"error": "submission_id_required"}
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="validation_failed",
+                    failure_detail="submission_id is required",
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
         if self.package_service is None:
-            return {"error": "package_service_unavailable", "submission_id": normalized_submission_id}
+            payload = {"error": "package_service_unavailable", "submission_id": normalized_submission_id}
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="service_unavailable",
+                    failure_detail="package service unavailable",
+                    submission_id=normalized_submission_id,
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
         try:
             submission = self.market_service.get_submission(submission_id=normalized_submission_id)
         except KeyError:
-            return {"error": "submission_not_found", "submission_id": normalized_submission_id}
+            payload = {"error": "submission_not_found", "submission_id": normalized_submission_id}
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="not_found",
+                    failure_detail="submission not found",
+                    submission_id=normalized_submission_id,
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
         if str(submission.user_id or "").strip() != normalized_user_id:
-            return {"error": "permission_denied", "submission_id": normalized_submission_id}
+            payload = {"error": "permission_denied", "submission_id": normalized_submission_id}
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="permission_denied",
+                    failure_detail="submission does not belong to current member",
+                    submission_id=normalized_submission_id,
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
         try:
             artifact = self.package_service.get_submission_package_artifact(submission_id=normalized_submission_id)
         except ValueError:
-            return {"error": "submission_package_not_available", "submission_id": normalized_submission_id}
-        return {
+            payload = {"error": "submission_package_not_available", "submission_id": normalized_submission_id}
+            if transfer_claim is not None:
+                self.transfer_job_service.mark_failed(
+                    transfer_claim.job.job_id,
+                    failure_reason="artifact_missing",
+                    failure_detail="submission package missing",
+                    submission_id=normalized_submission_id,
+                )
+                self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+            return payload
+        payload = {
             "submission_id": normalized_submission_id,
             "template_id": artifact.template_id,
             "version": artifact.version,
@@ -1807,6 +2783,17 @@ class SharelifeApiV1:
             "source": artifact.source,
             "size_bytes": artifact.size_bytes,
         }
+        if transfer_claim is not None:
+            self.transfer_job_service.mark_done(
+                transfer_claim.job.job_id,
+                template_id=artifact.template_id,
+                submission_id=normalized_submission_id,
+                filename=artifact.filename,
+                size_bytes=artifact.size_bytes,
+                sha256=artifact.sha256,
+            )
+            self._attach_transfer_job(payload, self.transfer_job_service.get(transfer_claim.job.job_id))
+        return payload
 
     def admin_get_submission_detail(self, role: str, submission_id: str) -> dict:
         if not self._is_reviewer_role(role):
@@ -2052,6 +3039,7 @@ class SharelifeApiV1:
     def admin_dryrun(self, role: str, plan_id: str, patch: dict) -> dict:
         if role != "admin":
             return {"error": "permission_denied", "plan_id": plan_id}
+        selected_sections = sorted({str(key or "").strip() for key in patch.keys() if str(key or "").strip()})
         plan = self.apply_service.register_plan(
             plan_id=plan_id,
             patch=patch,
@@ -2060,9 +3048,7 @@ class SharelifeApiV1:
                 "actor_role": "admin",
                 "source_id": plan_id,
                 "source_kind": "manual_patch",
-                "selected_sections": sorted(
-                    str(key or "").strip() for key in patch.keys() if str(key or "").strip()
-                ),
+                "selected_sections": selected_sections,
                 "recovery_class": "config_snapshot_restore",
             },
         )
@@ -2297,11 +3283,15 @@ class SharelifeApiV1:
         visibility = str(payload.get("visibility", "community") or "community").strip().lower()
         if visibility not in {"community", "private"}:
             visibility = "community"
-        return {
+        normalized = {
             "scan_mode": scan_mode,
             "visibility": visibility,
             "replace_existing": cls._as_bool(payload.get("replace_existing"), default=False),
         }
+        idempotency_key = cls._normalize_idempotency_key(payload.get("idempotency_key"))
+        if idempotency_key:
+            normalized["idempotency_key"] = idempotency_key
+        return normalized
 
     @classmethod
     def _normalize_profile_pack_submit_options(cls, submit_options: dict | None) -> dict:
@@ -2323,24 +3313,48 @@ class SharelifeApiV1:
             selected_sections = [str(item or "").strip() for item in selected_sections_raw if str(item or "").strip()]
         elif isinstance(selected_sections_raw, str):
             selected_sections = [item.strip() for item in selected_sections_raw.split(",") if item.strip()]
-        return {
+        selected_item_paths_raw = payload.get("selected_item_paths")
+        selected_item_paths: list[str] = []
+        if isinstance(selected_item_paths_raw, list):
+            selected_item_paths = [
+                str(item or "").strip()
+                for item in selected_item_paths_raw
+                if str(item or "").strip()
+            ]
+        elif isinstance(selected_item_paths_raw, str):
+            selected_item_paths = [item.strip() for item in selected_item_paths_raw.split(",") if item.strip()]
+        normalized = {
             "pack_type": pack_type,
             "selected_sections": selected_sections,
+            "selected_item_paths": selected_item_paths,
             "redaction_mode": redaction_mode,
             "replace_existing": cls._as_bool(payload.get("replace_existing"), default=False),
         }
+        idempotency_key = cls._normalize_idempotency_key(payload.get("idempotency_key"))
+        if idempotency_key:
+            normalized["idempotency_key"] = idempotency_key
+        return normalized
 
     def _member_installations_payload(self, user_id: str, limit: int) -> list[dict]:
         normalized_user_id = str(user_id or "").strip() or "webui-user"
         inspected_limit = max(200, limit * 20)
-        latest_by_template: dict[str, dict] = {}
+        latest_by_template: dict[str, tuple[str, Any]] = {}
         for event in self.audit_service.list_events(limit=inspected_limit):
-            if str(event.action or "") != "template.installed":
+            action = str(event.action or "").strip()
+            if action not in {"template.installed", "template.uninstalled"}:
                 continue
             if str(event.actor_id or "") != normalized_user_id:
                 continue
             template_id = str(event.target_id or "").strip()
             if not template_id:
+                continue
+            previous = latest_by_template.get(template_id)
+            if previous is not None and previous[1].created_at > event.created_at:
+                continue
+            latest_by_template[template_id] = (action, event)
+        rows = []
+        for template_id, (action, event) in latest_by_template.items():
+            if action != "template.installed":
                 continue
             published = self.market_service.get_published_template(template_id=template_id)
             detail = event.detail if isinstance(event.detail, dict) else {}
@@ -2361,13 +3375,82 @@ class SharelifeApiV1:
                 "maintainer": str(getattr(published, "maintainer", "") or ""),
                 "engagement": self._engagement_payload(published, self.market_service) if published else {},
             }
-            latest_by_template[template_id] = row
+            rows.append(row)
         rows = sorted(
-            latest_by_template.values(),
+            rows,
             key=lambda item: str(item.get("installed_at", "")),
             reverse=True,
         )
         return rows[:limit]
+
+    @classmethod
+    def _member_task_display_name(cls, action: str) -> str:
+        value = str(action or "").strip()
+        if not value:
+            return "operation"
+        if value == "trial.requested":
+            return "trial"
+        if value in {"template.installed", "template.uninstalled"}:
+            return "install"
+        if value in {"submission.created", "submission.package_uploaded", "submission.pending_replaced"}:
+            return "submit_template"
+        if value.startswith("submission.idempotency_"):
+            return "submit_template"
+        if value.startswith("member.installations."):
+            return "member_installations_refresh"
+        if value.startswith("profile_pack.submission"):
+            return "profile_pack_submit"
+        if value.startswith("profile_pack."):
+            return "profile_pack_operation"
+        return value.replace(".", "_")
+
+    def _member_tasks_payload(self, user_id: str, limit: int) -> list[dict]:
+        normalized_user_id = str(user_id or "").strip() or "webui-user"
+        inspected_limit = max(200, limit * 40)
+        rows: list[dict] = []
+        for event in reversed(self.audit_service.list_events(limit=inspected_limit)):
+            action = str(event.action or "").strip()
+            if action not in self._MEMBER_TASK_ACTIONS:
+                continue
+            if str(event.actor_id or "").strip() != normalized_user_id:
+                continue
+            if self._normalize_role(str(event.actor_role or "")) != "member":
+                continue
+            detail = event.detail if isinstance(event.detail, dict) else {}
+            template_id = str(detail.get("template_id", "") or "").strip()
+            if not template_id and action.startswith("template."):
+                template_id = str(event.target_id or "").strip()
+            pack_id = str(detail.get("pack_id", "") or "").strip()
+            normalized_status = str(event.status or "").strip().lower()
+            ok = (
+                normalized_status not in self._MEMBER_TASK_ERROR_STATUSES
+                and not action.endswith("idempotency_conflict")
+            )
+            summary = str(detail.get("message", "") or "").strip()
+            if not summary:
+                if template_id:
+                    summary = f"{action}: {template_id}"
+                elif pack_id:
+                    summary = f"{action}: {pack_id}"
+                else:
+                    summary = action
+            rows.append(
+                {
+                    "task_id": str(event.id or "").strip(),
+                    "name": self._member_task_display_name(action),
+                    "action": action,
+                    "ok": ok,
+                    "status": str(event.status or "").strip(),
+                    "message": summary,
+                    "at": event.created_at.isoformat(),
+                    "target_id": str(event.target_id or "").strip(),
+                    "template_id": template_id,
+                    "pack_id": pack_id,
+                }
+            )
+            if len(rows) >= limit:
+                break
+        return rows
 
     @staticmethod
     def _apply_error_payload(plan_id: str, exc: Exception) -> dict:
@@ -2385,13 +3468,21 @@ class SharelifeApiV1:
             return {"error": "profile_pack_not_published", "pack_id": fallback_id}
         if "PROFILE_PACK_ARTIFACT_NOT_FOUND" in code:
             return {"error": "profile_pack_not_found", "artifact_id": fallback_id}
+        if "PROFILE_PACK_ARTIFACT_PERMISSION_DENIED" in code:
+            return {"error": "permission_denied", "artifact_id": fallback_id}
+        if "PROFILE_PACK_SUBMISSION_PERMISSION_DENIED" in code:
+            return {"error": "permission_denied", "submission_id": fallback_id}
         if "PROFILE_PACK_SUBMISSION_NOT_FOUND" in code:
             return {"error": "profile_pack_submission_not_found", "submission_id": fallback_id}
+        if "PROFILE_PACK_SUBMISSION_STATE_INVALID" in code:
+            return {"error": "profile_pack_submission_state_invalid", "submission_id": fallback_id}
         if "PROFILE_PACK_BYTES_REQUIRED" in code:
             return {"error": "invalid_profile_pack_payload"}
         if "PROFILE_PACK_INVALID_ARCHIVE" in code:
             return {"error": "invalid_profile_pack_payload"}
         if "PROFILE_PACK_MANIFEST_MISSING" in code:
+            return {"error": "invalid_profile_pack_payload"}
+        if "PROFILE_PACK_MANIFEST_INVALID" in code:
             return {"error": "invalid_profile_pack_payload"}
         if "PROFILE_PACK_SECTION_MISSING" in code:
             return {"error": "invalid_profile_pack_payload"}
@@ -2407,10 +3498,14 @@ class SharelifeApiV1:
             return {"error": "invalid_profile_section"}
         if "PROFILE_SECTION_SELECTION_EMPTY" in code:
             return {"error": "invalid_profile_section"}
+        if "PROFILE_SECTION_ITEM_SELECTION_INVALID" in code:
+            return {"error": "invalid_profile_section_path"}
         if "field path must include section prefix" in code:
             return {"error": "invalid_redaction_path"}
         if "PROFILE_IMPORT_NOT_FOUND" in code:
             return {"error": "profile_import_not_found", "import_id": fallback_id}
+        if "PROFILE_IMPORT_IN_USE" in code:
+            return {"error": "profile_import_in_use", "import_id": fallback_id}
         if "PROFILE_PACK_INCOMPATIBLE" in code:
             return {"error": "profile_pack_incompatible", "import_id": fallback_id}
         if "PROFILE_PACK_PLUGIN_INSTALL_CONFIRM_REQUIRED" in code:
@@ -2429,11 +3524,17 @@ class SharelifeApiV1:
             return {"error": "invalid_submission_decision", "submission_id": fallback_id}
         raise exc
 
-    @staticmethod
-    def _profile_pack_import_payload(imported) -> dict:
+    def _profile_pack_import_payload(self, imported) -> dict:
+        meta = imported.sections.get("sharelife_meta") if isinstance(imported.sections, dict) else None
+        astrbot_import = meta.get("astrbot_import") if isinstance(meta, dict) else None
+        import_summary = astrbot_import.get("summary") if isinstance(astrbot_import, dict) else {}
+        selection_tree = []
+        if self.profile_pack_service is not None:
+            selection_tree = self.profile_pack_service.build_import_selection_tree(imported)
         return {
             "import_id": imported.import_id,
             "imported_at": imported.imported_at,
+            "user_id": imported.user_id,
             "filename": imported.filename,
             "pack_type": imported.manifest.pack_type,
             "pack_id": imported.manifest.pack_id,
@@ -2443,6 +3544,11 @@ class SharelifeApiV1:
             "scan_summary": imported.scan_summary,
             "compatibility": imported.compatibility,
             "compatibility_issues": list(imported.compatibility_issues),
+            "source_artifact_id": imported.source_artifact_id,
+            "import_origin": imported.import_origin,
+            "source_fingerprint": imported.source_fingerprint,
+            "import_summary": dict(import_summary) if isinstance(import_summary, dict) else {},
+            "selection_tree": selection_tree,
         }
 
     @staticmethod
@@ -2869,8 +3975,14 @@ class SharelifeApiV1:
             payload["published_at"] = published.published_at
         return payload
 
-    @staticmethod
-    def _submission_payload(submission) -> dict:
+    def _package_artifact_payload(self, artifact: dict | None) -> dict | None:
+        if not isinstance(artifact, dict) or not artifact:
+            return None
+        if self.package_service is None:
+            return dict(artifact)
+        return self.package_service.resolve_package_artifact_metadata(artifact)
+
+    def _submission_payload(self, submission) -> dict:
         payload = {
             "id": submission.id,
             "submission_id": submission.id,
@@ -2890,12 +4002,11 @@ class SharelifeApiV1:
             "upload_options": dict(submission.upload_options or {}),
         }
         if submission.package_artifact:
-            payload["package_artifact"] = submission.package_artifact
+            payload["package_artifact"] = self._package_artifact_payload(submission.package_artifact)
         return payload
 
-    @staticmethod
-    def _submission_detail_payload(submission) -> dict:
-        payload = SharelifeApiV1._submission_payload(submission)
+    def _submission_detail_payload(self, submission) -> dict:
+        payload = self._submission_payload(submission)
         payload["created_at"] = submission.created_at.isoformat()
         payload["updated_at"] = submission.updated_at.isoformat()
         payload["reviewer_id"] = submission.reviewer_id
@@ -2903,8 +4014,7 @@ class SharelifeApiV1:
         payload["prompt_length"] = len(str(submission.prompt_template or ""))
         return payload
 
-    @staticmethod
-    def _published_payload(published, market_service: MarketService | None = None) -> dict:
+    def _published_payload(self, published, market_service: MarketService | None = None) -> dict:
         payload = {
             "template_id": published.template_id,
             "version": published.version,
@@ -2921,12 +4031,11 @@ class SharelifeApiV1:
             "engagement": SharelifeApiV1._engagement_payload(published, market_service),
         }
         if published.package_artifact:
-            payload["package_artifact"] = published.package_artifact
+            payload["package_artifact"] = self._package_artifact_payload(published.package_artifact)
         return payload
 
-    @staticmethod
-    def _published_detail_payload(published, market_service: MarketService | None = None) -> dict:
-        payload = SharelifeApiV1._published_payload(published, market_service)
+    def _published_detail_payload(self, published, market_service: MarketService | None = None) -> dict:
+        payload = self._published_payload(published, market_service)
         payload["published_at"] = published.published_at.isoformat()
         payload["prompt_preview"] = str(published.prompt_template or "")[:240]
         payload["prompt_length"] = len(str(published.prompt_template or ""))

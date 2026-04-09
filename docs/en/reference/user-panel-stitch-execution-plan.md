@@ -35,6 +35,15 @@ Current tradeoff:
 1. `install_options.source_preference=generated` now changes package resolution behavior.
 2. Other option blocks are normalized, persisted, and surfaced back to the UI/API, but not all of them change downstream governance semantics yet.
 
+Immediate closure items for the next pass:
+
+1. `/member` top-bar primary action must be renamed from generic config import wording to explicit local migration wording: `Import Local AstrBot Config`.
+2. The `/member` surface must render only member-safe entry points in the top utility area:
+   - `Member Console`
+   - `Market Hub`
+3. Reviewer/admin/full-console links and developer-mode toggle must not be present in the member DOM, not merely hidden by CSS.
+4. Raw AstrBot import success must always deep-link into the upload review modal so the user can inspect sections before submission.
+
 ## 1. Target
 
 Restructure the user-facing WebUI into four explicit workflows while preserving existing contracts and route guards:
@@ -58,7 +67,7 @@ Restructure the user-facing WebUI into four explicit workflows while preserving 
 1. Top bar:
    - global spotlight-style search
    - locale switch
-   - always-visible `刷新本地已有配置` primary utility action
+   - always-visible `Import Local AstrBot Config` primary utility action
 2. Main default pane: installed resources overview.
 3. Secondary pane:
    - upload drop zone + upload options
@@ -133,3 +142,5 @@ Response envelope stays unchanged:
    Control: collapse advanced controls instead of deleting them.
 3. Risk: UI/back-end capability drift  
    Control: every control maps into `CONTROL_CAPABILITY_MAP` before merge.
+4. Risk: member DOM still leaks privileged console affordances even when visually hidden  
+   Control: remove privileged links/toggles from `member.html` entirely and keep capability enforcement server-side.

@@ -56,6 +56,8 @@ def test_public_navigation_omits_github_pages_publish_guides():
     assert "/zh/how-to/github-pages-publish" not in config_text
     assert "/en/how-to/github-pages-publish" not in config_text
     assert "/ja/how-to/github-pages-publish" not in config_text
+    root_index = (REPO_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+    assert "](/private/)" not in root_index
 
 
 def test_readme_names_the_github_pages_url():
@@ -64,16 +66,25 @@ def test_readme_names_the_github_pages_url():
     assert "EdgeOne Fallback Publishing" not in text
 
 
-def test_public_publish_docs_no_longer_reference_edgeone():
-    localized_pages = [
+def test_github_pages_publish_guides_are_private_only():
+    public_pages = [
         REPO_ROOT / "docs" / "en" / "how-to" / "github-pages-publish.md",
         REPO_ROOT / "docs" / "zh" / "how-to" / "github-pages-publish.md",
         REPO_ROOT / "docs" / "ja" / "how-to" / "github-pages-publish.md",
     ]
+    private_pages = [
+        REPO_ROOT / "docs" / "en" / "private" / "github-pages-publish.md",
+        REPO_ROOT / "docs" / "zh" / "private" / "github-pages-publish.md",
+        REPO_ROOT / "docs" / "ja" / "private" / "github-pages-publish.md",
+    ]
 
-    for page_path in localized_pages:
-        if not page_path.exists():
-            continue
+    for page_path in public_pages:
+        assert not page_path.exists()
+
+    existing_private_pages = [page_path for page_path in private_pages if page_path.exists()]
+    assert len(existing_private_pages) in {0, len(private_pages)}
+
+    for page_path in existing_private_pages:
         text = page_path.read_text(encoding="utf-8")
         assert "EdgeOne" not in text
         assert "edgeone" not in text

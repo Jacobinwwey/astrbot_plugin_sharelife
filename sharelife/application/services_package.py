@@ -12,11 +12,15 @@ from typing import Any
 
 from .services_scan import ScanService
 from .services_market import MarketService
+from ..infrastructure.json_state_store import JsonStateStore
+from ..infrastructure.local_artifact_store import ArtifactStore, LocalArtifactStore
+from ..infrastructure.sqlite_state_store import SqliteStateStore
 from ..infrastructure.system_clock import SystemClock
 
 
 @dataclass(slots=True)
 class PackageArtifact:
+    artifact_id: str
     template_id: str
     version: str
     path: Path
@@ -28,6 +32,7 @@ class PackageArtifact:
 
 @dataclass(slots=True)
 class SubmissionPackageImport:
+    artifact_id: str
     template_id: str
     version: str
     path: Path
@@ -51,12 +56,19 @@ class PackageService:
         clock: SystemClock,
         scan_service: ScanService | None = None,
         max_submission_package_bytes: int = DEFAULT_MAX_SUBMISSION_PACKAGE_BYTES,
+        artifact_state_store: JsonStateStore | SqliteStateStore | None = None,
+        artifact_store: ArtifactStore | None = None,
     ):
         self.market_service = market_service
         self.output_root = Path(output_root)
         self.clock = clock
         self.scan_service = scan_service or ScanService()
         self.max_submission_package_bytes = max(1, int(max_submission_package_bytes or self.DEFAULT_MAX_SUBMISSION_PACKAGE_BYTES))
+        self.artifact_store = artifact_store or LocalArtifactStore(
+            output_root=self.output_root,
+            clock=self.clock,
+            state_store=artifact_state_store,
+        )
 
     def ingest_submission_package(
         self,
@@ -76,6 +88,14 @@ class PackageService:
         upload_root.mkdir(parents=True, exist_ok=True)
         path = upload_root / f"{template_id.replace('/', '__')}-{version}-{sha256[:12]}-{safe_name}"
         path.write_bytes(content)
+        artifact_record = self.artifact_store.register_local_file(
+            artifact_kind="template_submission_package",
+            path=path,
+            filename=safe_name,
+            sha256=sha256,
+            size_bytes=len(content),
+            metadata={"template_id": template_id, "version": version, "source": "uploaded_submission"},
+        )
 
         prompt_template, scan_payload = self._extract_submission_payload(
             template_id=template_id,
@@ -86,6 +106,7 @@ class PackageService:
         report = self.scan_service.scan(scan_payload)
         summary = self.scan_service.to_dict(report)
         return SubmissionPackageImport(
+            artifact_id=artifact_record.artifact_id,
             template_id=template_id,
             version=version,
             path=path,
@@ -135,7 +156,16 @@ class PackageService:
             )
 
         sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        artifact_record = self.artifact_store.register_local_file(
+            artifact_kind="template_generated_package",
+            path=path,
+            filename=path.name,
+            sha256=sha256,
+            size_bytes=path.stat().st_size,
+            metadata={"template_id": template_id, "version": version, "source": "generated"},
+        )
         return PackageArtifact(
+            artifact_id=artifact_record.artifact_id,
             template_id=template_id,
             version=version,
             path=path,
@@ -148,21 +178,30 @@ class PackageService:
     def get_submission_package_artifact(self, submission_id: str) -> PackageArtifact:
         submission = self.market_service.get_submission(submission_id=submission_id)
         artifact = submission.package_artifact or {}
-        path = Path(str(artifact.get("path", "") or ""))
-        if not path.exists():
+        artifact_record = self._resolve_artifact_reference(
+            artifact=artifact,
+            artifact_kind="template_submission_package",
+            metadata={"template_id": submission.template_id, "version": submission.version},
+        )
+        if artifact_record is None:
             raise ValueError("SUBMISSION_PACKAGE_NOT_AVAILABLE")
-        sha256 = str(artifact.get("sha256", "") or hashlib.sha256(path.read_bytes()).hexdigest())
-        filename = str(artifact.get("filename", "") or path.name)
-        size_bytes = int(artifact.get("size_bytes", 0) or path.stat().st_size)
-        source = str(artifact.get("source", "") or "uploaded_submission")
+        path = self.artifact_store.resolve(artifact_record.artifact_id)
+        normalized_ref = self._artifact_ref_payload(
+            artifact_record,
+            source=str(artifact.get("source", "") or "uploaded_submission"),
+        )
+        if normalized_ref != artifact:
+            self.market_service.set_submission_package_artifact(submission_id, normalized_ref)
+        source = str(normalized_ref.get("source", "") or "uploaded_submission")
         return PackageArtifact(
+            artifact_id=artifact_record.artifact_id,
             template_id=submission.template_id,
             version=submission.version,
             path=path,
-            sha256=sha256,
-            filename=filename,
+            sha256=artifact_record.sha256,
+            filename=artifact_record.filename,
             source=source,
-            size_bytes=size_bytes,
+            size_bytes=artifact_record.size_bytes,
         )
 
     def _published_upload(self, template_id: str) -> PackageArtifact | None:
@@ -170,22 +209,87 @@ class PackageService:
         if published is None or not published.package_artifact:
             return None
         artifact = published.package_artifact
-        path = Path(str(artifact.get("path", "")))
-        if not path.exists():
+        artifact_record = self._resolve_artifact_reference(
+            artifact=artifact,
+            artifact_kind="template_submission_package",
+            metadata={"template_id": template_id, "version": published.version},
+        )
+        if artifact_record is None:
             return None
-        sha256 = str(artifact.get("sha256", "") or hashlib.sha256(path.read_bytes()).hexdigest())
-        filename = str(artifact.get("filename", "") or path.name)
-        size_bytes = int(artifact.get("size_bytes", 0) or path.stat().st_size)
+        path = self.artifact_store.resolve(artifact_record.artifact_id)
+        normalized_ref = self._artifact_ref_payload(
+            artifact_record,
+            source=str(artifact.get("source", "") or "uploaded_submission"),
+        )
+        if normalized_ref != artifact:
+            self.market_service.set_published_package_artifact(template_id, normalized_ref)
         source = str(artifact.get("source", "") or "uploaded_submission")
         return PackageArtifact(
+            artifact_id=artifact_record.artifact_id,
             template_id=template_id,
             version=published.version,
             path=path,
-            sha256=sha256,
-            filename=filename,
+            sha256=artifact_record.sha256,
+            filename=artifact_record.filename,
             source=source,
-            size_bytes=size_bytes,
+            size_bytes=artifact_record.size_bytes,
         )
+
+    def resolve_package_artifact_metadata(self, artifact: dict | None) -> dict:
+        payload = dict(artifact or {}) if isinstance(artifact, dict) else {}
+        record = self._resolve_artifact_reference(
+            artifact=payload,
+            artifact_kind="template_package",
+            metadata={},
+        )
+        if record is None:
+            return payload
+        path = self.artifact_store.resolve(record.artifact_id)
+        payload.setdefault("artifact_id", record.artifact_id)
+        payload.setdefault("filename", record.filename)
+        payload.setdefault("sha256", record.sha256)
+        payload.setdefault("size_bytes", record.size_bytes)
+        payload["path"] = str(path)
+        return payload
+
+    def _resolve_artifact_reference(
+        self,
+        *,
+        artifact: dict | None,
+        artifact_kind: str,
+        metadata: dict[str, Any],
+    ):
+        payload = dict(artifact or {}) if isinstance(artifact, dict) else {}
+        artifact_id = str(payload.get("artifact_id", "") or "").strip()
+        if artifact_id:
+            try:
+                return self.artifact_store.get(artifact_id)
+            except KeyError:
+                return None
+        legacy_path_text = str(payload.get("path", "") or "").strip()
+        if not legacy_path_text:
+            return None
+        legacy_path = Path(legacy_path_text).expanduser()
+        if not legacy_path.exists():
+            return None
+        return self.artifact_store.register_local_file(
+            artifact_kind=artifact_kind,
+            path=legacy_path,
+            filename=str(payload.get("filename", "") or legacy_path.name),
+            sha256=str(payload.get("sha256", "") or ""),
+            size_bytes=int(payload.get("size_bytes", 0) or legacy_path.stat().st_size),
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _artifact_ref_payload(record, *, source: str) -> dict[str, Any]:
+        return {
+            "artifact_id": record.artifact_id,
+            "sha256": record.sha256,
+            "filename": record.filename,
+            "size_bytes": record.size_bytes,
+            "source": str(source or "generated").strip() or "generated",
+        }
 
     @staticmethod
     def _safe_filename(filename: str) -> str:

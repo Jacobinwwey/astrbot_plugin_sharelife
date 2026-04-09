@@ -6,6 +6,7 @@ from sharelife.application.services_preferences import PreferenceService
 from sharelife.application.services_queue import RetryQueueService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
+from sharelife.infrastructure.json_state_store import JsonStateStore
 from sharelife.infrastructure.notifier import InMemoryNotifier
 from sharelife.interfaces.commands_admin import AdminCommands
 from sharelife.interfaces.commands_user import UserCommands
@@ -25,7 +26,12 @@ class FrozenClock:
 def test_install_returns_package_artifact_after_approval(tmp_path):
     clock = FrozenClock(datetime(2026, 3, 25, 10, 0, tzinfo=UTC))
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path,
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
 
     trial = TrialRequestService(
         trial_service=TrialService(clock=clock),
@@ -53,7 +59,12 @@ def test_install_returns_package_artifact_after_approval(tmp_path):
 def test_export_package_requires_approved_template(tmp_path):
     clock = FrozenClock(datetime(2026, 3, 25, 10, 0, tzinfo=UTC))
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path,
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
     user = UserCommands(
         preference_service=PreferenceService(),
         market_service=market,

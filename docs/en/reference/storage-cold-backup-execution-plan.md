@@ -59,6 +59,16 @@ Exact admin route names stay in the private operator docs. The public plan only 
 5. Daily upload budget guard: enabled
 6. One active backup job lock: enabled
 
+## 6.1 Current implementation progress (`2026-04-07`)
+
+1. Storage backup service already enforces policy normalization and guards for:
+   - remote encryption requirement
+   - daily upload budget
+   - optional bandwidth cap
+   - single active backup lock
+2. Backup and restore jobs are persisted with deterministic state transitions, and are available via admin APIs.
+3. Upload surfaces (template/profile-pack submit) now include idempotency replay + conflict handling to reduce duplicate submissions before they enter backup scope.
+
 ## 7. Drive Constraints (Handled Explicitly)
 
 1. Daily upload hard-limit guard.

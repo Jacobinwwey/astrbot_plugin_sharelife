@@ -6,7 +6,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 HOST="${SHARELIFE_E2E_HOST:-127.0.0.1}"
 PORT="${SHARELIFE_E2E_PORT:-38106}"
-BASE_URL="http://${HOST}:${PORT}"
 ARTIFACT_DIR="${SHARELIFE_E2E_ARTIFACT_DIR:-${REPO_ROOT}/output/playwright}"
 SERVER_LOG="${ARTIFACT_DIR}/sharelife-webui-e2e-server.log"
 
@@ -19,6 +18,36 @@ EOF
 fi
 
 mkdir -p "${ARTIFACT_DIR}"
+
+pick_available_port() {
+  python3 - "${HOST}" "${PORT}" "${SHARELIFE_E2E_PORT+x}" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+preferred = int(sys.argv[2])
+port_explicitly_set = len(sys.argv[3]) > 0
+
+def bindable(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+        return True
+
+if port_explicitly_set or bindable(preferred):
+    print(preferred)
+else:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        print(sock.getsockname()[1])
+PY
+}
+
+PORT="$(pick_available_port)"
+BASE_URL="http://${HOST}:${PORT}"
 
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "${SERVER_PID}" 2>/dev/null; then

@@ -114,22 +114,19 @@ const publicSidebar: SidebarMap = {
 }
 
 const sidebar: SidebarMap = {
-  '/private/': hasPrivateDocsPortal ? privateSidebar['/private/'] ?? [] : [],
-  '/zh/': [
-    ...publicSidebar['/zh/'],
-    ...(hasPrivateDocsPortal ? privateSidebar['/zh/'] ?? [] : [])
-  ],
-  '/zh/private/': hasPrivateDocsPortal ? privateSidebar['/zh/private/'] ?? [] : [],
-  '/en/': [
-    ...publicSidebar['/en/'],
-    ...(hasPrivateDocsPortal ? privateSidebar['/en/'] ?? [] : [])
-  ],
-  '/en/private/': hasPrivateDocsPortal ? privateSidebar['/en/private/'] ?? [] : [],
-  '/ja/': [
-    ...publicSidebar['/ja/'],
-    ...(hasPrivateDocsPortal ? privateSidebar['/ja/'] ?? [] : [])
-  ],
-  '/ja/private/': hasPrivateDocsPortal ? privateSidebar['/ja/private/'] ?? [] : []
+  '/zh/': [...publicSidebar['/zh/']],
+  '/en/': [...publicSidebar['/en/']],
+  '/ja/': [...publicSidebar['/ja/']]
+}
+
+if (hasPrivateDocsPortal) {
+  sidebar['/private/'] = privateSidebar['/private/'] ?? []
+  sidebar['/zh/'].push(...(privateSidebar['/zh/'] ?? []))
+  sidebar['/zh/private/'] = privateSidebar['/zh/private/'] ?? []
+  sidebar['/en/'].push(...(privateSidebar['/en/'] ?? []))
+  sidebar['/en/private/'] = privateSidebar['/en/private/'] ?? []
+  sidebar['/ja/'].push(...(privateSidebar['/ja/'] ?? []))
+  sidebar['/ja/private/'] = privateSidebar['/ja/private/'] ?? []
 }
 
 export default defineConfig({

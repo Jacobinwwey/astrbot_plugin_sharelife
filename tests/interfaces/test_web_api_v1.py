@@ -1,11 +1,13 @@
 import base64
 import io
 import json
+import subprocess
 import zipfile
 from datetime import UTC, datetime, timedelta
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
+from sharelife.application.services_artifact_mirror import ArtifactMirrorService
 from sharelife.application.services_continuity import ConfigContinuityService
 from sharelife.application.services_market import MarketService
 from sharelife.application.services_package import PackageService
@@ -14,6 +16,7 @@ from sharelife.application.services_profile_pack import ProfilePackService
 from sharelife.application.services_queue import RetryQueueService
 from sharelife.application.services_reviewer_auth import ReviewerAuthService
 from sharelife.application.services_storage_backup import StorageBackupService
+from sharelife.application.services_transfer_jobs import TransferJobService
 from sharelife.application.services_trial import TrialService
 from sharelife.application.services_trial_request import TrialRequestService
 from sharelife.infrastructure.json_state_store import JsonStateStore
@@ -54,7 +57,12 @@ def build_web_api(tmp_path, *, with_profile_pack: bool = False):
         notifier=notifier,
     )
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path, clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path,
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
     runtime = InMemoryRuntimeBridge(
         initial_state={
             "astrbot_core": {"name": "sharelife-bot"},
@@ -73,6 +81,11 @@ def build_web_api(tmp_path, *, with_profile_pack: bool = False):
         data_root=tmp_path,
         clock=clock,
     )
+    transfer_jobs = TransferJobService(
+        clock=clock,
+        state_store=JsonStateStore(tmp_path / "transfer_state.json"),
+    )
+    artifact_mirror = ArtifactMirrorService(artifact_store=package.artifact_store, clock=clock)
     profile_pack = None
     if with_profile_pack:
         profile_pack = ProfilePackService(
@@ -93,9 +106,12 @@ def build_web_api(tmp_path, *, with_profile_pack: bool = False):
         audit_service=audit,
         profile_pack_service=profile_pack,
         reviewer_auth_service=ReviewerAuthService(
-            state_store=JsonStateStore(tmp_path / "reviewer_auth_state.json"),
+            state_store=JsonStateStore(tmp_path / "identity_state.json"),
+            legacy_state_store=JsonStateStore(tmp_path / "reviewer_auth_state.json"),
         ),
+        artifact_mirror_service=artifact_mirror,
         storage_backup_service=storage_backup,
+        transfer_job_service=transfer_jobs,
     )
     return SharelifeWebApiV1(api=api, notifier=notifier)
 
@@ -185,6 +201,26 @@ def test_web_api_install_preflight_and_member_installation_endpoints(tmp_path):
     assert refreshed.ok is True
     assert refreshed.data["count"] == 1
 
+    listed_tasks = web_api.list_member_tasks(user_id="u1", limit=20)
+    assert listed_tasks.ok is True
+    assert listed_tasks.data["count"] >= 1
+    assert "template.installed" in [str(item.get("action") or "") for item in listed_tasks.data["tasks"]]
+
+    refreshed_tasks = web_api.refresh_member_tasks(user_id="u1", limit=20)
+    assert refreshed_tasks.ok is True
+    assert refreshed_tasks.data["count"] >= 1
+
+    uninstalled = web_api.uninstall_member_installation(
+        user_id="u1",
+        template_id="community/basic",
+    )
+    assert uninstalled.ok is True
+    assert uninstalled.data["status"] == "uninstalled"
+
+    listed_after = web_api.list_member_installations(user_id="u1")
+    assert listed_after.ok is True
+    assert listed_after.data["count"] == 0
+
 
 def test_web_api_upload_replace_existing_retires_previous_pending_submission(tmp_path):
     web_api = build_web_api(tmp_path)
@@ -210,6 +246,27 @@ def test_web_api_upload_replace_existing_retires_previous_pending_submission(tmp
     replaced = web_api.member_get_submission_detail(user_id="u1", submission_id=first_submission_id)
     assert replaced.ok is True
     assert replaced.data["status"] == "replaced"
+
+
+def test_web_api_upload_idempotency_key_conflict_maps_to_409(tmp_path):
+    web_api = build_web_api(tmp_path)
+    first = web_api.submit_template(
+        user_id="u1",
+        template_id="community/basic",
+        version="1.0.0",
+        upload_options={"idempotency_key": "web-upload-key-1"},
+    )
+    assert first.ok is True
+
+    conflict = web_api.submit_template(
+        user_id="u1",
+        template_id="community/other",
+        version="1.0.0",
+        upload_options={"idempotency_key": "web-upload-key-1"},
+    )
+    assert conflict.ok is False
+    assert conflict.status_code == 409
+    assert conflict.error_code == "idempotency_key_conflict"
 
 
 def test_web_api_denies_member_admin_submission_decision(tmp_path):
@@ -411,9 +468,13 @@ def test_web_api_exposes_trial_status_and_apply_rollback_cycle(tmp_path):
     assert rolled_back.data["status"] == "rolled_back"
     assert rolled_back.data["continuity"]["restore_verification"] == "matched"
 
-    continuity = web_api.admin_get_continuity(role="admin", plan_id="plan-community-basic")
+    continuity = web_api.admin_list_continuity(role="admin", limit=10)
     assert continuity.ok is True
-    assert continuity.data["entry"]["restore_verification"] == "matched"
+    assert continuity.data["entries"][0]["plan_id"] == "plan-community-basic"
+
+    detail = web_api.admin_get_continuity(role="admin", plan_id="plan-community-basic")
+    assert detail.ok is True
+    assert detail.data["entry"]["restore_verification"] == "matched"
 
 
 def test_web_api_submit_template_package_exposes_risk_labels(tmp_path):
@@ -909,3 +970,33 @@ def test_web_api_exposes_engagement_and_sorting_for_templates(tmp_path):
     assert templates.data["templates"][0]["engagement"]["installs"] == 2
     assert detail.ok is True
     assert detail.data["engagement"]["installs"] == 2
+
+
+def test_web_api_admin_can_list_and_mirror_artifacts(tmp_path, monkeypatch):
+    web_api = build_web_api(tmp_path)
+    web_api.api.market_service.publish_official_template(
+        template_id="community/basic",
+        version="1.0.0",
+        prompt_template="Official template",
+    )
+    artifact = web_api.api.package_service.export_template_package("community/basic")
+    calls: list[list[str]] = []
+
+    def _fake_run(command, **kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="copy ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    listed = web_api.admin_list_artifacts(role="admin", limit=20)
+    assert listed.ok is True
+    assert any(row["artifact_id"] == artifact.artifact_id for row in listed.data["artifacts"])
+
+    mirrored = web_api.admin_mirror_artifact(
+        role="admin",
+        artifact_id=artifact.artifact_id,
+        admin_id="admin-1",
+        remote_path="gdrive-crypt:/sharelife-artifacts",
+    )
+    assert mirrored.ok is True
+    assert mirrored.data["mirror"]["status"] == "succeeded"

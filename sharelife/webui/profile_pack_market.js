@@ -38,6 +38,68 @@
     return out
   }
 
+  function normalizeChoice(value, allowed, fallback) {
+    const text = textValue(value).toLowerCase()
+    if (Array.isArray(allowed) && allowed.includes(text)) {
+      return text
+    }
+    return fallback
+  }
+
+  function buildInstallOptions(input) {
+    const data = input || {}
+    const selectedSections = Array.isArray(data.selectedSections)
+      ? splitList(data.selectedSections.join(","))
+      : splitList(data.selectedSections)
+    return {
+      preflight: Boolean(data.preflight),
+      force_reinstall: Boolean(data.forceReinstall),
+      source_preference: textValue(data.sourcePreference, "auto") || "auto",
+      selected_sections: selectedSections,
+    }
+  }
+
+  function buildUploadOptions(input) {
+    const data = input || {}
+    const normalized = {
+      scan_mode: normalizeChoice(data.scanMode, ["strict", "balanced"], "balanced"),
+      visibility: normalizeChoice(data.visibility, ["community", "private"], "community"),
+      replace_existing: Boolean(data.replaceExisting),
+    }
+    const idempotencyKey = textValue(data.idempotencyKey)
+    if (idempotencyKey) {
+      normalized.idempotency_key = idempotencyKey
+    }
+    return normalized
+  }
+
+  function buildSubmitOptions(input) {
+    const data = input || {}
+    const selectedSections = Array.isArray(data.selectedSections)
+      ? splitList(data.selectedSections.join(","))
+      : splitList(data.selectedSections)
+    const normalized = {
+      pack_type: normalizeChoice(data.packType, ["bot_profile_pack", "extension_pack"], "bot_profile_pack"),
+      selected_sections: selectedSections,
+      redaction_mode: normalizeChoice(
+        data.redactionMode,
+        [
+          "exclude_secrets",
+          "exclude_provider",
+          "include_provider_no_key",
+          "include_encrypted_secrets",
+        ],
+        "exclude_secrets",
+      ),
+      replace_existing: Boolean(data.replaceExisting),
+    }
+    const idempotencyKey = textValue(data.idempotencyKey)
+    if (idempotencyKey) {
+      normalized.idempotency_key = idempotencyKey
+    }
+    return normalized
+  }
+
   function buildSubmitPayload(input) {
     const data = input || {}
     const artifactId = textValue(data.artifactId) || textValue(data.fallbackArtifactId)
@@ -113,6 +175,9 @@
   const api = {
     splitList,
     normalizeSubmissionDecision,
+    buildInstallOptions,
+    buildUploadOptions,
+    buildSubmitOptions,
     buildSubmitPayload,
     buildSubmissionDecisionPayload,
     buildSubmissionFilterQuery,

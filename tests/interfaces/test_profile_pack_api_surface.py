@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import zipfile
 
 from sharelife.application.services_apply import ApplyService
 from sharelife.application.services_audit import AuditService
@@ -58,7 +60,12 @@ def build_interfaces(
         notifier=notifier,
     )
     market = MarketService(clock=clock)
-    package = PackageService(market_service=market, output_root=tmp_path / "packages", clock=clock)
+    package = PackageService(
+        market_service=market,
+        output_root=tmp_path / "packages",
+        clock=clock,
+        artifact_state_store=JsonStateStore(tmp_path / "artifact_state.json"),
+    )
     continuity = ConfigContinuityService(
         state_store=JsonStateStore(tmp_path / "continuity_state.json"),
         clock=clock,
@@ -233,9 +240,80 @@ def test_api_submit_profile_pack_returns_normalized_submit_options(tmp_path):
     assert submitted["submit_options"] == {
         "pack_type": "extension_pack",
         "selected_sections": ["plugins", "providers"],
+        "selected_item_paths": [],
         "redaction_mode": "include_provider_no_key",
         "replace_existing": True,
     }
+
+
+def test_api_submit_profile_pack_preserves_selected_item_paths_and_materializes_filtered_submission(tmp_path):
+    api, _ = build_interfaces(tmp_path)
+    raw_bytes = json.dumps(
+        {
+            "config_version": 2,
+            "provider": [
+                {
+                    "id": "test-openai",
+                    "type": "openai_chat_completion",
+                    "model": "gpt-4o-mini",
+                    "key": ["test-key"],
+                }
+            ],
+            "provider_settings": {
+                "default_personality": "analyst",
+                "persona_pool": ["analyst", "helper"],
+            },
+            "persona": [
+                {"name": "analyst", "system_prompt": "Analyze before acting."},
+                {"name": "helper", "system_prompt": "Help with rollout tasks."},
+            ],
+            "subagent_orchestrator": {
+                "main_enable": True,
+                "agents": [
+                    {"name": "planner_prometheus", "enabled": True},
+                    {"name": "reviewer_oracle", "enabled": False},
+                ],
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    imported = api.member_import_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content_base64=base64.b64encode(raw_bytes).decode("ascii"),
+    )
+    source_artifact_id = imported["source_artifact_id"]
+
+    submitted = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=source_artifact_id,
+        submit_options={
+            "selected_sections": ["personas", "environment_manifest"],
+            "selected_item_paths": [
+                "personas.runtime.default_personality",
+                "personas.entries.analyst",
+                "environment_manifest.subagent_orchestrator.agents[0]",
+            ],
+        },
+    )
+
+    assert submitted["submit_options"]["selected_sections"] == ["personas", "environment_manifest"]
+    assert submitted["submit_options"]["selected_item_paths"] == [
+        "personas.runtime.default_personality",
+        "personas.entries.analyst",
+        "environment_manifest.subagent_orchestrator.agents[0]",
+    ]
+    assert submitted["artifact_id"] != source_artifact_id
+    assert submitted["sections"] == ["personas", "environment_manifest"]
+
+    detail = api.member_get_profile_pack_submission_detail(
+        user_id="member-1",
+        submission_id=submitted["submission_id"],
+    )
+    assert detail["submit_options"]["selected_item_paths"] == submitted["submit_options"]["selected_item_paths"]
+    assert detail["sections"] == ["personas", "environment_manifest"]
 
 
 def test_api_submit_profile_pack_replace_existing_retires_previous_pending_submission(tmp_path):
@@ -282,6 +360,72 @@ def test_api_submit_profile_pack_replace_existing_retires_previous_pending_submi
 
     audit = api.admin_list_audit(role="admin", limit=20)
     assert any(item["action"] == "profile_pack.submission.pending_replaced" for item in audit["events"])
+
+
+def test_api_submit_profile_pack_idempotency_key_replays_existing_submission(tmp_path):
+    api, _ = build_interfaces(tmp_path)
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-safe-idempotent",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+
+    first = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported["artifact_id"],
+        submit_options={"idempotency_key": "profile-pack-key-1"},
+    )
+    assert first["status"] == "pending"
+
+    second = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported["artifact_id"],
+        submit_options={"idempotency_key": "profile-pack-key-1"},
+    )
+    assert second["submission_id"] == first["submission_id"]
+    assert second["idempotent_replay"] is True
+
+    rows = api.member_list_profile_pack_submissions(user_id="member-1")
+    assert len(rows["submissions"]) == 1
+    events = api.admin_list_audit(role="admin", limit=30)
+    assert any(item["action"] == "profile_pack.submission.idempotency_replayed" for item in events["events"])
+
+
+def test_api_submit_profile_pack_idempotency_key_conflict_is_rejected(tmp_path):
+    api, _ = build_interfaces(tmp_path)
+    exported_first = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-safe-idempotent-a",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    exported_second = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-safe-idempotent-b",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+
+    first = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported_first["artifact_id"],
+        submit_options={"idempotency_key": "profile-pack-key-2"},
+    )
+    assert first["status"] == "pending"
+
+    conflict = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported_second["artifact_id"],
+        submit_options={"idempotency_key": "profile-pack-key-2"},
+    )
+    assert conflict["error"] == "idempotency_key_conflict"
+    assert conflict["existing_submission_id"] == first["submission_id"]
+
+    rows = api.member_list_profile_pack_submissions(user_id="member-1")
+    assert len(rows["submissions"]) == 1
+    events = api.admin_list_audit(role="admin", limit=30)
+    assert any(item["action"] == "profile_pack.submission.idempotency_conflict" for item in events["events"])
 
 
 def test_api_profile_pack_plugin_install_confirmation_flow(tmp_path):
@@ -865,6 +1009,40 @@ def test_web_api_submit_profile_pack_replace_existing_retires_previous_pending_s
     assert replaced.data["status"] == "replaced"
 
 
+def test_web_api_submit_profile_pack_idempotency_key_conflict_maps_to_409(tmp_path):
+    _, web_api = build_interfaces(tmp_path)
+    exported_first = web_api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-web-idempotent-a",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    exported_second = web_api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/community-web-idempotent-b",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    assert exported_first.ok is True
+    assert exported_second.ok is True
+
+    first = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported_first.data["artifact_id"],
+        submit_options={"idempotency_key": "profile-pack-web-key-1"},
+    )
+    assert first.ok is True
+
+    conflict = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported_second.data["artifact_id"],
+        submit_options={"idempotency_key": "profile-pack-web-key-1"},
+    )
+    assert conflict.ok is False
+    assert conflict.status_code == 409
+    assert conflict.error_code == "idempotency_key_conflict"
+
+
 def test_web_api_member_profile_pack_submission_views_are_owner_scoped(tmp_path):
     _, web_api = build_interfaces(tmp_path)
     exported = web_api.admin_export_profile_pack(
@@ -930,6 +1108,380 @@ def test_web_api_member_profile_pack_submission_views_are_owner_scoped(tmp_path)
     assert missing_export.ok is False
     assert missing_export.status_code == 400
     assert missing_export.error_code == "submission_id_required"
+
+
+def test_api_member_profile_pack_import_drafts_are_owner_scoped(tmp_path):
+    api, web_api = build_interfaces(tmp_path)
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/member-import-draft",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    assert exported["artifact_id"]
+    archive_bytes = Path(exported["path"]).read_bytes()
+    archive_b64 = base64.b64encode(archive_bytes).decode("ascii")
+
+    imported = api.member_import_profile_pack(
+        user_id="member-1",
+        filename=exported["filename"],
+        content_base64=archive_b64,
+    )
+    assert imported["user_id"] == "member-1"
+    assert imported["source_artifact_id"]
+
+    listed = api.member_list_profile_pack_imports(user_id="member-1", limit=20)
+    assert listed["user_id"] == "member-1"
+    assert len(listed["imports"]) == 1
+    assert listed["imports"][0]["import_id"] == imported["import_id"]
+
+    denied_submit = api.submit_profile_pack(
+        user_id="member-2",
+        artifact_id=imported["source_artifact_id"],
+    )
+    assert denied_submit["error"] == "permission_denied"
+
+    web_imported = web_api.member_import_profile_pack(
+        user_id="member-2",
+        filename=exported["filename"],
+        content_base64=archive_b64,
+    )
+    assert web_imported.ok is True
+    assert web_imported.data["user_id"] == "member-2"
+
+    web_listed = web_api.member_list_profile_pack_imports(user_id="member-2", limit=20)
+    assert web_listed.ok is True
+    assert web_listed.data["user_id"] == "member-2"
+    assert len(web_listed.data["imports"]) == 1
+    assert web_listed.data["imports"][0]["import_id"] == web_imported.data["import_id"]
+
+    web_denied = web_api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=web_imported.data["source_artifact_id"],
+    )
+    assert web_denied.ok is False
+    assert web_denied.status_code == 403
+    assert web_denied.error_code == "permission_denied"
+
+
+def test_api_member_profile_pack_submission_withdraw_is_owner_scoped_and_pending_only(tmp_path):
+    api, web_api = build_interfaces(tmp_path)
+    exported = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/member-withdraw",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+
+    submitted = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported["artifact_id"],
+    )
+    submission_id = submitted["submission_id"]
+    assert submitted["status"] == "pending"
+
+    denied = api.member_withdraw_profile_pack_submission(
+        user_id="member-2",
+        submission_id=submission_id,
+    )
+    assert denied["error"] == "permission_denied"
+
+    withdrawn = api.member_withdraw_profile_pack_submission(
+        user_id="member-1",
+        submission_id=submission_id,
+    )
+    assert withdrawn["status"] == "withdrawn"
+
+    withdrawn_again = api.member_withdraw_profile_pack_submission(
+        user_id="member-1",
+        submission_id=submission_id,
+    )
+    assert withdrawn_again["status"] == "withdrawn"
+
+    pending_rows = api.member_list_profile_pack_submissions(
+        user_id="member-1",
+        status="pending",
+    )
+    assert pending_rows["submissions"] == []
+
+    withdrawn_rows = api.member_list_profile_pack_submissions(
+        user_id="member-1",
+        status="withdrawn",
+    )
+    assert [item["submission_id"] for item in withdrawn_rows["submissions"]] == [submission_id]
+
+    exported_approved = api.admin_export_profile_pack(
+        role="admin",
+        pack_id="profile/member-withdraw-approved",
+        version="1.0.0",
+        redaction_mode="exclude_secrets",
+    )
+    approved = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=exported_approved["artifact_id"],
+    )
+    decided = api.admin_decide_profile_pack_submission(
+        role="admin",
+        reviewer_id="admin",
+        submission_id=approved["submission_id"],
+        decision="approve",
+        review_labels=["approved"],
+    )
+    assert decided["status"] == "approved"
+
+    invalid_state = web_api.member_withdraw_profile_pack_submission(
+        user_id="member-1",
+        submission_id=approved["submission_id"],
+    )
+    assert invalid_state.ok is False
+    assert invalid_state.status_code == 409
+    assert invalid_state.error_code == "profile_pack_submission_state_invalid"
+
+    audit = api.admin_list_audit(role="admin", limit=20)
+    assert any(item["action"] == "profile_pack.submission_withdrawn" for item in audit["events"])
+
+
+def test_api_member_profile_pack_import_rejects_non_sharelife_archive(tmp_path):
+    api, web_api = build_interfaces(tmp_path)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("astrbot-config.json", json.dumps({"provider": "openai"}))
+    archive_b64 = base64.b64encode(archive.getvalue()).decode("ascii")
+
+    imported = api.member_import_profile_pack(
+        user_id="member-1",
+        filename="astrbot-export.zip",
+        content_base64=archive_b64,
+    )
+    assert imported["error"] == "invalid_profile_pack_payload"
+
+    web_imported = web_api.member_import_profile_pack(
+        user_id="member-1",
+        filename="astrbot-export.zip",
+        content_base64=archive_b64,
+    )
+    assert web_imported.ok is False
+    assert web_imported.status_code == 400
+    assert web_imported.error_code == "invalid_profile_pack_payload"
+
+
+def test_api_member_profile_pack_import_converts_astrbot_backup_zip(tmp_path):
+    api, web_api = build_interfaces(tmp_path)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "astrbot_version": "4.16.0",
+                    "backup_time": "2026-04-07T12:00:00Z",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        zf.writestr(
+            "config/cmd_config.json",
+            json.dumps(
+                {
+                    "provider": [
+                        {
+                            "id": "test-openai",
+                            "type": "openai_chat_completion",
+                            "model": "gpt-4o-mini",
+                            "key": ["test-key"],
+                        }
+                    ],
+                    "provider_settings": {"websearch_tavily_key": ["tvly-secret"]},
+                    "dashboard": {"password": "dashboard-secret", "jwt_secret": "jwt-secret"},
+                    "admins_id": ["owner"],
+                    "plugin_set": ["*"],
+                    "timezone": "Asia/Shanghai",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+    archive_b64 = base64.b64encode(archive.getvalue()).decode("ascii")
+
+    imported = api.member_import_profile_pack(
+        user_id="member-1",
+        filename="astrbot-backup.zip",
+        content_base64=archive_b64,
+    )
+    assert imported["compatibility"] == "degraded"
+    assert "astrbot_raw_import_converted" in imported["compatibility_issues"]
+    assert imported["source_artifact_id"]
+
+    submission = api.submit_profile_pack(
+        user_id="member-1",
+        artifact_id=imported["source_artifact_id"],
+    )
+    assert submission["status"] == "pending"
+    assert submission["compatibility"] == "degraded"
+
+    web_imported = web_api.member_import_profile_pack(
+        user_id="member-1",
+        filename="astrbot-backup.zip",
+        content_base64=archive_b64,
+    )
+    assert web_imported.ok is True
+    assert web_imported.data["compatibility"] == "degraded"
+    assert "astrbot_raw_import_converted" in web_imported.data["compatibility_issues"]
+
+
+def test_api_member_profile_pack_import_detects_local_astrbot_config(tmp_path, monkeypatch):
+    api, web_api = build_interfaces(tmp_path)
+    local_config = tmp_path / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {"websearch_tavily_key": ["tvly-secret"]},
+                "dashboard": {"password": "dashboard-secret"},
+                "admins_id": ["owner"],
+                "plugin_set": ["sharelife"],
+                "timezone": "Asia/Shanghai",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+
+    imported = api.member_import_local_astrbot_config(user_id="member-1")
+    assert imported["compatibility"] == "degraded"
+    assert "astrbot_raw_import_converted" in imported["compatibility_issues"]
+    assert imported["source_artifact_id"]
+
+    web_imported = web_api.member_import_local_astrbot_config(user_id="member-1")
+    assert web_imported.ok is True
+    assert web_imported.data["compatibility"] == "degraded"
+    assert "astrbot_raw_import_converted" in web_imported.data["compatibility_issues"]
+
+
+def test_api_member_local_astrbot_import_refreshes_existing_draft_and_supports_delete(tmp_path, monkeypatch):
+    api, web_api = build_interfaces(tmp_path)
+    local_config = tmp_path / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {"default_personality": "alpha"},
+                "plugin_set": ["sharelife"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+
+    first = api.member_import_local_astrbot_config(user_id="member-1")
+    listed_first = api.member_list_profile_pack_imports(user_id="member-1", limit=10)
+    assert len(listed_first["imports"]) == 1
+    assert listed_first["imports"][0]["import_id"] == first["import_id"]
+    assert listed_first["imports"][0]["import_origin"] == "local_astrbot_detected"
+    assert listed_first["imports"][0]["delete_allowed"] is True
+    assert listed_first["imports"][0]["import_summary"]["default_personality"] == "alpha"
+
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {"default_personality": "beta"},
+                "plugin_set": ["sharelife", "community_tools"],
+                "subagent_orchestrator": {
+                    "agents": [{"name": "planner_prometheus", "enabled": True}],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    second = api.member_import_local_astrbot_config(user_id="member-1")
+    listed_second = api.member_list_profile_pack_imports(user_id="member-1", limit=10)
+    assert len(listed_second["imports"]) == 1
+    assert listed_second["imports"][0]["import_id"] == second["import_id"]
+    assert listed_second["imports"][0]["import_summary"]["default_personality"] == "beta"
+    assert listed_second["imports"][0]["import_summary"]["subagent_count"] == 1
+
+    deleted = api.member_delete_profile_pack_import(
+        user_id="member-1",
+        import_id=second["import_id"],
+    )
+    assert deleted["deleted"] is True
+    assert deleted["import_id"] == second["import_id"]
+    assert api.member_list_profile_pack_imports(user_id="member-1", limit=10)["imports"] == []
+
+    web_deleted = web_api.member_delete_profile_pack_import(
+        user_id="member-1",
+        import_id=second["import_id"],
+    )
+    assert web_deleted.ok is False
+    assert web_deleted.status_code == 404
+    assert web_deleted.error_code == "profile_import_not_found"
+
+
+def test_api_member_profile_pack_import_detects_local_astrbot_config_with_utf8_bom(tmp_path, monkeypatch):
+    api, _web_api = build_interfaces(tmp_path)
+    local_config = tmp_path / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {"websearch_tavily_key": ["tvly-secret"]},
+                "dashboard": {"password": "dashboard-secret"},
+                "admins_id": ["owner"],
+                "plugin_set": ["sharelife"],
+                "timezone": "Asia/Shanghai",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8-sig",
+    )
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+
+    imported = api.member_import_local_astrbot_config(user_id="member-1")
+    assert imported["compatibility"] == "degraded"
+    assert "astrbot_raw_import_converted" in imported["compatibility_issues"]
+    assert imported["source_artifact_id"]
 
 
 def test_web_api_profile_pack_decision_exposes_public_market_publish_payload(tmp_path):

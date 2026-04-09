@@ -49,6 +49,12 @@ def _safe_slug(value: str) -> str:
     return slug or "profile-pack"
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
 def _hash_json(payload: Any) -> str:
     encoded = _json_dump(payload, pretty=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -99,6 +105,31 @@ def _official_engagement(pack_id: str) -> dict[str, int]:
     if pack_id == "profile/official-safe-reference":
         return {"installs": 179, "trial_requests": 47}
     return {"installs": 0, "trial_requests": 0}
+
+
+def _official_search_aliases(pack_id: str) -> list[str]:
+    aliases: dict[str, list[str]] = {
+        "profile/official-starter": [
+            "official",
+            "official starter",
+            "official profile pack",
+            "官方",
+            "官方入门参考包",
+            "公式",
+            "公式スターター",
+        ],
+        "profile/official-safe-reference": [
+            "official",
+            "official safe reference",
+            "official profile pack",
+            "官方",
+            "官方安全参考包",
+            "公式",
+            "公式セーフリファレンス",
+        ],
+    }
+    base = aliases.get(pack_id, [])
+    return sorted({pack_id, *base})
 
 
 def _build_manifest(
@@ -247,6 +278,7 @@ def _official_row(example: dict[str, Any], *, generated_at: str) -> tuple[bool, 
         "maintainer": "Sharelife",
         "published_at": published_at,
         "engagement": _official_engagement(pack_id),
+        "search_aliases": _official_search_aliases(pack_id),
         "package_path": f"/market/packages/official/{package_path.name}",
         "catalog_origin": "public",
         "runtime_available": False,
@@ -266,14 +298,11 @@ def _normalized_public_row(entry: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"missing public package for entry: {package_path}")
     sha256, size_bytes = _package_metadata(resolved_package)
     engagement = entry.get("engagement") if isinstance(entry.get("engagement"), dict) else {}
-    sections = entry.get("sections") if isinstance(entry.get("sections"), list) else []
-    review_labels = entry.get("review_labels") if isinstance(entry.get("review_labels"), list) else []
-    warning_flags = entry.get("warning_flags") if isinstance(entry.get("warning_flags"), list) else []
-    compatibility_issues = (
-        entry.get("compatibility_issues")
-        if isinstance(entry.get("compatibility_issues"), list)
-        else []
-    )
+    sections = _string_list(entry.get("sections"))
+    review_labels = _string_list(entry.get("review_labels"))
+    warning_flags = _string_list(entry.get("warning_flags"))
+    compatibility_issues = _string_list(entry.get("compatibility_issues"))
+    search_aliases = _string_list(entry.get("search_aliases"))
     normalized = dict(entry)
     normalized.update(
         {
@@ -288,14 +317,11 @@ def _normalized_public_row(entry: dict[str, Any]) -> dict[str, Any]:
                 "installs": int(engagement.get("installs", 0) or 0),
                 "trial_requests": int(engagement.get("trial_requests", 0) or 0),
             },
-            "sections": [str(item or "").strip() for item in sections if str(item or "").strip()],
-            "review_labels": [str(item or "").strip() for item in review_labels if str(item or "").strip()],
-            "warning_flags": [str(item or "").strip() for item in warning_flags if str(item or "").strip()],
-            "compatibility_issues": [
-                str(item or "").strip()
-                for item in compatibility_issues
-                if str(item or "").strip()
-            ],
+            "sections": sections,
+            "review_labels": review_labels,
+            "warning_flags": warning_flags,
+            "compatibility_issues": compatibility_issues,
+            "search_aliases": sorted({*search_aliases, pack_id}),
             "catalog_origin": "public",
             "runtime_available": False,
         }

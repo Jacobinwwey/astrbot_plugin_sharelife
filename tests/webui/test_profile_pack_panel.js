@@ -7,6 +7,7 @@ const {
   buildDryrunPayload,
   buildSelectedSections,
   buildImportAndDryrunPayload,
+  normalizeSelectionPaths,
   validateFieldPaths,
 } = require("../../sharelife/webui/profile_pack_panel.js")
 
@@ -83,6 +84,21 @@ test("buildImportAndDryrunPayload prefers artifact source and selected sections"
   assert.equal(payload.filename, undefined)
   assert.equal(payload.content_base64, undefined)
   assert.deepEqual(payload.selected_sections, ["plugins"])
+})
+
+test("normalizeSelectionPaths de-duplicates nested section item paths", () => {
+  assert.deepEqual(
+    normalizeSelectionPaths([
+      "personas.entries.analyst",
+      "personas.entries.analyst",
+      "environment_manifest.subagent_orchestrator.agents[0]",
+      "",
+    ]),
+    [
+      "personas.entries.analyst",
+      "environment_manifest.subagent_orchestrator.agents[0]",
+    ],
+  )
 })
 
 test("validateFieldPaths checks section-prefixed dotted paths", () => {

@@ -1,7 +1,13 @@
 (function bootstrapMarketPage(globalScope) {
   const UI_LOCALE_STORAGE_KEY = "sharelife.uiLocale"
+  const MARKET_LIKES_STORAGE_KEY = "sharelife.marketLikes"
   const MARKET_PAGE_INSTANCE_ID = `sharelife-market-${Math.random().toString(36).slice(2)}`
   const marketFilterApi = globalScope.SharelifeMarketFilters || null
+  const MARKET_PAGE_KIND = String(
+    globalScope.__SHARELIFE_MARKET_PAGE_KIND
+      || (globalScope.document && globalScope.document.body && globalScope.document.body.dataset.marketSurface)
+      || "catalog",
+  ).trim().toLowerCase() || "catalog"
   const LOCAL_SORT_OPTIONS = Object.freeze({
     TRENDING: "trending",
     DOWNLOADS: "downloads",
@@ -70,6 +76,25 @@
       ],
     },
   ])
+  const QUICK_FILTER_PRESETS = Object.freeze({
+    all: null,
+    bot_profile_pack: {
+      groupKey: "pack_type",
+      values: ["bot_profile_pack"],
+    },
+    extension_pack: {
+      groupKey: "pack_type",
+      values: ["extension_pack"],
+    },
+    featured: {
+      groupKey: "featured",
+      values: ["true"],
+    },
+    low_risk: {
+      groupKey: "risk_level",
+      values: ["low"],
+    },
+  })
 
   function createFacetSelectionMap() {
     const selection = {}
@@ -82,10 +107,14 @@
   const state = {
     token: "",
     authRequired: false,
+    allowAnonymousMember: false,
+    authResolved: false,
     authRole: "",
     availableRoles: [],
     capabilities: {
       role: "member",
+      authenticated: false,
+      anonymousMember: false,
       operations: [],
     },
     catalog: [],
@@ -99,67 +128,73 @@
     localSearch: "",
     localSort: LOCAL_SORT_OPTIONS.TRENDING,
     localFacets: createFacetSelectionMap(),
+    activeQuickFilter: "all",
     filterDrawerOpen: false,
     logExpanded: false,
     detailExpanded: false,
+    activeDetailVariant: "variant_3",
     compareDetailKey: "",
+    installSectionSelections: {},
     memberInstallations: [],
-    memberTemplateSubmissions: [],
-    memberProfilePackSubmissions: [],
-    selectedProfilePackSubmissionId: "",
-    memberUserId: "webui-user",
+    memberInstallationsRequested: false,
+    likedPackIds: new Set(),
     publicCatalogRows: [],
     publicCatalogAvailable: false,
     catalogSourceMode: "runtime",
   }
   const CONTROL_CAPABILITY_MAP = Object.freeze({
     btnMarketLogin: "auth.login",
-    btnMarketRefreshInstallations: "member.installations.refresh",
     btnMarketListCatalog: "profile_pack.catalog.read",
     btnMarketCatalogDetail: "profile_pack.catalog.read",
     btnMarketCatalogCompare: "profile_pack.catalog.read",
-    btnMarketTemplateTrial: "templates.trial.request",
-    btnMarketTemplateInstall: "templates.install",
-    btnMarketTemplateSubmit: "templates.submit",
-    btnMarketProfilePackSubmit: "profile_pack.community.submit",
-    btnMarketListSubmissions: "member.submissions.read",
-    btnMarketListProfilePackSubmissions: "member.profile_pack.submissions.read",
-    btnMarketDownloadProfilePackSubmission: "member.profile_pack.submissions.export.download",
   })
+  const ANONYMOUS_MEMBER_FALLBACK_OPERATIONS = Object.freeze([
+    "auth.info.read",
+    "auth.login",
+    "health.read",
+    "member.installations.read",
+    "member.installations.refresh",
+    "member.installations.uninstall",
+    "member.tasks.read",
+    "member.tasks.refresh",
+    "notifications.read",
+    "preferences.read",
+    "preferences.write",
+    "profile_pack.catalog.read",
+    "templates.detail",
+    "templates.install",
+    "templates.list",
+    "templates.package.download",
+    "templates.trial.request",
+    "templates.trial.status",
+    "ui.capabilities.read",
+  ])
   let storageSyncBound = false
   let uiEventBusBound = false
   const compareViewHelper = globalScope.SharelifeProfilePackCompareView
+
+  function profilePackMarketHelpers() {
+    return globalScope.SharelifeProfilePackMarket || null
+  }
+
+  function profilePackGuidanceHelpers() {
+    return globalScope.SharelifeProfilePackGuidance || null
+  }
 
   function marketCardHelpers() {
     return globalScope.SharelifeMarketCards || null
   }
 
-  function marketFacetViewHelpers() {
-    return globalScope.SharelifeMarketFacetView || null
+  function marketCatalogContractHelpers() {
+    return globalScope.SharelifeMarketCatalogContract || null
   }
 
-  function marketEventBindingHelpers() {
-    return globalScope.SharelifeMarketEventBindings || null
+  function detailShellHelpers() {
+    return globalScope.SharelifeMarketDetailShell || null
   }
 
-  function marketStatusViewHelpers() {
-    return globalScope.SharelifeMarketStatusView || null
-  }
-
-  function marketAuthViewHelpers() {
-    return globalScope.SharelifeMarketAuthView || null
-  }
-
-  function marketCatalogInsightsHelpers() {
-    return globalScope.SharelifeMarketCatalogInsights || null
-  }
-
-  function marketCatalogViewHelpers() {
-    return globalScope.SharelifeMarketCatalogView || null
-  }
-
-  function marketCompareHelpers() {
-    return globalScope.SharelifeMarketCompareHelpers || null
+  function variantRegistryHelpers() {
+    return globalScope.SharelifeMarketDetailVariantRegistry || null
   }
 
   function uiEventBusHelpers() {
@@ -168,6 +203,29 @@
 
   function byId(id) {
     return document.getElementById(id)
+  }
+
+  function isDetailPage() {
+    return MARKET_PAGE_KIND === "detail"
+  }
+
+  function encodePackIdForPath(packId) {
+    return String(packId || "")
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/")
+  }
+
+  function routeSelectedPackId() {
+    if (!globalScope || !globalScope.location) return ""
+    const prefix = "/market/packs/"
+    const pathname = String(globalScope.location.pathname || "")
+    if (!pathname.startsWith(prefix)) return ""
+    return pathname.slice(prefix.length)
+      .split("/")
+      .map((part) => decodeURIComponent(part))
+      .join("/")
+      .trim()
   }
 
   function fixedAuthRole() {
@@ -185,6 +243,65 @@
     } catch (_error) {
       return ""
     }
+  }
+
+  function readStoredMarketLikes() {
+    if (!globalScope.localStorage) return new Set()
+    try {
+      const raw = String(globalScope.localStorage.getItem(MARKET_LIKES_STORAGE_KEY) || "")
+      if (!raw) return new Set()
+      const parsed = JSON.parse(raw)
+      const values = Array.isArray(parsed)
+        ? parsed
+        : (parsed && typeof parsed === "object" ? Object.keys(parsed).filter((key) => parsed[key]) : [])
+      return new Set(
+        values.map((item) => String(item || "").trim()).filter(Boolean),
+      )
+    } catch (_error) {
+      return new Set()
+    }
+  }
+
+  function persistMarketLikes() {
+    if (!globalScope.localStorage) return
+    try {
+      globalScope.localStorage.setItem(
+        MARKET_LIKES_STORAGE_KEY,
+        JSON.stringify(Array.from(state.likedPackIds)),
+      )
+    } catch (_error) {
+      // Ignore localStorage write failures and keep the current in-memory state.
+    }
+  }
+
+  function isPackLiked(packId) {
+    const normalized = String(packId || "").trim()
+    if (!normalized) return false
+    return state.likedPackIds.has(normalized)
+  }
+
+  function catalogBaseLikeCount(item) {
+    const explicit = Number(item && item.like_count)
+    if (Number.isFinite(explicit)) return Math.max(0, Math.trunc(explicit))
+    const engagementCount = Number(item && item.engagement && item.engagement.likes)
+    if (Number.isFinite(engagementCount)) return Math.max(0, Math.trunc(engagementCount))
+    return 0
+  }
+
+  function catalogLikeCount(item) {
+    return catalogBaseLikeCount(item) + (isPackLiked(item && item.pack_id) ? 1 : 0)
+  }
+
+  function toggleCatalogLike(item) {
+    const packId = String(item && item.pack_id || "").trim()
+    if (!packId) return
+    if (state.likedPackIds.has(packId)) {
+      state.likedPackIds.delete(packId)
+    } else {
+      state.likedPackIds.add(packId)
+    }
+    persistMarketLikes()
+    renderCatalogCards(state.catalog)
   }
 
   function saveUiLocale(locale) {
@@ -411,6 +528,9 @@
     if (state.lastComparePayload) {
       renderCompareView(state.lastComparePayload)
     }
+    if (state.selectedPackId) {
+      renderSelectedDetailShell()
+    }
     return normalized
   }
 
@@ -424,7 +544,14 @@
   }
 
   function handleUiStorageSync(event) {
-    if (!event || String(event.key || "") !== UI_LOCALE_STORAGE_KEY) return
+    if (!event) return
+    const key = String(event.key || "")
+    if (key === MARKET_LIKES_STORAGE_KEY) {
+      state.likedPackIds = readStoredMarketLikes()
+      renderCatalogCards(state.catalog)
+      return
+    }
+    if (key !== UI_LOCALE_STORAGE_KEY) return
     const incoming = String(event.newValue || "").trim()
     const nextLocale = normalizeUiLocale(incoming || browserUiLocale() || "en-US")
     if (nextLocale === state.uiLocale) return
@@ -479,11 +606,41 @@
     return LOCAL_SORT_OPTIONS.TRENDING
   }
 
+  function quickFilterButtons() {
+    return Array.from(document.querySelectorAll("[data-market-quick-filter]"))
+  }
+
   function parseCsvQueryValue(value) {
     return String(value || "")
       .split(",")
       .map((item) => String(item || "").trim())
       .filter(Boolean)
+  }
+
+  function currentCatalogQueryParams() {
+    const next = new URLSearchParams()
+    const q = String(state.localSearch || "").trim()
+    const sort = validSortOption(state.localSort)
+    if (q) next.set("q", q)
+    if (sort && sort !== LOCAL_SORT_OPTIONS.TRENDING) next.set("sort", sort)
+    LOCAL_FACET_GROUPS.forEach((group) => {
+      const selected = state.localFacets[group.key]
+      if (!(selected instanceof Set) || selected.size === 0) return
+      next.set(`facet_${group.key}`, Array.from(selected).sort().join(","))
+    })
+    return next
+  }
+
+  function detailHref(packId) {
+    const encodedPackId = encodePackIdForPath(packId)
+    const search = currentCatalogQueryParams().toString()
+    return `/market/packs/${encodedPackId}${search ? `?${search}` : ""}`
+  }
+
+  function navigateToDetail(packId) {
+    const targetPackId = String(packId || "").trim()
+    if (!targetPackId || !globalScope || !globalScope.location) return
+    globalScope.location.href = detailHref(targetPackId)
   }
 
   function applyQueryStateToControls() {
@@ -503,22 +660,12 @@
 
   function loadQueryState() {
     if (!globalScope || !globalScope.location) return
-    const search = globalScope.location.search || ""
-    if (marketFilterApi && typeof marketFilterApi.parseQueryState === "function") {
-      const parsed = marketFilterApi.parseQueryState(search, {
-        groups: LOCAL_FACET_GROUPS,
-        sortOptions: LOCAL_SORT_OPTIONS,
-      })
-      state.localSearch = parsed.localSearch
-      state.localSort = parsed.localSort
-      state.selectedPackId = parsed.selectedPackId
-      state.localFacets = parsed.localFacets
-      return
-    }
-    const params = new URLSearchParams(search)
+    const params = new URLSearchParams(globalScope.location.search || "")
     state.localSearch = String(params.get("q") || "").trim()
     state.localSort = validSortOption(params.get("sort") || LOCAL_SORT_OPTIONS.TRENDING)
-    state.selectedPackId = String(params.get("pack_id") || "").trim()
+    state.selectedPackId = isDetailPage()
+      ? routeSelectedPackId()
+      : String(params.get("pack_id") || "").trim()
     state.localFacets = createFacetSelectionMap()
     LOCAL_FACET_GROUPS.forEach((group) => {
       const queryKey = `facet_${group.key}`
@@ -526,34 +673,98 @@
         state.localFacets[group.key].add(value)
       })
     })
+    state.activeQuickFilter = detectActiveQuickFilter()
   }
 
   function syncQueryState() {
     if (!globalScope || !globalScope.location || !globalScope.history) return
-    let next = null
-    if (marketFilterApi && typeof marketFilterApi.buildQueryStateParams === "function") {
-      next = marketFilterApi.buildQueryStateParams(state, {
-        groups: LOCAL_FACET_GROUPS,
-        sortOptions: LOCAL_SORT_OPTIONS,
-      })
-    } else {
-      next = new URLSearchParams()
-      const q = String(state.localSearch || "").trim()
-      const sort = validSortOption(state.localSort)
-      if (q) next.set("q", q)
-      if (sort && sort !== LOCAL_SORT_OPTIONS.TRENDING) next.set("sort", sort)
-      if (state.selectedPackId) next.set("pack_id", state.selectedPackId)
-      LOCAL_FACET_GROUPS.forEach((group) => {
-        const selected = state.localFacets[group.key]
-        if (!(selected instanceof Set) || selected.size === 0) return
-        next.set(`facet_${group.key}`, Array.from(selected).sort().join(","))
-      })
-    }
+    if (isDetailPage()) return
+    const next = currentCatalogQueryParams()
+    if (state.selectedPackId) next.set("pack_id", state.selectedPackId)
     const search = next.toString()
     const nextHref = `${globalScope.location.pathname}${search ? `?${search}` : ""}${globalScope.location.hash || ""}`
     const currentHref = `${globalScope.location.pathname}${globalScope.location.search || ""}${globalScope.location.hash || ""}`
     if (nextHref === currentHref) return
     globalScope.history.replaceState(null, "", nextHref)
+  }
+
+  function facetSignatureFromSelection(selection) {
+    const out = []
+    LOCAL_FACET_GROUPS.forEach((group) => {
+      const bucket = selection && selection[group.key]
+      if (!(bucket instanceof Set)) return
+      Array.from(bucket)
+        .map((value) => normalizeFacetValue(group.key, value))
+        .filter(Boolean)
+        .sort()
+        .forEach((value) => {
+          out.push(`${group.key}:${value}`)
+        })
+    })
+    return out.sort()
+  }
+
+  function quickFilterSelection(key) {
+    const preset = QUICK_FILTER_PRESETS[key]
+    const selection = createFacetSelectionMap()
+    if (!preset || !preset.groupKey) return selection
+    const bucket = selection[preset.groupKey]
+    if (bucket instanceof Set) {
+      preset.values.forEach((value) => {
+        bucket.add(normalizeFacetValue(preset.groupKey, value))
+      })
+    }
+    return selection
+  }
+
+  function signaturesMatch(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return false
+    if (left.length !== right.length) return false
+    return left.every((value, index) => value === right[index])
+  }
+
+  function detectActiveQuickFilter() {
+    const activeSignature = facetSignatureFromSelection(state.localFacets)
+    if (!activeSignature.length) return "all"
+    return Object.keys(QUICK_FILTER_PRESETS).find((key) => (
+      key !== "all" && signaturesMatch(activeSignature, facetSignatureFromSelection(quickFilterSelection(key)))
+    )) || ""
+  }
+
+  function rowMatchesQuickFilter(item, key) {
+    const presetKey = String(key || "all").trim()
+    if (!presetKey || presetKey === "all") return true
+    if (presetKey === "bot_profile_pack" || presetKey === "extension_pack") {
+      return normalizeFacetValue("pack_type", item && item.pack_type) === presetKey
+    }
+    if (presetKey === "featured") {
+      return Boolean(item && item.featured)
+    }
+    if (presetKey === "low_risk") {
+      return normalizeFacetValue("risk_level", item && item.risk_level) === "low"
+    }
+    return true
+  }
+
+  function updateQuickFilterButtons(rows = state.catalogRaw) {
+    const items = Array.isArray(rows) ? rows : []
+    quickFilterButtons().forEach((button) => {
+      const key = String(button.getAttribute("data-market-quick-filter") || "").trim() || "all"
+      const active = key === state.activeQuickFilter
+      button.classList.toggle("is-active", active)
+      button.setAttribute("aria-pressed", active ? "true" : "false")
+      const countNode = button.querySelector(".market-sidebar-category-count")
+      if (countNode) {
+        countNode.textContent = String(items.filter((item) => rowMatchesQuickFilter(item, key)).length)
+      }
+    })
+  }
+
+  function applyQuickFilter(key) {
+    const presetKey = Object.prototype.hasOwnProperty.call(QUICK_FILTER_PRESETS, key) ? key : "all"
+    state.localFacets = quickFilterSelection(presetKey)
+    state.activeQuickFilter = detectActiveQuickFilter() || presetKey
+    applyLocalCatalogView()
   }
 
   function headers() {
@@ -768,10 +979,34 @@
   function selectedCatalogRow() {
     const selectedPackId = String(state.selectedPackId || "").trim()
     if (!selectedPackId) return null
-    const candidates = []
-    if (Array.isArray(state.catalog)) candidates.push(...state.catalog)
-    if (Array.isArray(state.catalogRaw)) candidates.push(...state.catalogRaw)
-    return candidates.find((item) => String(item && item.pack_id || "").trim() === selectedPackId) || null
+    return findCatalogItemByPackId(selectedPackId)
+  }
+
+  function findCatalogItemByPackId(packId, rows = null) {
+    const targetPackId = String(packId || "").trim()
+    if (!targetPackId) return null
+    const candidates = Array.isArray(rows)
+      ? rows
+      : [
+        ...(Array.isArray(state.catalog) ? state.catalog : []),
+        ...(Array.isArray(state.catalogRaw) ? state.catalogRaw : []),
+      ]
+    return candidates.find((item) => String(item && item.pack_id || "").trim() === targetPackId) || null
+  }
+
+  function resolveDefaultCatalogSelection(rows) {
+    const helper = detailShellHelpers()
+    if (helper && typeof helper.resolveDefaultSelectedPackId === "function") {
+      return String(helper.resolveDefaultSelectedPackId({
+        selectedPackId: state.selectedPackId,
+        rows,
+      }) || "").trim()
+    }
+    if (state.selectedPackId) return String(state.selectedPackId || "").trim()
+    const items = Array.isArray(rows) ? rows : []
+    const featured = items.find((item) => Boolean(item && item.featured))
+    if (featured) return String(featured.pack_id || "").trim()
+    return String((items[0] && items[0].pack_id) || "").trim()
   }
 
   function catalogRowHasRuntime(item) {
@@ -781,10 +1016,14 @@
 
   function updateCatalogDetailActions() {
     const selected = selectedCatalogRow()
+    const shellState = detailShellState(selected)
     const compareButton = byId("btnMarketCatalogCompare")
     const downloadButton = byId("btnMarketCatalogDownload")
     const downloadUrl = catalogPackageUrl(selected)
-    const runtimeAvailable = selected && catalogRowHasRuntime(selected) && hasCapability("profile_pack.catalog.read")
+    const runtimeAvailable = shellState.hasSelection
+      && selected
+      && catalogRowHasRuntime(selected)
+      && hasCapability("profile_pack.catalog.read")
 
     if (compareButton) {
       compareButton.disabled = !runtimeAvailable
@@ -800,12 +1039,22 @@
     }
 
     if (downloadButton) {
-      const visible = Boolean(downloadUrl)
-      downloadButton.classList.toggle("hidden", !visible)
-      downloadButton.disabled = !visible
-      downloadButton.setAttribute("aria-disabled", visible ? "false" : "true")
-      downloadButton.dataset.downloadUrl = downloadUrl
+      const available = Boolean(downloadUrl)
+      downloadButton.disabled = !available
+      downloadButton.setAttribute("aria-disabled", available ? "false" : "true")
+      if (available) {
+        downloadButton.dataset.downloadUrl = downloadUrl
+        downloadButton.removeAttribute("title")
+      } else {
+        delete downloadButton.dataset.downloadUrl
+        downloadButton.title = i18nMessage(
+          "market.download.unavailable",
+          "No public download is available for this catalog row.",
+        )
+      }
     }
+
+    applyDetailMemberActionStates(selected)
   }
 
   function triggerCatalogDownload(item = selectedCatalogRow()) {
@@ -830,8 +1079,497 @@
     }
   }
 
-  function fallbackCapabilityOperations(role) {
+  function detailSeed(item = selectedCatalogRow()) {
+    const helper = marketCatalogContractHelpers()
+    if (helper && typeof helper.buildDetailSeed === "function") {
+      return helper.buildDetailSeed(item)
+    }
+    return {
+      packId: String((item && item.pack_id) || "").trim(),
+      title: String((item && item.pack_id) || "").trim() || "-",
+      version: String((item && item.version) || "").trim(),
+      packType: String((item && item.pack_type) || "bot_profile_pack").trim(),
+      compatibility: String((item && item.compatibility) || "unknown").trim(),
+      riskLevel: String((item && item.risk_level) || "unknown").trim(),
+      maintainer: String((item && item.maintainer) || "unknown").trim(),
+      reviewLabels: Array.isArray(item && item.review_labels) ? item.review_labels : [],
+      warningFlags: Array.isArray(item && item.warning_flags) ? item.warning_flags : [],
+      sections: Array.isArray(item && item.sections) ? item.sections : [],
+      summary: String((item && (item.summary || item.description)) || "").trim(),
+      featured: Boolean(item && item.featured),
+      packagePath: String((item && item.package_path) || "").trim(),
+      sourceSubmissionId: String((item && item.source_submission_id) || "").trim(),
+      locale: state.uiLocale || "en-US",
+    }
+  }
+
+  function detailShellState(item = selectedCatalogRow(), overrides = {}) {
+    const helper = detailShellHelpers()
+    const registry = variantRegistryHelpers()
+    const availableVariants = registry && Array.isArray(registry.DEFAULT_VARIANTS)
+      ? registry.DEFAULT_VARIANTS
+      : null
+    const selectedPackId = overrides.selectedPackId !== undefined
+      ? String(overrides.selectedPackId || "").trim()
+      : String((item && item.pack_id) || state.selectedPackId || "").trim()
+    if (helper && typeof helper.buildDetailShellState === "function") {
+      return helper.buildDetailShellState({
+        selectedPackId,
+        activeVariant: overrides.activeVariant !== undefined ? overrides.activeVariant : state.activeDetailVariant,
+        availableVariants,
+        viewportWidth: overrides.viewportWidth !== undefined ? overrides.viewportWidth : (globalScope.innerWidth || 0),
+        normalizeVariantId: registry && typeof registry.normalizeVariantId === "function"
+          ? registry.normalizeVariantId
+          : null,
+      })
+    }
+    const presentation = helper && typeof helper.resolveDetailPresentation === "function"
+      ? helper.resolveDetailPresentation({
+        viewportWidth: overrides.viewportWidth !== undefined ? overrides.viewportWidth : (globalScope.innerWidth || 0),
+      })
+      : "drawer"
+    const fallbackVariants = Array.isArray(availableVariants) && availableVariants.length
+      ? availableVariants.slice()
+      : ["variant_1", "variant_2", "variant_3", "variant_4", "variant_5"]
+    const requestedVariant = overrides.activeVariant !== undefined ? overrides.activeVariant : state.activeDetailVariant
+    const fallbackActiveVariant = registry && typeof registry.normalizeVariantId === "function"
+      ? registry.normalizeVariantId(requestedVariant)
+      : String(requestedVariant || fallbackVariants[0]).trim() || fallbackVariants[0]
+    return {
+      selectedPackId,
+      hasSelection: Boolean(selectedPackId),
+      presentation,
+      activeVariant: fallbackVariants.includes(fallbackActiveVariant) ? fallbackActiveVariant : fallbackVariants[0],
+      availableVariants: fallbackVariants,
+    }
+  }
+
+  function detailMemberActionStates(item = selectedCatalogRow()) {
+    const helper = detailShellHelpers()
+    const shellState = detailShellState(item)
+    if (!(helper && typeof helper.buildDetailMemberActionStates === "function")) {
+      return []
+    }
+    return helper.buildDetailMemberActionStates({
+      selectedPackId: shellState.selectedPackId,
+      isAuthenticated: hasAuthenticatedSession(),
+      capabilities: {
+        "templates.trial.request": hasCapability("templates.trial.request"),
+        "templates.install": hasCapability("templates.install"),
+        "templates.submit": hasCapability("templates.submit"),
+        "member.installations.refresh": hasCapability("member.installations.refresh"),
+        "profile_pack.community.submit": hasCapability("profile_pack.community.submit"),
+      },
+    })
+  }
+
+  function applyDetailMemberActionStates(item = selectedCatalogRow()) {
+    detailMemberActionStates(item).forEach((actionState) => {
+      const node = byId(actionState.controlId)
+      if (!node) return
+      node.classList.toggle("hidden", !actionState.visible)
+      node.disabled = Boolean(actionState.disabled)
+      node.setAttribute("aria-disabled", actionState.disabled ? "true" : "false")
+      if (actionState.blockedReason === "capability") {
+        node.title = i18nFormat(
+          "capability.locked_hint",
+          "Requires capability: {capability}",
+          { capability: actionState.capability },
+        )
+      } else {
+        node.removeAttribute("title")
+      }
+    })
+  }
+
+  function normalizeUniqueStringList(values) {
+    const rows = Array.isArray(values) ? values : [values]
+    const out = []
+    const seen = new Set()
+    rows.forEach((item) => {
+      const value = String(item || "").trim()
+      if (!value || seen.has(value)) return
+      seen.add(value)
+      out.push(value)
+    })
+    return out
+  }
+
+  function availableInstallSections(item = selectedCatalogRow()) {
+    return installSectionState(item).availableSections
+  }
+
+  function installSectionSelectionKey(item = selectedCatalogRow()) {
+    return String(detailSeed(item).packId || "").trim()
+  }
+
+  function installSectionState(item = selectedCatalogRow(), overrides = {}) {
+    const key = installSectionSelectionKey(item)
+    const hasSavedSelection = overrides.hasSavedSelection !== undefined
+      ? Boolean(overrides.hasSavedSelection)
+      : Boolean(key) && Object.prototype.hasOwnProperty.call(state.installSectionSelections, key)
+    const savedSections = overrides.savedSections !== undefined
+      ? overrides.savedSections
+      : (hasSavedSelection ? state.installSectionSelections[key] : [])
+    const helper = detailShellHelpers()
+    if (helper && typeof helper.buildInstallSectionSelectionState === "function") {
+      return helper.buildInstallSectionSelectionState({
+        availableSections: item && item.sections,
+        savedSections,
+        hasSavedSelection,
+        describeSection: sectionDisplayMeta,
+      })
+    }
+    const availableSections = normalizeUniqueStringList(item && item.sections)
+    const selectedSections = hasSavedSelection
+      ? normalizeUniqueStringList(savedSections).filter((section) => availableSections.includes(section))
+      : availableSections.slice()
+    const statefulCount = availableSections.filter((sectionName) => {
+      const meta = sectionDisplayMeta(sectionName)
+      return Boolean(meta && (meta.stateful || meta.localData))
+    }).length
+    let summaryKey = "market.install.sections.summary"
+    if (!availableSections.length) {
+      summaryKey = "market.install.sections.empty"
+    } else if (!selectedSections.length) {
+      summaryKey = "market.install.sections.none_selected"
+    } else if (statefulCount > 0) {
+      summaryKey = "market.install.sections.summary_stateful"
+    }
+    return {
+      availableSections,
+      selectedSections,
+      statefulCount,
+      summaryKey,
+      summaryValues: {
+        selected: selectedSections.length,
+        total: availableSections.length,
+        stateful: statefulCount,
+      },
+    }
+  }
+
+  function resolvedInstallSections(item = selectedCatalogRow()) {
+    return installSectionState(item).selectedSections
+  }
+
+  function rememberInstallSections(item = selectedCatalogRow(), sections = []) {
+    const key = installSectionSelectionKey(item)
+    if (!key) return
+    state.installSectionSelections[key] = installSectionState(item, {
+      savedSections: sections,
+      hasSavedSelection: true,
+    }).selectedSections
+  }
+
+  function readSelectedInstallSections() {
+    const inputs = Array.from(document.querySelectorAll("input[data-market-install-section]"))
+    return normalizeUniqueStringList(
+      inputs
+        .filter((node) => Boolean(node.checked))
+        .map((node) => String(node.getAttribute("data-market-install-section") || "")),
+    )
+  }
+
+  function sectionDisplayMeta(sectionName) {
+    const guidance = profilePackGuidanceHelpers()
+    return guidance && typeof guidance.describeSection === "function"
+      ? guidance.describeSection(sectionName)
+      : {
+        name: String(sectionName || ""),
+        known: false,
+        titleKey: "",
+        descriptionKey: "",
+        stateful: false,
+        localData: false,
+      }
+  }
+
+  function syncInstallSectionSummary(item = selectedCatalogRow()) {
+    const summaryNode = byId("marketInstallSectionSummary")
+    if (!summaryNode) return
+    const selected = readSelectedInstallSections()
+    rememberInstallSections(item, selected)
+    const installState = installSectionState(item, {
+      savedSections: selected,
+      hasSavedSelection: true,
+    })
+    if (!installState.availableSections.length) {
+      summaryNode.textContent = i18nMessage(
+        "market.install.sections.empty",
+        "No declared sections on this pack.",
+      )
+      return
+    }
+    if (!installState.selectedSections.length) {
+      summaryNode.textContent = i18nMessage(
+        "market.install.sections.none_selected",
+        "No sections selected. Install will skip section sync.",
+      )
+      return
+    }
+    summaryNode.textContent = installState.statefulCount > 0
+      ? i18nFormat(
+        "market.install.sections.summary_stateful",
+        "{selected}/{total} sections selected · {stateful} stateful/local sections can be skipped",
+        installState.summaryValues,
+      )
+      : i18nFormat(
+        "market.install.sections.summary",
+        "{selected}/{total} sections selected for install sync",
+        installState.summaryValues,
+      )
+  }
+
+  function renderMarketInstallSectionList(item = selectedCatalogRow()) {
+    const root = byId("marketInstallSectionList")
+    if (!root) return
+    root.innerHTML = ""
+    const installState = installSectionState(item)
+    if (!installState.availableSections.length) {
+      syncInstallSectionSummary(item)
+      return
+    }
+    const selectedSet = new Set(installState.selectedSections)
+    installState.availableSections.forEach((sectionName) => {
+      const meta = sectionDisplayMeta(sectionName)
+      const label = document.createElement("label")
+      label.className = "profile-pack-section-item market-install-section-item"
+
+      const input = document.createElement("input")
+      input.type = "checkbox"
+      input.checked = selectedSet.has(sectionName)
+      input.setAttribute("data-market-install-section", sectionName)
+      input.addEventListener("change", () => {
+        syncInstallSectionSummary(item)
+      })
+      label.appendChild(input)
+
+      const body = document.createElement("span")
+      body.className = "profile-pack-section-body"
+      const titleRow = document.createElement("span")
+      titleRow.className = "profile-pack-section-title-row"
+
+      const title = document.createElement("span")
+      title.className = "profile-pack-section-title"
+      title.textContent = meta.known && meta.titleKey
+        ? i18nMessage(meta.titleKey, sectionName)
+        : sectionName
+      titleRow.appendChild(title)
+
+      if (meta.stateful) {
+        appendPill(
+          titleRow,
+          i18nMessage("profile_pack.section.badge.stateful", "Stateful"),
+          "warning",
+        )
+      }
+      if (meta.localData) {
+        appendPill(
+          titleRow,
+          i18nMessage("profile_pack.section.badge.local_data", "Local Data"),
+          "neutral",
+        )
+      }
+
+      body.appendChild(titleRow)
+
+      const description = document.createElement("span")
+      description.className = "profile-pack-section-description"
+      description.textContent = meta.known && meta.descriptionKey
+        ? i18nMessage(meta.descriptionKey, sectionName)
+        : sectionName
+      body.appendChild(description)
+
+      label.appendChild(body)
+      root.appendChild(label)
+    })
+    syncInstallSectionSummary(item)
+  }
+
+  function hasAuthenticatedSession() {
+    return !state.authRequired || state.capabilities.authenticated === true
+  }
+
+  function ensureMemberActionCapability(capability, actionKey) {
+    if (hasCapability(capability)) return true
+    setMarketDetailExpanded(true)
+    updateSummary({
+      ...(selectedCatalogRow() || {}),
+      status: "auth_required",
+      message: i18nFormat(
+        "market.detail.auth_required_action",
+        "Login is required before using {action}.",
+        { action: actionKey },
+      ),
+    })
+    const passwordNode = byId("marketAuthPassword")
+    if (passwordNode && typeof passwordNode.focus === "function") {
+      passwordNode.focus()
+    }
+    return false
+  }
+
+  function renderDetailVariantTabs(item = selectedCatalogRow()) {
+    const root = byId("marketDetailVariantTabs")
+    if (!root) return
+    root.innerHTML = ""
+    const shellState = detailShellState(item)
+    state.activeDetailVariant = shellState.activeVariant
+    shellState.availableVariants.forEach((variantId, index) => {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.className = "locale-pill"
+      if (variantId === shellState.activeVariant) {
+        button.classList.add("is-active")
+        button.setAttribute("aria-pressed", "true")
+      } else {
+        button.setAttribute("aria-pressed", "false")
+      }
+      button.textContent = i18nMessage(`market.variant.tab_${index + 1}`, `Variant ${index + 1}`)
+      button.addEventListener("click", () => {
+        state.activeDetailVariant = detailShellState(item, { activeVariant: variantId }).activeVariant
+        renderDetailVariantViewport(item)
+        renderDetailVariantTabs(item)
+      })
+      root.appendChild(button)
+    })
+  }
+
+  function renderDetailVariantViewport(item = selectedCatalogRow()) {
+    const root = byId("marketDetailVariantViewport")
+    if (!root) return
+    restoreDetailEmbeddedControls()
+    const registry = variantRegistryHelpers()
+    const context = detailSeed(item)
+    const shellState = detailShellState(item)
+    const variantId = shellState.activeVariant
+    state.activeDetailVariant = variantId
+    const renderer = registry && typeof registry.getVariantRenderer === "function"
+      ? registry.getVariantRenderer(variantId)
+      : null
+    root.innerHTML = typeof renderer === "function"
+      ? renderer(context)
+      : ""
+  }
+
+  function renderDetailPublicFacts(item = selectedCatalogRow()) {
+    const root = byId("marketDetailPublicFacts")
+    if (!root) return
+    root.innerHTML = ""
+    const context = detailSeed(item)
+    const helper = detailShellHelpers()
+    const rows = helper && typeof helper.buildDetailPublicFactRows === "function"
+      ? helper.buildDetailPublicFactRows(context, {
+        message: i18nMessage,
+        enumLabel,
+        localizedList,
+      })
+      : [
+        { label: i18nMessage("table.header.pack", "Pack"), value: context.title || context.packId || "-" },
+        { label: i18nMessage("table.header.version", "Version"), value: context.version || "-" },
+        { label: i18nMessage("table.header.pack_type", "Pack Type"), value: enumLabel("pack_type", context.packType) },
+        { label: i18nMessage("market.evidence.compatibility", "compatibility"), value: enumLabel("compatibility", context.compatibility) },
+        { label: i18nMessage("table.header.risk", "Risk"), value: enumLabel("risk", context.riskLevel) },
+        { label: i18nMessage("table.header.maintainer", "Maintainer"), value: context.maintainer || "-" },
+        { label: i18nMessage("table.header.labels", "Labels"), value: localizedList("review_label", context.reviewLabels) },
+        { label: i18nMessage("table.header.flags", "Flags"), value: localizedList("warning_flag", context.warningFlags) },
+      ]
+    rows.forEach((itemRow) => {
+      const card = document.createElement("div")
+      card.className = "detail-card"
+      const label = document.createElement("div")
+      label.className = "detail-card-label"
+      label.textContent = itemRow.label
+      card.appendChild(label)
+      const value = document.createElement("div")
+      value.className = "detail-card-value"
+      value.textContent = itemRow.value
+      card.appendChild(value)
+      root.appendChild(card)
+    })
+  }
+
+  function syncDetailActionPrefill(item = selectedCatalogRow()) {
+    const context = detailSeed(item)
+    const packNode = byId("marketPackId")
+    if (packNode) {
+      packNode.value = context.packId || ""
+    }
+    const templateNode = byId("marketTemplateId")
+    if (templateNode && !String(templateNode.value || "").trim()) {
+      templateNode.value = context.packId || ""
+    }
+  }
+
+  function renderSelectedDetailShell(item = selectedCatalogRow()) {
+    if (!item) return
+    syncDetailActionPrefill(item)
+    renderDetailVariantViewport(item)
+    mountDetailEmbeddedControls()
+    renderMarketInstallSectionList(item)
+    updateCatalogDetailActions()
+    maybeLoadDetailInstallations()
+  }
+
+  function detailControlStore() {
+    return byId("marketDetailControlStore")
+  }
+
+  function detailControlSlot(slotName) {
+    const viewport = byId("marketDetailVariantViewport")
+    if (!viewport) return null
+    return viewport.querySelector(`[data-market-detail-slot="${slotName}"]`)
+  }
+
+  function restoreDetailEmbeddedControls() {
+    const store = detailControlStore()
+    if (!store) return
+    ;[
+      "marketDetailInstallSectionsShell",
+      "marketDetailInstallOptionsShell",
+    ].forEach((controlId) => {
+      const node = byId(controlId)
+      if (node && node.parentElement !== store) {
+        store.appendChild(node)
+      }
+    })
+  }
+
+  function mountDetailEmbeddedControls() {
+    const store = detailControlStore()
+    if (!store) return
+    const placements = [
+      ["marketDetailInstallSectionsShell", "install_sections"],
+      ["marketDetailInstallOptionsShell", "install_options"],
+    ]
+    placements.forEach(([controlId, slotName]) => {
+      const node = byId(controlId)
+      const slot = detailControlSlot(slotName)
+      if (!node) return
+      if (slot) {
+        slot.replaceChildren(node)
+        return
+      }
+      if (node.parentElement !== store) {
+        store.appendChild(node)
+      }
+    })
+  }
+
+  function maybeLoadDetailInstallations() {
+    if (!isDetailPage()) return
+    if (!selectedCatalogRow()) return
+    if (state.memberInstallationsRequested) return
+    if (!hasCapability("member.installations.read")) return
+    state.memberInstallationsRequested = true
+    void loadMarketInstallations()
+  }
+
+  function fallbackCapabilityOperations(role, options = {}) {
     const normalized = String(role || "").trim().toLowerCase()
+    const authenticated = options.authenticated !== false
+    const allowAnonymousMember = options.allowAnonymousMember === true
     const base = [
       "auth.info.read",
       "auth.login",
@@ -841,11 +1579,7 @@
     const member = [
       "member.installations.read",
       "member.installations.refresh",
-      "member.submissions.read",
-      "member.submissions.detail.read",
-      "member.profile_pack.submissions.read",
-      "member.profile_pack.submissions.detail.read",
-      "member.profile_pack.submissions.export.download",
+      "member.installations.uninstall",
       "templates.trial.request",
       "templates.install",
       "templates.submit",
@@ -854,6 +1588,9 @@
       "notifications.read",
     ]
     if (normalized === "admin" || normalized === "reviewer" || normalized === "member") {
+      if (normalized === "member" && !authenticated && allowAnonymousMember) {
+        return ANONYMOUS_MEMBER_FALLBACK_OPERATIONS.slice()
+      }
       return Array.from(new Set([...base, ...member]))
     }
     return base
@@ -894,20 +1631,29 @@
     Object.keys(CONTROL_CAPABILITY_MAP).forEach((controlId) => {
       applyCapabilityGuardToControl(controlId)
     })
-    syncMarketProfilePackSubmissionActions()
   }
 
   function setCapabilities(payload) {
     const data = payload && typeof payload === "object" ? payload : {}
     const role = String(data.role || "member").trim().toLowerCase() || "member"
+    const authenticated = typeof data.authenticated === "boolean"
+      ? data.authenticated
+      : (!state.authRequired || (Boolean(state.token) && state.token !== "no-auth"))
+    const anonymousMember = data.anonymous_member === true
     const operations = Array.isArray(data.operations)
       ? data.operations.map((item) => String(item || "").trim()).filter(Boolean)
-      : fallbackCapabilityOperations(role)
+      : fallbackCapabilityOperations(role, {
+        authenticated,
+        allowAnonymousMember: state.allowAnonymousMember,
+      })
     state.capabilities = {
       role,
+      authenticated,
+      anonymousMember,
       operations: Array.from(new Set(operations)),
     }
     applyCapabilityGuards()
+    updateCatalogDetailActions()
   }
 
   async function refreshCapabilities() {
@@ -915,13 +1661,29 @@
     if (!state.authRequired) {
       query.role = fixedAuthRole()
     }
+    if (state.pageMode && state.pageMode !== "auto") {
+      query.page_mode = state.pageMode
+    }
     const response = await api(`/api/ui/capabilities${queryString(query)}`)
     if (!response || response.status >= 400 || !(response.data && response.data.ok)) {
+      const fallbackAnonymousMember = (
+        state.authRequired &&
+        state.allowAnonymousMember &&
+        !state.token &&
+        state.pageMode !== "reviewer" &&
+        state.pageMode !== "admin"
+      )
+      const fallbackRole = fallbackAnonymousMember
+        ? "member"
+        : (state.authRequired ? "public" : fixedAuthRole())
       setCapabilities({
-        role: state.authRequired ? "public" : fixedAuthRole(),
-        operations: fallbackCapabilityOperations(
-          state.authRequired ? "public" : fixedAuthRole(),
-        ),
+        role: fallbackRole,
+        authenticated: !fallbackAnonymousMember && (!state.authRequired || (Boolean(state.token) && state.token !== "no-auth")),
+        anonymous_member: fallbackAnonymousMember,
+        operations: fallbackCapabilityOperations(fallbackRole, {
+          authenticated: !fallbackAnonymousMember && (!state.authRequired || (Boolean(state.token) && state.token !== "no-auth")),
+          allowAnonymousMember: state.allowAnonymousMember,
+        }),
       })
       return response
     }
@@ -931,6 +1693,7 @@
 
   function renderLog(name, payload) {
     const node = byId("marketResult")
+    if (!node) return
     const line = `[${new Date().toISOString()}] ${name}\n${JSON.stringify(payload, null, 2)}\n\n`
     node.textContent = line + node.textContent
   }
@@ -983,8 +1746,14 @@
     state.detailExpanded = nextState
     const area = byId("marketDetailArea")
     if (area) {
+      const shellState = detailShellState(selectedCatalogRow(), {
+        selectedPackId: state.selectedPackId,
+      })
+      state.activeDetailVariant = shellState.activeVariant
       area.classList.toggle("hidden", !nextState)
       area.setAttribute("aria-hidden", nextState ? "false" : "true")
+      area.classList.toggle("is-drawer", shellState.presentation === "drawer")
+      area.classList.toggle("is-sheet", shellState.presentation === "sheet")
     }
     const panel = byId("marketDetailPanel")
     if (!panel) return
@@ -1029,7 +1798,32 @@
     return ["unknown"]
   }
 
+  function localizedCatalogSearchTerms(item) {
+    if (!item || typeof item !== "object") return []
+    const packId = String(item.pack_id || "").trim()
+    return [
+      resolveCatalogPackTitle(item),
+      localizedPackLabel(packId, { includeId: true }),
+      localizedPackDescription(packId, String(item.description || item.summary || "").trim()),
+      localizedPackFeaturedNote(packId, String(item.featured_note || "").trim()),
+      localizedSourceSubmission(item.source_submission_id, packId),
+      resolveCatalogPackSubtitle(item),
+      enumLabel("risk", String(item.risk_level || "unknown")),
+      enumLabel("compatibility", String(item.compatibility || "unknown")),
+      ...normalizeStringArray(item.review_labels).map((value) => enumLabel("review_label", value)),
+      ...normalizeStringArray(item.warning_flags).map((value) => enumLabel("warning_flag", value)),
+      ...normalizeStringArray(item.compatibility_issues),
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  }
+
   function marketRowSearchText(item) {
+    const localizedTerms = localizedCatalogSearchTerms(item)
+    const helper = marketCatalogContractHelpers()
+    if (helper && typeof helper.buildPublicCatalogSearchText === "function") {
+      return helper.buildPublicCatalogSearchText(item, { localizedTerms })
+    }
     if (!item || typeof item !== "object") return ""
     const labels = Array.isArray(item.review_labels) ? item.review_labels.join(" ") : ""
     const flags = Array.isArray(item.warning_flags) ? item.warning_flags.join(" ") : ""
@@ -1040,7 +1834,7 @@
     const risk = String(item.risk_level || "")
     const compatibility = String(item.compatibility || "")
     const version = String(item.version || "")
-    return [packId, packType, risk, compatibility, labels, flags, issues, source, version]
+    return [packId, packType, risk, compatibility, labels, flags, issues, source, version, localizedTerms.join(" ")]
       .join(" ")
       .toLowerCase()
   }
@@ -1112,6 +1906,39 @@
     }
   }
 
+  function facetLabel(group, value) {
+    if (value === "unknown") {
+      return i18nMessage("market.filter.value.unknown", "unknown")
+    }
+    if (group.key === "pack_type") {
+      if (value === "bot_profile_pack") {
+        return i18nMessage("option.pack_type.bot_profile_pack", "Bot Profile Pack (Full Bot Setup)")
+      }
+      if (value === "extension_pack") {
+        return i18nMessage("option.pack_type.extension_pack", "Extension Pack (Skills/Personas/MCP/Plugins)")
+      }
+    }
+    if (group.key === "risk_level") {
+      if (value === "high") return i18nMessage("option.risk.high", "high")
+      if (value === "medium") return i18nMessage("option.risk.medium", "medium")
+      if (value === "low") return i18nMessage("option.risk.low", "low")
+    }
+    if (group.key === "featured") {
+      if (value === "true") return i18nMessage("option.featured_status.true", "featured only")
+      if (value === "false") return i18nMessage("option.featured_status.false", "non-featured only")
+    }
+    if (group.key === "compatibility") {
+      return enumLabel("compatibility", value)
+    }
+    if (group.key === "review_label") {
+      return enumLabel("review_label", value)
+    }
+    if (group.key === "warning_flag") {
+      return enumLabel("warning_flag", value)
+    }
+    return value
+  }
+
   function sortedFacetEntries(group, bucket) {
     const entries = Array.from(bucket.entries())
     const order = Array.isArray(group.ordered) ? group.ordered : []
@@ -1173,56 +2000,16 @@
     return bucket
   }
 
-  function buildFacetRenderModel(rows) {
-    const buckets = computeFacetBuckets(rows)
-    const facetView = marketFacetViewHelpers()
-    if (facetView && typeof facetView.buildFacetRenderModel === "function") {
-      return facetView.buildFacetRenderModel({
-        groups: LOCAL_FACET_GROUPS,
-        buckets,
-        facetSelection: state.localFacets,
-        completeFacetBucket: (group, bucket) => completeFacetBucket(group, bucket),
-        sortedFacetEntries: (group, bucket) => sortedFacetEntries(group, bucket),
-        i18nMessage,
-        enumLabel,
-      })
-    }
-    return LOCAL_FACET_GROUPS.map((group) => {
-      const entries = sortedFacetEntries(group, completeFacetBucket(group, buckets[group.key] || new Map()))
-      return {
-        key: group.key,
-        title: i18nMessage(group.titleKey, group.titleFallback),
-        entries: entries.map(([value, count]) => ({
-          value: String(value),
-          count: Number(count || 0),
-          checked: Boolean(state.localFacets[group.key] && state.localFacets[group.key].has(value)),
-          label: String(value),
-        })),
-      }
-    })
-  }
-
   function applyLocalCatalogView(options = {}) {
     const baseRows = Array.isArray(state.catalogRaw) ? state.catalogRaw : []
-    let searchedRows = baseRows.filter((item) => rowMatchesSearch(item, state.localSearch))
-    let sortedRows = sortCatalogRows(searchedRows.filter((item) => rowMatchesFacets(item)))
-    if (marketFilterApi && typeof marketFilterApi.buildLocalCatalogView === "function") {
-      const computed = marketFilterApi.buildLocalCatalogView(baseRows, {
-        localSearch: state.localSearch,
-        localFacets: state.localFacets,
-        localSort: state.localSort,
-      }, {
-        groups: LOCAL_FACET_GROUPS,
-        catalogRankScore,
-        parseIsoDate,
-      })
-      searchedRows = computed.searchedRows
-      sortedRows = computed.sortedRows
-    }
+    const searchedRows = baseRows.filter((item) => rowMatchesSearch(item, state.localSearch))
+    const filteredRows = searchedRows.filter((item) => rowMatchesFacets(item))
+    const sortedRows = sortCatalogRows(filteredRows)
     state.catalog = sortedRows
     updateCatalogTable(state.catalog, { skipFilterSync: true })
     updateCatalogCountChips(state.catalog, baseRows)
     renderFacetFilters(searchedRows)
+    updateQuickFilterButtons(baseRows)
     syncQueryState()
     if (options.updateSummary !== false && state.catalogRaw.length > 0) {
       setCatalogState(
@@ -1233,6 +2020,12 @@
           { shown: state.catalog.length, total: state.catalogRaw.length },
         ),
       )
+    }
+    if (isDetailPage() && state.selectedPackId) {
+      const selected = selectedCatalogRow()
+      if (selected) {
+        renderSelectedDetailShell(selected)
+      }
     }
   }
 
@@ -1246,59 +2039,51 @@
     } else {
       bucket.delete(normalizedValue)
     }
+    state.activeQuickFilter = detectActiveQuickFilter()
     applyLocalCatalogView()
   }
 
   function renderFacetFilters(rows) {
     const root = byId("marketFacetFilters")
     if (!root) return
-    const model = buildFacetRenderModel(rows)
-    const facetView = marketFacetViewHelpers()
-    if (facetView && typeof facetView.renderFacetRenderModel === "function") {
-      facetView.renderFacetRenderModel(root, model, onFacetToggle, {
-        document,
-        emptyText: i18nMessage("market.filter.group_empty", "No values"),
-      })
-      return
-    }
-
     root.innerHTML = ""
-    model.forEach((group) => {
+    const buckets = computeFacetBuckets(rows)
+    LOCAL_FACET_GROUPS.forEach((group) => {
       const detail = document.createElement("details")
       detail.className = "market-facet-group"
       detail.open = true
       const summary = document.createElement("summary")
       summary.className = "market-facet-title"
-      summary.textContent = String(group.title || "")
+      summary.textContent = i18nMessage(group.titleKey, group.titleFallback)
       detail.appendChild(summary)
       const list = document.createElement("div")
       list.className = "market-facet-list"
-      const entries = Array.isArray(group.entries) ? group.entries : []
+      const entries = sortedFacetEntries(group, completeFacetBucket(group, buckets[group.key] || new Map()))
       if (!entries.length) {
         const empty = document.createElement("div")
         empty.className = "market-facet-empty"
         empty.textContent = i18nMessage("market.filter.group_empty", "No values")
         list.appendChild(empty)
       } else {
-        entries.forEach((entry) => {
+        entries.forEach(([value, count]) => {
           const row = document.createElement("label")
           row.className = "market-facet-option"
           const checkbox = document.createElement("input")
           checkbox.type = "checkbox"
-          checkbox.checked = Boolean(entry.checked)
-          checkbox.setAttribute("data-market-facet-group", String(group.key || ""))
-          checkbox.setAttribute("data-market-facet-value", String(entry.value || ""))
+          checkbox.checked = Boolean(state.localFacets[group.key] && state.localFacets[group.key].has(value))
+          checkbox.setAttribute("data-market-facet-group", group.key)
+          checkbox.setAttribute("data-market-facet-value", value)
           checkbox.addEventListener("change", () => {
-            onFacetToggle(String(group.key || ""), String(entry.value || ""), checkbox.checked)
+            onFacetToggle(group.key, value, checkbox.checked)
           })
           row.appendChild(checkbox)
           const label = document.createElement("span")
           label.className = "market-facet-option-label"
-          label.textContent = String(entry.label || entry.value || "")
+          label.textContent = facetLabel(group, value)
           row.appendChild(label)
           const badge = document.createElement("span")
           badge.className = "market-facet-option-count"
-          badge.textContent = String(Number.isFinite(Number(entry.count)) ? Number(entry.count) : 0)
+          badge.textContent = String(count)
           row.appendChild(badge)
           list.appendChild(row)
         })
@@ -1310,6 +2095,7 @@
 
   function setCatalogState(status, message) {
     const node = byId("marketCatalogState")
+    if (!node) return
     node.classList.remove("is-neutral", "is-warning", "is-danger", "is-success")
     if (status === "loading") {
       node.classList.add("is-warning")
@@ -1328,7 +2114,9 @@
     const url = state.health && state.health.data && state.health.data.webui_url
       ? String(state.health.data.webui_url)
       : ""
-    byId("marketHealthLine").textContent = i18nFormat(
+    const healthNode = byId("marketHealthLine")
+    if (!healthNode) return
+    healthNode.textContent = i18nFormat(
       "market.health.line",
       "health: {status} {url}",
       { status, url },
@@ -1338,34 +2126,36 @@
   function updateSummary(data) {
     const summaryNode = byId("marketSummary")
     const detailsNode = byId("marketDetails")
+    const helper = detailShellHelpers()
+    const summaryView = helper && typeof helper.buildDetailSummaryViewModel === "function"
+      ? helper.buildDetailSummaryViewModel(data, {
+        message: i18nMessage,
+        format: i18nFormat,
+        enumLabel,
+        resolvePackLabel: localizedPackLabel,
+      })
+      : null
     if (!data || typeof data !== "object") {
       state.lastSummary = null
-      const statusView = marketStatusViewHelpers()
-      if (statusView && typeof statusView.buildSummaryText === "function") {
-        summaryNode.textContent = statusView.buildSummaryText(null, { i18nMessage, i18nFormat })
-      } else {
-        summaryNode.textContent = i18nMessage("market.summary.idle", "No operation yet.")
+      if (summaryNode) {
+        summaryNode.textContent = summaryView ? summaryView.text : i18nMessage("market.summary.idle", "No operation yet.")
       }
-      detailsNode.textContent = ""
+      if (detailsNode) {
+        detailsNode.textContent = ""
+      }
       renderEvidence(null)
       return
     }
     state.lastSummary = data
-    const statusView = marketStatusViewHelpers()
-    if (statusView && typeof statusView.buildSummaryText === "function") {
-      summaryNode.textContent = statusView.buildSummaryText(data, {
-        i18nMessage,
-        i18nFormat,
-        enumLabel,
-        localizedPackLabel,
-      })
-    } else {
-      summaryNode.textContent = i18nFormat("market.summary.part.status", "status={value}", {
-        value: enumLabel("status", String(data.status || "updated")),
-      })
+    if (summaryNode) {
+      summaryNode.textContent = summaryView
+        ? summaryView.text
+        : i18nMessage("market.summary.idle", "No operation yet.")
     }
     renderEvidence(data)
-    detailsNode.textContent = JSON.stringify(data, null, 2)
+    if (detailsNode) {
+      detailsNode.textContent = JSON.stringify(data, null, 2)
+    }
   }
 
   function renderEvidence(data) {
@@ -1373,36 +2163,99 @@
     if (!node) return
     node.innerHTML = ""
     if (!data || typeof data !== "object") return
-    const statusView = marketStatusViewHelpers()
-    if (statusView && typeof statusView.buildEvidenceRows === "function") {
-      const rows = statusView.buildEvidenceRows(data, {
-        i18nMessage,
-        i18nFormat,
-        enumLabel,
-        localizedPackFeaturedNote,
-        localizedList,
-        summarizePluginInstallExecution:
-          compareViewHelper && typeof compareViewHelper.summarizePluginInstallExecution === "function"
-            ? (execution) => compareViewHelper.summarizePluginInstallExecution(execution)
-            : null,
-      })
-      if (typeof statusView.renderDetailCards === "function") {
-        statusView.renderDetailCards(node, rows, { document })
-        return
+    const capabilitySummary = data.capability_summary || {}
+    const reviewEvidence = data.review_evidence || {}
+    const pluginInstall = data.plugin_install && typeof data.plugin_install === "object" ? data.plugin_install : {}
+    const latestExecution = pluginInstall.latest_execution && typeof pluginInstall.latest_execution === "object"
+      ? pluginInstall.latest_execution
+      : null
+    const executionSummary = latestExecution && compareViewHelper && typeof compareViewHelper.summarizePluginInstallExecution === "function"
+      ? compareViewHelper.summarizePluginInstallExecution(latestExecution)
+      : null
+    const executionGroups = []
+    if (executionSummary && executionSummary.groups) {
+      if (Array.isArray(executionSummary.groups.policy_blocked) && executionSummary.groups.policy_blocked.length) {
+        executionGroups.push(
+          i18nFormat("market.evidence.plugin_install_failure_group", "{group}: {items}", {
+            group: i18nMessage("profile_pack.review.group.policy_blocked", "policy"),
+            items: executionSummary.groups.policy_blocked.join("|"),
+          }),
+        )
+      }
+      if (Array.isArray(executionSummary.groups.command_failed) && executionSummary.groups.command_failed.length) {
+        executionGroups.push(
+          i18nFormat("market.evidence.plugin_install_failure_group", "{group}: {items}", {
+            group: i18nMessage("profile_pack.review.group.command_failed", "failed"),
+            items: executionSummary.groups.command_failed.join("|"),
+          }),
+        )
+      }
+      if (Array.isArray(executionSummary.groups.timed_out) && executionSummary.groups.timed_out.length) {
+        executionGroups.push(
+          i18nFormat("market.evidence.plugin_install_failure_group", "{group}: {items}", {
+            group: i18nMessage("profile_pack.review.group.timed_out", "timeout"),
+            items: executionSummary.groups.timed_out.join("|"),
+          }),
+        )
       }
     }
-
-    const fallback = document.createElement("div")
-    fallback.className = "detail-card"
-    const label = document.createElement("div")
-    label.className = "detail-card-label"
-    label.textContent = i18nMessage("market.evidence.plugin_install_status", "plugin install status")
-    fallback.appendChild(label)
-    const value = document.createElement("div")
-    value.className = "detail-card-value"
-    value.textContent = enumLabel("plugin_install_status", String(data.plugin_install && data.plugin_install.status || "unknown"))
-    fallback.appendChild(value)
-    node.appendChild(fallback)
+    const rows = [
+      {
+        label: i18nMessage("market.evidence.featured_note", "featured note"),
+        value: localizedPackFeaturedNote(data.pack_id, String(data.featured_note || "-")),
+      },
+      {
+        label: i18nMessage("market.evidence.compatibility", "compatibility"),
+        value: enumLabel("compatibility", String(data.compatibility || "unknown")),
+      },
+      {
+        label: i18nMessage("market.evidence.declared_capabilities", "declared capabilities"),
+        value: Array.isArray(capabilitySummary.declared) ? capabilitySummary.declared.join(", ") || "-" : "-",
+      },
+      {
+        label: i18nMessage("market.evidence.review_labels", "review labels"),
+        value: localizedList("review_label", reviewEvidence.review_labels),
+      },
+      {
+        label: i18nMessage("market.evidence.plugin_install_status", "plugin install status"),
+        value: enumLabel("plugin_install_status", String(pluginInstall.status || "unknown")),
+      },
+      {
+        label: i18nMessage("market.evidence.plugin_install_execution", "plugin install execution"),
+        value: executionSummary
+          ? i18nFormat(
+            "market.evidence.plugin_install_execution_counts",
+            "{status} (installed={installed}, failed={failed}, blocked={blocked})",
+            {
+              status: enumLabel("plugin_install_status", executionSummary.status),
+              installed: executionSummary.installed_count,
+              failed: executionSummary.failed_count,
+              blocked: executionSummary.blocked_count,
+            },
+          )
+          : "-",
+      },
+      {
+        label: i18nMessage(
+          "market.evidence.plugin_install_failure_groups",
+          "plugin install failure groups",
+        ),
+        value: executionGroups.length ? executionGroups.join(" ; ") : "-",
+      },
+    ]
+    rows.forEach((item) => {
+      const card = document.createElement("div")
+      card.className = "detail-card"
+      const label = document.createElement("div")
+      label.className = "detail-card-label"
+      label.textContent = item.label
+      card.appendChild(label)
+      const value = document.createElement("div")
+      value.className = "detail-card-value"
+      value.textContent = item.value
+      card.appendChild(value)
+      node.appendChild(card)
+    })
   }
 
   function resetCompareView() {
@@ -1509,7 +2362,10 @@
       resetCompareDetailPane()
     }
 
-    byId("marketSummary").textContent = view.summary
+    const summaryNode = byId("marketSummary")
+    if (summaryNode) {
+      summaryNode.textContent = view.summary
+    }
   }
 
   function applyAuthOptions(roles) {
@@ -1517,17 +2373,23 @@
     if (!roleNode) return
     roleNode.innerHTML = ""
     const preferredRole = fixedAuthRole()
-    const authView = marketAuthViewHelpers()
-    const options = authView && typeof authView.buildAuthRoleOptions === "function"
-      ? authView.buildAuthRoleOptions(roles, preferredRole, { i18nMessage })
-      : [{ value: preferredRole, label: i18nMessage("option.member", "member"), i18nKey: "option.member" }]
-    options.forEach((entry) => {
+    const inputRoles = Array.isArray(roles) ? roles : []
+    const effectiveRoles = inputRoles.includes(preferredRole) ? [preferredRole] : [preferredRole]
+    effectiveRoles.forEach((role) => {
       const option = document.createElement("option")
-      option.value = String(entry.value || preferredRole)
-      if (entry.i18nKey) {
-        option.setAttribute("data-i18n-key", String(entry.i18nKey))
+      option.value = role
+      if (role === "member") {
+        option.setAttribute("data-i18n-key", "option.member")
+        option.textContent = i18nMessage("option.member", "member")
+      } else if (role === "reviewer") {
+        option.setAttribute("data-i18n-key", "option.reviewer")
+        option.textContent = i18nMessage("option.reviewer", "reviewer")
+      } else if (role === "admin") {
+        option.setAttribute("data-i18n-key", "option.admin")
+        option.textContent = i18nMessage("option.admin", "admin")
+      } else {
+        option.textContent = role
       }
-      option.textContent = String(entry.label || entry.value || preferredRole)
       roleNode.appendChild(option)
     })
     roleNode.value = preferredRole
@@ -1539,42 +2401,40 @@
     const roleNode = byId("marketAuthRole")
     const fieldsNode = byId("marketReviewerAuthFields")
     if (!roleNode || !fieldsNode) return
-    const authView = marketAuthViewHelpers()
-    const role = String(roleNode.value || "").trim()
-    const visible = authView && typeof authView.isReviewerRole === "function"
-      ? authView.isReviewerRole(role)
-      : role.toLowerCase() === "reviewer"
-    fieldsNode.classList.toggle("hidden", !visible)
+    const role = String(roleNode.value || "").trim().toLowerCase()
+    fieldsNode.classList.toggle("hidden", role !== "reviewer")
   }
 
   function updateAuthUi() {
     const rolesText = state.availableRoles.length ? state.availableRoles.join(", ") : "none"
-    byId("marketAuthLine").textContent = i18nFormat(
-      "market.auth.line",
-      "auth: {status}",
-      {
-        status: state.authRequired
-          ? i18nFormat("auth.status.required", "required ({roles})", { roles: rolesText })
-          : i18nMessage("auth.status.disabled", "disabled"),
-      },
-    )
-    byId("marketRoleLine").textContent = i18nFormat(
-      "market.role.line",
-      "role: {role}",
-      {
-        role: state.authRole || i18nMessage("market.role.not_logged_in", "not logged in"),
-      },
-    )
+    const authLine = byId("marketAuthLine")
+    const roleLine = byId("marketRoleLine")
     const authPanel = byId("marketAuthPanel")
+    if (authLine) {
+      authLine.textContent = i18nFormat(
+        "market.auth.line",
+        "auth: {status}",
+        {
+          status: state.authRequired
+            ? i18nFormat("auth.status.required", "required ({roles})", { roles: rolesText })
+            : i18nMessage("auth.status.disabled", "disabled"),
+        },
+      )
+    }
+    if (roleLine) {
+      roleLine.textContent = i18nFormat(
+        "market.role.line",
+        "role: {role}",
+        {
+          role: state.authRole || i18nMessage("market.role.not_logged_in", "not logged in"),
+        },
+      )
+    }
     if (authPanel) {
       const shouldShowAuthPanel = state.authRequired
       authPanel.classList.toggle("hidden", !shouldShowAuthPanel)
       authPanel.toggleAttribute("hidden", !shouldShowAuthPanel)
       authPanel.setAttribute("aria-hidden", shouldShowAuthPanel ? "false" : "true")
-    }
-    const authUserIdNode = byId("marketAuthUserId")
-    if (authUserIdNode) {
-      authUserIdNode.value = String(state.memberUserId || "webui-user").trim() || "webui-user"
     }
     syncReviewerAuthFields()
     updateConsoleLinkVisibility()
@@ -1586,24 +2446,20 @@
     const reviewerLink = byId("marketReviewerConsoleLink")
     const adminLink = byId("marketAdminConsoleLink")
     const fullLink = byId("marketFullConsoleLink")
-    const authView = marketAuthViewHelpers()
-    if (authView && typeof authView.resolveConsoleVisibility === "function" && typeof authView.applyConsoleVisibility === "function") {
-      const visibility = authView.resolveConsoleVisibility(state.authRequired, state.authRole)
-      authView.applyConsoleVisibility(
-        {
-          member: memberLink,
-          reviewer: reviewerLink,
-          admin: adminLink,
-          full: fullLink,
-        },
-        visibility,
-      )
-      return
-    }
     const hide = (node, value) => {
       if (!node) return
       node.classList.toggle("hidden", Boolean(value))
     }
+
+    if (!state.authResolved) {
+      hide(memberLink, true)
+      hide(reviewerLink, true)
+      hide(adminLink, true)
+      hide(fullLink, true)
+      return
+    }
+
+    // Public/no-auth market should only expose member console entry.
     if (!state.authRequired) {
       hide(memberLink, false)
       hide(reviewerLink, true)
@@ -1611,6 +2467,7 @@
       hide(fullLink, true)
       return
     }
+
     const role = String(state.authRole || "member").trim().toLowerCase()
     if (role === "admin") {
       hide(memberLink, false)
@@ -1641,12 +2498,13 @@
   async function initAuth() {
     const response = await api("/api/auth-info")
     state.authRequired = Boolean(response.data.auth_required)
+    state.allowAnonymousMember = Boolean(response.data.allow_anonymous_member)
+    state.authResolved = true
     state.availableRoles = Array.isArray(response.data.available_roles) ? response.data.available_roles : []
     applyAuthOptions(state.availableRoles)
     if (!state.authRequired) {
       state.token = "no-auth"
       state.authRole = "member"
-      state.memberUserId = String(byId("marketAuthUserId")?.value || "webui-user").trim() || "webui-user"
     }
     updateAuthUi()
     await refreshCapabilities()
@@ -1654,11 +2512,8 @@
 
   async function login() {
     const role = fixedAuthRole()
-    const password = byId("marketAuthPassword").value
+    const password = String(byId("marketAuthPassword")?.value || "")
     const body = { role, password }
-    if (role === "member") {
-      body.user_id = String(byId("marketAuthUserId")?.value || "webui-user").trim() || "webui-user"
-    }
     if (role === "reviewer") {
       body.reviewer_id = String(byId("marketAuthReviewerId")?.value || "").trim()
       body.reviewer_device_key = String(byId("marketAuthReviewerDeviceKey")?.value || "").trim()
@@ -1676,16 +2531,16 @@
       return
     }
     state.token = String(response.data.token || "")
+    state.authResolved = true
     state.authRole = String(response.data.role || role)
-    if (state.authRole === "member") {
-      state.memberUserId = String(response.data.user_id || body.user_id || state.memberUserId || "webui-user").trim() || "webui-user"
-    }
     state.availableRoles = Array.isArray(response.data.available_roles)
       ? response.data.available_roles
       : state.availableRoles
+    state.memberInstallationsRequested = false
     applyAuthOptions(state.availableRoles)
     updateAuthUi()
     await refreshCapabilities()
+    maybeLoadDetailInstallations()
     if (hasCapability("profile_pack.catalog.read")) {
       await listCatalog()
     }
@@ -1700,7 +2555,7 @@
 
   function marketActor() {
     return {
-      user_id: String(state.memberUserId || "webui-user").trim() || "webui-user",
+      user_id: "webui-user",
       session_id: "market-session",
     }
   }
@@ -1740,38 +2595,62 @@
   }
 
   function readMarketInstallOptions() {
-    return {
+    const helper = profilePackMarketHelpers()
+    const input = {
       preflight: Boolean(byId("marketInstallPreflight") && byId("marketInstallPreflight").checked),
-      force_reinstall: Boolean(byId("marketInstallForceReinstall") && byId("marketInstallForceReinstall").checked),
-      source_preference: String(byId("marketInstallSourcePreference")?.value || "auto").trim() || "auto",
+      forceReinstall: Boolean(byId("marketInstallForceReinstall") && byId("marketInstallForceReinstall").checked),
+      sourcePreference: String(byId("marketInstallSourcePreference")?.value || "auto").trim() || "auto",
+      selectedSections: readSelectedInstallSections(),
+    }
+    if (helper && typeof helper.buildInstallOptions === "function") {
+      return helper.buildInstallOptions(input)
+    }
+    return {
+      preflight: Boolean(input.preflight),
+      force_reinstall: Boolean(input.forceReinstall),
+      source_preference: String(input.sourcePreference || "auto").trim() || "auto",
+      selected_sections: normalizeUniqueStringList(input.selectedSections),
     }
   }
 
   function readMarketUploadOptions() {
-    return {
-      scan_mode: String(byId("marketUploadScanMode")?.value || "balanced").trim() || "balanced",
+    const helper = profilePackMarketHelpers()
+    const input = {
+      scanMode: String(byId("marketUploadScanMode")?.value || "balanced").trim() || "balanced",
       visibility: String(byId("marketUploadVisibility")?.value || "community").trim() || "community",
-      replace_existing: Boolean(byId("marketUploadReplaceExisting") && byId("marketUploadReplaceExisting").checked),
+      replaceExisting: Boolean(byId("marketUploadReplaceExisting") && byId("marketUploadReplaceExisting").checked),
+    }
+    if (helper && typeof helper.buildUploadOptions === "function") {
+      return helper.buildUploadOptions(input)
+    }
+    return {
+      scan_mode: input.scanMode,
+      visibility: input.visibility,
+      replace_existing: Boolean(input.replaceExisting),
     }
   }
 
   function readMarketSubmitOptions() {
+    const helper = profilePackMarketHelpers()
+    const input = {
+      packType: String(byId("marketSubmitPackType")?.value || "bot_profile_pack").trim() || "bot_profile_pack",
+      selectedSections: String(byId("marketSubmitSelectedSections")?.value || ""),
+      redactionMode: String(byId("marketSubmitRedactionMode")?.value || "exclude_secrets").trim() || "exclude_secrets",
+      replaceExisting: Boolean(byId("marketSubmitReplaceExisting") && byId("marketSubmitReplaceExisting").checked),
+    }
+    if (helper && typeof helper.buildSubmitOptions === "function") {
+      return helper.buildSubmitOptions(input)
+    }
     return {
-      pack_type: String(byId("marketSubmitPackType")?.value || "bot_profile_pack").trim() || "bot_profile_pack",
-      selected_sections: normalizeList(byId("marketSubmitSelectedSections")?.value || ""),
-      redaction_mode: String(byId("marketSubmitRedactionMode")?.value || "exclude_secrets").trim() || "exclude_secrets",
-      replace_existing: Boolean(
-        byId("marketSubmitReplaceExisting") && byId("marketSubmitReplaceExisting").checked
-      ),
+      pack_type: input.packType,
+      selected_sections: normalizeList(input.selectedSections),
+      redaction_mode: input.redactionMode,
+      replace_existing: Boolean(input.replaceExisting),
     }
   }
 
   function setMarketInstallationsState(status, message) {
-    setCollectionState("marketInstallationsState", status, message)
-  }
-
-  function setCollectionState(nodeId, status, message) {
-    const node = byId(nodeId)
+    const node = byId("marketInstallationsState")
     if (!node) return
     node.classList.remove("is-neutral", "is-warning", "is-danger", "is-success")
     if (status === "loading" || status === "warning") node.classList.add("is-warning")
@@ -1779,45 +2658,6 @@
     else if (status === "success") node.classList.add("is-success")
     else node.classList.add("is-neutral")
     node.textContent = message
-  }
-
-  function setMarketTemplateSubmissionsState(status, message) {
-    setCollectionState("marketSubmissionsState", status, message)
-  }
-
-  function setMarketProfilePackSubmissionsState(status, message) {
-    setCollectionState("marketProfilePackSubmissionsState", status, message)
-  }
-
-  function selectedProfilePackSubmissionId() {
-    const selected = String(state.selectedProfilePackSubmissionId || "").trim()
-    if (selected) return selected
-    const first = Array.isArray(state.memberProfilePackSubmissions) ? state.memberProfilePackSubmissions[0] : null
-    return String((first && (first.submission_id || first.id)) || "").trim()
-  }
-
-  function syncMarketProfilePackSubmissionActions() {
-    const button = byId("btnMarketDownloadProfilePackSubmission")
-    if (!button) return
-    const required = "member.profile_pack.submissions.export.download"
-    const allowed = hasCapability(required)
-    const submissionId = selectedProfilePackSubmissionId()
-    const enabled = allowed && Boolean(submissionId)
-    button.disabled = !enabled
-    button.setAttribute("aria-disabled", enabled ? "false" : "true")
-    if (!allowed) {
-      button.title = i18nFormat(
-        "capability.locked_hint",
-        "Requires capability: {capability}",
-        { capability: required },
-      )
-      return
-    }
-    if (!submissionId) {
-      button.title = i18nMessage("moderation.no_selection", "No submission selected.")
-      return
-    }
-    button.removeAttribute("title")
   }
 
   function updateSelectedFileName(inputId, outputId, emptyKey, emptyFallback) {
@@ -1867,6 +2707,70 @@
     syncFileName()
   }
 
+  function setMarketInstallationActionBusy(button, busy) {
+    if (!button) return
+    button.disabled = Boolean(busy)
+    button.setAttribute("aria-busy", busy ? "true" : "false")
+  }
+
+  function focusMarketInstallation(item) {
+    const templateId = String(item && item.template_id || "").trim()
+    const templateNode = byId("marketTemplateId")
+    if (templateNode) {
+      templateNode.value = templateId
+    }
+  }
+
+  async function reinstallMarketInstallation(item, button) {
+    const templateId = String(item && item.template_id || "").trim()
+    if (!templateId) return
+    const actor = marketActor()
+    const installOptions = item && typeof item.install_options === "object"
+      ? { ...item.install_options, force_reinstall: true }
+      : { force_reinstall: true }
+    setMarketInstallationActionBusy(button, true)
+    const response = await api("/api/templates/install", {
+      method: "POST",
+      body: {
+        ...actor,
+        template_id: templateId,
+        install_options: installOptions,
+      },
+    })
+    renderLog("market_template_install", response)
+    updateSummary(response.data.ok ? apiData(response) : {
+      status: "error",
+      message: response.data.message || "request_failed",
+    })
+    if (response.data.ok) {
+      await loadMarketInstallations({ refresh: true })
+    }
+    setMarketInstallationActionBusy(button, false)
+  }
+
+  async function uninstallMarketInstallation(item, button) {
+    const templateId = String(item && item.template_id || "").trim()
+    if (!templateId) return
+    const actor = marketActor()
+    setMarketInstallationActionBusy(button, true)
+    const response = await api("/api/member/installations/uninstall", {
+      method: "POST",
+      body: {
+        user_id: actor.user_id,
+        template_id: templateId,
+      },
+    })
+    renderLog("member_installations_uninstall", response)
+    updateSummary(response.data.ok ? apiData(response) : {
+      status: "error",
+      message: response.data.message || "request_failed",
+    })
+    if (response.data.ok) {
+      await loadMarketInstallations({ refresh: true })
+    }
+    setMarketInstallationActionBusy(button, false)
+  }
+
   function renderMarketInstallations(rows) {
     const root = byId("marketInstallationsList")
     if (!root) return
@@ -1877,12 +2781,15 @@
       return
     }
     items.forEach((item) => {
-      const button = document.createElement("button")
-      button.type = "button"
-      button.className = "member-install-item"
+      const row = document.createElement("article")
+      row.className = "member-install-item"
+      row.tabIndex = 0
+      row.setAttribute("role", "button")
       const title = document.createElement("strong")
       title.textContent = String(item.template_id || "-")
-      button.appendChild(title)
+      const body = document.createElement("div")
+      body.className = "member-install-item-body"
+      body.appendChild(title)
       const version = String(item.version || "-")
       const risk = enumLabel("risk", String(item.risk_level || "unknown"))
       const installedAt = String(item.installed_at || "-")
@@ -1896,18 +2803,51 @@
           installed_at: installedAt,
         },
       )
-      button.appendChild(meta)
-      button.addEventListener("click", () => {
-        const templateNode = byId("marketTemplateId")
-        if (templateNode) {
-          templateNode.value = String(item.template_id || "")
-        }
+      body.appendChild(meta)
+      row.appendChild(body)
+
+      const actions = document.createElement("div")
+      actions.className = "member-install-actions"
+
+      const reinstallButton = document.createElement("button")
+      reinstallButton.type = "button"
+      reinstallButton.className = "btn-ghost member-install-action"
+      reinstallButton.textContent = i18nMessage("member.installations.reinstall", "Reinstall")
+      reinstallButton.disabled = false
+      reinstallButton.setAttribute("data-member-install-action", "reinstall")
+      reinstallButton.addEventListener("click", (event) => {
+        event.stopPropagation()
+        void reinstallMarketInstallation(item, reinstallButton)
       })
-      root.appendChild(button)
+      actions.appendChild(reinstallButton)
+
+      const uninstallButton = document.createElement("button")
+      uninstallButton.type = "button"
+      uninstallButton.className = "btn-ghost member-install-action"
+      uninstallButton.textContent = i18nMessage("member.installations.uninstall", "Uninstall")
+      uninstallButton.disabled = false
+      uninstallButton.setAttribute("data-member-install-action", "uninstall")
+      uninstallButton.addEventListener("click", (event) => {
+        event.stopPropagation()
+        void uninstallMarketInstallation(item, uninstallButton)
+      })
+      actions.appendChild(uninstallButton)
+
+      row.appendChild(actions)
+      row.addEventListener("click", () => {
+        focusMarketInstallation(item)
+      })
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return
+        event.preventDefault()
+        focusMarketInstallation(item)
+      })
+      root.appendChild(row)
     })
   }
 
   async function loadMarketInstallations(options = {}) {
+    state.memberInstallationsRequested = true
     if (!hasCapability("member.installations.read")) {
       setMarketInstallationsState(
         "warning",
@@ -1952,304 +2892,14 @@
     )
   }
 
-  function renderMemberSubmissionList({
-    rootId,
-    rows,
-    emptyKey,
-    emptyFallback,
-    titleBuilder,
-    metaBuilder,
-    onSelect,
-  }) {
-    const root = byId(rootId)
-    if (!root) return
-    root.innerHTML = ""
-    const items = Array.isArray(rows) ? rows : []
-    if (!items.length) {
-      root.textContent = i18nMessage(emptyKey, emptyFallback)
-      return
-    }
-    items.forEach((item) => {
-      const button = document.createElement("button")
-      button.type = "button"
-      button.className = "member-task-item"
-      const title = document.createElement("strong")
-      title.textContent = titleBuilder(item)
-      button.appendChild(title)
-      const meta = document.createElement("span")
-      meta.textContent = metaBuilder(item)
-      button.appendChild(meta)
-      button.addEventListener("click", () => {
-        onSelect(item)
-      })
-      root.appendChild(button)
-    })
-  }
-
-  function renderMarketTemplateSubmissions(rows) {
-    renderMemberSubmissionList({
-      rootId: "marketSubmissionsList",
-      rows,
-      emptyKey: "submissions.empty_unfiltered",
-      emptyFallback: "No submissions are available yet.",
-      titleBuilder: (item) => {
-        const templateId = String(item.template_id || "-").trim() || "-"
-        const version = String(item.version || "").trim()
-        return version ? `${templateId}@${version}` : templateId
-      },
-      metaBuilder: (item) => {
-        const submissionId = String(item.submission_id || item.id || "-").trim() || "-"
-        const status = enumLabel("status", String(item.status || "unknown"))
-        const risk = enumLabel("risk", String(item.risk_level || "unknown"))
-        return `${submissionId} · ${status} · ${risk}`
-      },
-      onSelect: (item) => {
-        const templateId = String(item.template_id || "").trim()
-        const submissionId = String(item.submission_id || item.id || "").trim()
-        if (templateId) {
-          const node = byId("marketTemplateId")
-          if (node) node.value = templateId
-        }
-        if (submissionId) {
-          void loadMarketTemplateSubmissionDetail(submissionId)
-        }
-      },
-    })
-  }
-
-  function renderMarketProfilePackSubmissions(rows) {
-    renderMemberSubmissionList({
-      rootId: "marketProfilePackSubmissionsList",
-      rows,
-      emptyKey: "profile_pack.market.submissions_empty_unfiltered",
-      emptyFallback: "No profile-pack submissions are available yet.",
-      titleBuilder: (item) => {
-        const packId = String(item.pack_id || "-").trim() || "-"
-        const packType = String(item.pack_type || "").trim()
-        return packType ? `${packId} (${enumLabel("pack_type", packType)})` : packId
-      },
-      metaBuilder: (item) => {
-        const submissionId = String(item.submission_id || item.id || "-").trim() || "-"
-        const status = enumLabel("status", String(item.status || "unknown"))
-        const risk = enumLabel("risk", String(item.risk_level || "unknown"))
-        return `${submissionId} · ${status} · ${risk}`
-      },
-      onSelect: (item) => {
-        const submissionId = String(item.submission_id || item.id || "").trim()
-        state.selectedProfilePackSubmissionId = submissionId
-        syncMarketProfilePackSubmissionActions()
-        if (submissionId) {
-          void loadMarketProfilePackSubmissionDetail(submissionId)
-        }
-      },
-    })
-  }
-
-  async function loadMarketTemplateSubmissionDetail(submissionId) {
-    const actor = marketActor()
-    const sid = String(submissionId || "").trim()
-    if (!sid) return
-    const response = await api(`/api/member/submissions/detail${queryString({ user_id: actor.user_id, submission_id: sid })}`)
-    renderLog("member_submission_detail_market", response)
-    if (!response.data.ok) {
-      updateSummary({ status: "error", message: response.data.message || "request_failed" })
-      return response
-    }
-    const payload = apiData(response)
-    const templateId = String(payload.template_id || "").trim()
-    if (templateId) {
-      const node = byId("marketTemplateId")
-      if (node) node.value = templateId
-    }
-    updateSummary(payload)
-    return response
-  }
-
-  async function loadMarketProfilePackSubmissionDetail(submissionId) {
-    const actor = marketActor()
-    const sid = String(submissionId || "").trim()
-    if (!sid) return
-    const response = await api(
-      `/api/member/profile-pack/submissions/detail${queryString({ user_id: actor.user_id, submission_id: sid })}`,
-    )
-    renderLog("member_profile_pack_submission_detail_market", response)
-    if (!response.data.ok) {
-      updateSummary({ status: "error", message: response.data.message || "request_failed" })
-      return response
-    }
-    const payload = apiData(response)
-    const packId = String(payload.pack_id || "").trim()
-    const artifactId = String(payload.artifact_id || "").trim()
-    if (packId) {
-      const packNode = byId("marketPackId")
-      if (packNode) packNode.value = packId
-    }
-    if (artifactId) {
-      const artifactNode = byId("marketSubmitArtifactId")
-      if (artifactNode) artifactNode.value = artifactId
-    }
-    updateSummary(payload)
-    return response
-  }
-
-  async function listMarketTemplateSubmissions() {
-    if (!hasCapability("member.submissions.read")) {
-      setMarketTemplateSubmissionsState(
-        "warning",
-        i18nFormat(
-          "capability.locked_hint",
-          "Requires capability: {capability}",
-          { capability: "member.submissions.read" },
-        ),
-      )
-      return
-    }
-    const actor = marketActor()
-    setMarketTemplateSubmissionsState(
-      "loading",
-      i18nMessage("submissions.loading", "Loading submissions..."),
-    )
-    const response = await api(`/api/member/submissions${queryString({ user_id: actor.user_id })}`)
-    renderLog("member_list_submissions_market", response)
-    if (!response.data.ok) {
-      setMarketTemplateSubmissionsState(
-        "error",
-        i18nFormat("submissions.error", "Failed to load submissions: {message}", {
-          message: String(response.data.message || "request_failed"),
-        }),
-      )
-      return response
-    }
-    const rows = Array.isArray(apiData(response).submissions) ? apiData(response).submissions : []
-    state.memberTemplateSubmissions = rows
-    renderMarketTemplateSubmissions(rows)
-    setMarketTemplateSubmissionsState(
-      rows.length ? "success" : "neutral",
-      rows.length
-        ? i18nFormat("market.submissions.ready", "Submissions: {count}", { count: rows.length })
-        : i18nMessage("submissions.empty_unfiltered", "No submissions are available yet."),
-    )
-    return response
-  }
-
-  async function listMarketProfilePackSubmissions() {
-    if (!hasCapability("member.profile_pack.submissions.read")) {
-      setMarketProfilePackSubmissionsState(
-        "warning",
-        i18nFormat(
-          "capability.locked_hint",
-          "Requires capability: {capability}",
-          { capability: "member.profile_pack.submissions.read" },
-        ),
-      )
-      return
-    }
-    const actor = marketActor()
-    setMarketProfilePackSubmissionsState(
-      "loading",
-      i18nMessage("profile_pack.market.submissions_loading", "Loading profile-pack submissions..."),
-    )
-    const response = await api(`/api/member/profile-pack/submissions${queryString({ user_id: actor.user_id })}`)
-    renderLog("member_list_profile_pack_submissions_market", response)
-    if (!response.data.ok) {
-      setMarketProfilePackSubmissionsState(
-        "error",
-        i18nFormat("profile_pack.market.submissions_error", "Failed to load profile-pack submissions: {message}", {
-          message: String(response.data.message || "request_failed"),
-        }),
-      )
-      return response
-    }
-    const rows = Array.isArray(apiData(response).submissions) ? apiData(response).submissions : []
-    state.memberProfilePackSubmissions = rows
-    const selectedId = selectedProfilePackSubmissionId()
-    const selectedExists = rows.some((item) => String(item.submission_id || item.id || "").trim() === selectedId)
-    state.selectedProfilePackSubmissionId = selectedExists
-      ? selectedId
-      : String((rows[0] && (rows[0].submission_id || rows[0].id)) || "").trim()
-    renderMarketProfilePackSubmissions(rows)
-    syncMarketProfilePackSubmissionActions()
-    setMarketProfilePackSubmissionsState(
-      rows.length ? "success" : "neutral",
-      rows.length
-        ? i18nFormat("market.profile_pack_submissions.ready", "Profile-pack submissions: {count}", { count: rows.length })
-        : i18nMessage("profile_pack.market.submissions_empty_unfiltered", "No profile-pack submissions are available yet."),
-    )
-    return response
-  }
-
-  async function downloadMarketProfilePackSubmissionExport() {
-    if (!hasCapability("member.profile_pack.submissions.export.download")) {
-      updateSummary({
-        status: "permission_denied",
-        message: i18nFormat(
-          "capability.locked_hint",
-          "Requires capability: {capability}",
-          { capability: "member.profile_pack.submissions.export.download" },
-        ),
-      })
-      syncMarketProfilePackSubmissionActions()
-      return
-    }
-    const submissionId = selectedProfilePackSubmissionId()
-    if (!submissionId) {
-      updateSummary({
-        status: "error",
-        message: i18nMessage("moderation.no_selection", "No submission selected."),
-      })
-      syncMarketProfilePackSubmissionActions()
-      return
-    }
-    const actor = marketActor()
-    const response = await fetch(
-      `/api/member/profile-pack/submissions/export/download${queryString({
-        user_id: actor.user_id,
-        submission_id: submissionId,
-      })}`,
-      {
-        method: "GET",
-        headers: state.token && state.token !== "no-auth" ? { Authorization: `Bearer ${state.token}` } : {},
-      },
-    )
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ ok: false, message: "download_failed" }))
-      renderLog("member_profile_pack_submission_download_market", { status: response.status, data })
-      updateSummary({
-        status: "download_failed",
-        message: String((data && data.message) || "download_failed"),
-      })
-      return
-    }
-    const blob = await response.blob()
-    const disposition = response.headers.get("Content-Disposition") || ""
-    const match = disposition.match(/filename=\"?([^"]+)\"?$/i)
-    const filename = match ? match[1] : `${submissionId}.zip`
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-    const payload = {
-      status: "downloaded",
-      submission_id: submissionId,
-      filename,
-      size_bytes: blob.size,
-    }
-    renderLog("member_profile_pack_submission_download_market", { status: response.status, data: payload })
-    updateSummary(payload)
-  }
-
   function catalogFilters() {
     return {
-      pack_id: byId("marketPackFilter").value,
-      pack_type: byId("marketPackTypeFilter").value,
-      risk_level: byId("marketRiskFilter").value,
-      featured: byId("marketFeaturedFilter").value,
-      review_label: byId("marketReviewLabelFilter").value,
-      warning_flag: byId("marketWarningFlagFilter").value,
+      pack_id: String(byId("marketPackFilter")?.value || ""),
+      pack_type: String(byId("marketPackTypeFilter")?.value || ""),
+      risk_level: String(byId("marketRiskFilter")?.value || ""),
+      featured: String(byId("marketFeaturedFilter")?.value || ""),
+      review_label: String(byId("marketReviewLabelFilter")?.value || ""),
+      warning_flag: String(byId("marketWarningFlagFilter")?.value || ""),
     }
   }
 
@@ -2284,9 +2934,9 @@
   }
 
   function catalogCompareQuery() {
-    const sections = normalizeList(byId("marketCompareSections").value)
+    const sections = normalizeList(byId("marketCompareSections")?.value || "")
     return {
-      pack_id: byId("marketPackId").value,
+      pack_id: String(byId("marketPackId")?.value || ""),
       selected_sections: sections.join(","),
     }
   }
@@ -2349,10 +2999,6 @@
   }
 
   function parseIsoDate(value) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.parseIsoDate === "function") {
-      return helper.parseIsoDate(value)
-    }
     const text = String(value || "").trim()
     if (!text) return 0
     const time = Date.parse(text)
@@ -2360,18 +3006,10 @@
   }
 
   function listLength(value) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.listLength === "function") {
-      return helper.listLength(value)
-    }
     return Array.isArray(value) ? value.length : 0
   }
 
   function packRiskScore(risk) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.packRiskScore === "function") {
-      return helper.packRiskScore(risk)
-    }
     const text = String(risk || "").trim().toLowerCase()
     if (text === "low") return 20
     if (text === "medium") return 12
@@ -2380,10 +3018,6 @@
   }
 
   function packCompatibilityScore(item) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.packCompatibilityScore === "function") {
-      return helper.packCompatibilityScore(item)
-    }
     const text = String((item && item.compatibility) || "").trim().toLowerCase()
     if (text === "compatible" || text === "ok") return 14
     if (text === "degraded") return 8
@@ -2392,10 +3026,6 @@
   }
 
   function catalogRankScore(item) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.catalogRankScore === "function") {
-      return helper.catalogRankScore(item)
-    }
     if (!item || typeof item !== "object") return 0
     const labels = listLength(item.review_labels)
     const warnings = listLength(item.warning_flags)
@@ -2415,10 +3045,6 @@
   }
 
   function catalogMetrics(rows) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.catalogMetrics === "function") {
-      return helper.catalogMetrics(rows)
-    }
     const items = Array.isArray(rows) ? rows : []
     let featured = 0
     let highRisk = 0
@@ -2445,10 +3071,6 @@
   }
 
   function catalogTrendScore(item) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.catalogTrendScore === "function") {
-      return helper.catalogTrendScore(item)
-    }
     if (!item || typeof item !== "object") return 0
     const explicit = Number(item.trend_score)
     if (Number.isFinite(explicit)) {
@@ -2471,44 +3093,41 @@
         botProfile: toSafeInt(metricOverride.botProfile),
       }
       : catalogMetrics(rows)
-    const viewHelper = marketCatalogViewHelpers()
-    const cards = viewHelper && typeof viewHelper.buildMetricCards === "function"
-      ? viewHelper.buildMetricCards(metric)
-      : [
-        {
-          key: "market.metric.total",
-          fallback: "Total Packs",
-          value: String(metric.total),
-        },
-        {
-          key: "market.metric.featured",
-          fallback: "Featured",
-          value: String(metric.featured),
-          tone: "success",
-        },
-        {
-          key: "market.metric.safe",
-          fallback: "Low Risk",
-          value: String(metric.safe),
-          tone: "success",
-        },
-        {
-          key: "market.metric.high_risk",
-          fallback: "High Risk",
-          value: String(metric.highRisk),
-          tone: metric.highRisk > 0 ? "danger" : "",
-        },
-        {
-          key: "market.metric.extension",
-          fallback: "Extension Pack",
-          value: String(metric.extension),
-        },
-        {
-          key: "market.metric.bot_profile",
-          fallback: "Bot Profile Pack",
-          value: String(metric.botProfile),
-        },
-      ]
+    const cards = [
+      {
+        key: "market.metric.total",
+        fallback: "Total Packs",
+        value: String(metric.total),
+      },
+      {
+        key: "market.metric.featured",
+        fallback: "Featured",
+        value: String(metric.featured),
+        tone: "success",
+      },
+      {
+        key: "market.metric.safe",
+        fallback: "Low Risk",
+        value: String(metric.safe),
+        tone: "success",
+      },
+      {
+        key: "market.metric.high_risk",
+        fallback: "High Risk",
+        value: String(metric.highRisk),
+        tone: metric.highRisk > 0 ? "danger" : "",
+      },
+      {
+        key: "market.metric.extension",
+        fallback: "Extension Pack",
+        value: String(metric.extension),
+      },
+      {
+        key: "market.metric.bot_profile",
+        fallback: "Bot Profile Pack",
+        value: String(metric.botProfile),
+      },
+    ]
     cards.forEach((entry) => {
       const card = document.createElement("div")
       card.className = "market-metric-card"
@@ -2527,10 +3146,6 @@
   }
 
   function sortedByTrend(rows) {
-    const helper = marketCatalogInsightsHelpers()
-    if (helper && typeof helper.sortedByTrend === "function") {
-      return helper.sortedByTrend(rows)
-    }
     const items = Array.isArray(rows) ? rows.slice() : []
     return items.sort((left, right) => {
       const scoreDiff = catalogRankScore(right) - catalogRankScore(left)
@@ -2557,16 +3172,11 @@
     const root = byId("marketFeaturedSpotlight")
     if (!root) return
     root.innerHTML = ""
-    const viewHelper = marketCatalogViewHelpers()
-    const candidate = viewHelper && typeof viewHelper.selectFeaturedCandidate === "function"
-      ? viewHelper.selectFeaturedCandidate(rows, featuredOverride, { sortedByTrend })
-      : (() => {
-        const sorted = sortedByTrend(rows)
-        const featuredRows = sorted.filter((item) => Boolean(item && item.featured))
-        return (featuredOverride && typeof featuredOverride === "object")
-          ? featuredOverride
-          : (featuredRows[0] || sorted[0] || null)
-      })()
+    const sorted = sortedByTrend(rows)
+    const featuredRows = sorted.filter((item) => Boolean(item && item.featured))
+    const candidate = (featuredOverride && typeof featuredOverride === "object")
+      ? featuredOverride
+      : (featuredRows[0] || sorted[0] || null)
     if (!candidate) {
       setInsightState(
         "marketFeaturedState",
@@ -2624,12 +3234,9 @@
     const root = byId("marketTrendingRack")
     if (!root) return
     root.innerHTML = ""
-    const viewHelper = marketCatalogViewHelpers()
-    const ranked = viewHelper && typeof viewHelper.selectTrendingRows === "function"
-      ? viewHelper.selectTrendingRows(rows, trendingOverride, { sortedByTrend, limit: 6 })
-      : (Array.isArray(trendingOverride) && trendingOverride.length
-        ? trendingOverride.slice(0, 6)
-        : sortedByTrend(rows).slice(0, 6))
+    const ranked = Array.isArray(trendingOverride) && trendingOverride.length
+      ? trendingOverride.slice(0, 6)
+      : sortedByTrend(rows).slice(0, 6)
     if (!ranked.length) {
       setInsightState(
         "marketTrendingState",
@@ -2672,6 +3279,7 @@
     renderCatalogMetrics(rows, normalized ? normalized.metrics : null)
     renderFeaturedSpotlight(rows, normalized ? normalized.featured : null)
     renderTrendingRack(rows, normalized ? normalized.trending : null)
+    renderEntryFeaturedPreview(rows, normalized ? normalized.metrics : null, normalized ? normalized.featured : null)
   }
 
   function resetCatalogInsights() {
@@ -2691,15 +3299,108 @@
     if (featured) featured.innerHTML = ""
     const trending = byId("marketTrendingRack")
     if (trending) trending.innerHTML = ""
+    renderEntryFeaturedPreview([], null, null)
+  }
+
+  function renderEntryFeaturedPreview(rows, metricOverride = null, featuredOverride = null) {
+    const totalValue = byId("marketEntryStatTotalValue")
+    const featuredValue = byId("marketEntryStatFeaturedValue")
+    const titleNode = byId("marketEntryFeaturedTitle")
+    const summaryNode = byId("marketEntryFeaturedSummary")
+    const metaNode = byId("marketEntryFeaturedMeta")
+    const pillRoot = byId("marketEntryFeaturedPills")
+    const jumpButton = byId("btnMarketJumpToFeaturedDetail")
+    const metric = metricOverride && typeof metricOverride === "object"
+      ? metricOverride
+      : catalogMetrics(rows)
+    if (totalValue) totalValue.textContent = String(toSafeInt(metric.total))
+    if (featuredValue) featuredValue.textContent = String(toSafeInt(metric.featured))
+
+    const selected = selectedCatalogRow()
+    const resolvedPackId = selected
+      ? String(selected.pack_id || "").trim()
+      : resolveDefaultCatalogSelection(rows)
+    const candidate = selected
+      || (featuredOverride && typeof featuredOverride === "object" ? featuredOverride : null)
+      || findCatalogItemByPackId(resolvedPackId, rows)
+
+    if (!titleNode || !summaryNode || !metaNode || !pillRoot || !jumpButton) return
+
+    pillRoot.innerHTML = ""
+    if (!candidate) {
+      titleNode.textContent = i18nMessage(
+        "market.entry.default_detail_loading_title",
+        "Loading default detail baseline...",
+      )
+      summaryNode.textContent = i18nMessage(
+        "market.entry.default_detail_loading_summary",
+        "Catalog insights will pin a default detail candidate here.",
+      )
+      metaNode.textContent = ""
+      jumpButton.disabled = true
+      jumpButton.setAttribute("aria-disabled", "true")
+      jumpButton.dataset.packId = ""
+      return
+    }
+
+    const candidatePackId = String(candidate.pack_id || "").trim()
+    titleNode.textContent = resolveCatalogPackTitle(candidate) || candidatePackId || "-"
+    summaryNode.textContent = cardDescription(candidate)
+      || localizedPackFeaturedNote(candidatePackId, "")
+      || i18nMessage("market.card.description_fallback", "No description provided.")
+    metaNode.textContent = [
+      resolveCatalogPackSubtitle(candidate),
+      i18nFormat("market.featured.risk_and_compat", "risk={risk} · compatibility={compatibility}", {
+        risk: enumLabel("risk", String(candidate.risk_level || "unknown")),
+        compatibility: enumLabel("compatibility", String(candidate.compatibility || "unknown")),
+      }),
+    ].filter(Boolean).join(" · ")
+
+    if (candidate.featured) {
+      appendPill(
+        pillRoot,
+        i18nMessage("market.badge.featured", "featured"),
+        "success",
+      )
+    }
+    normalizeStringArray(candidate.review_labels).slice(0, 2).forEach((label) => {
+      appendPill(pillRoot, enumLabel("review_label", label), pillTone(label))
+    })
+    normalizeStringArray(candidate.warning_flags).slice(0, 2).forEach((flag) => {
+      appendPill(pillRoot, enumLabel("warning_flag", flag), pillTone(flag))
+    })
+    if (!pillRoot.childNodes.length) {
+      appendPill(
+        pillRoot,
+        enumLabel("compatibility", String(candidate.compatibility || "unknown")),
+        "neutral",
+      )
+    }
+
+    jumpButton.disabled = !candidatePackId
+    jumpButton.setAttribute("aria-disabled", candidatePackId ? "false" : "true")
+    jumpButton.dataset.packId = candidatePackId
+  }
+
+  function scrollMarketDetailIntoView() {
+    const area = byId("marketDetailArea")
+    if (area && typeof area.scrollIntoView === "function") {
+      area.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
   }
 
   function selectCatalogItem(item) {
     const packId = String((item && item.pack_id) || "").trim()
     if (!packId) return
+    if (!isDetailPage()) {
+      state.selectedPackId = packId
+      navigateToDetail(packId)
+      return
+    }
     state.selectedPackId = packId
-    byId("marketPackId").value = packId
     setMarketDetailExpanded(true)
     resetCompareView()
+    renderSelectedDetailShell(item)
     updateSummary(item)
     updateCatalogTable(state.catalog)
     updateCatalogDetailActions()
@@ -2707,10 +3408,6 @@
   }
 
   function resolvedUpdatedAt(item) {
-    const viewHelper = marketCatalogViewHelpers()
-    if (viewHelper && typeof viewHelper.resolveUpdatedAt === "function") {
-      return viewHelper.resolveUpdatedAt(item, state.uiLocale || "en-US")
-    }
     const raw = String((item && (item.featured_at || item.published_at)) || "").trim()
     if (!raw) return "-"
     const time = Date.parse(raw)
@@ -2727,10 +3424,6 @@
   }
 
   function engagementValue(item, key) {
-    const viewHelper = marketCatalogViewHelpers()
-    if (viewHelper && typeof viewHelper.engagementValue === "function") {
-      return viewHelper.engagementValue(item, key)
-    }
     if (!item || typeof item !== "object") return 0
     const raw = Number(item.engagement && item.engagement[key] || 0)
     if (!Number.isFinite(raw)) return 0
@@ -2745,13 +3438,6 @@
   }
 
   function cardSignalRows(item) {
-    const viewHelper = marketCatalogViewHelpers()
-    if (viewHelper && typeof viewHelper.buildCardSignalRows === "function") {
-      return viewHelper.buildCardSignalRows(item, {
-        i18nMessage,
-        enumLabel,
-      })
-    }
     const sections = Array.isArray(item && item.sections) ? item.sections.length : 0
     const labels = Array.isArray(item && item.review_labels) ? item.review_labels.length : 0
     const flags = Array.isArray(item && item.warning_flags) ? item.warning_flags.length : 0
@@ -2791,9 +3477,21 @@
       return
     }
     items.forEach((item) => {
-      const model = profilePackCardModel(item)
+      const contractHelper = marketCatalogContractHelpers()
+      const likeCount = catalogLikeCount(item)
+      const liked = isPackLiked(item && item.pack_id)
+      const contractModel = contractHelper && typeof contractHelper.buildPublicCatalogCard === "function"
+        ? contractHelper.buildPublicCatalogCard(item, { likeCount, liked })
+        : null
+      const model = contractModel || profilePackCardModel(item)
+      const displayedLikeCount = Number.isFinite(Number(model.likeCount))
+        ? Math.max(0, Math.trunc(Number(model.likeCount)))
+        : likeCount
+      const displayedLiked = Object.prototype.hasOwnProperty.call(model, "liked")
+        ? Boolean(model.liked)
+        : liked
       const card = document.createElement("article")
-      card.className = "template-card hf-like-card"
+      card.className = "template-card"
       card.tabIndex = 0
       if (model.id && model.id === state.selectedPackId) {
         card.classList.add("is-selected")
@@ -2821,13 +3519,27 @@
 
       const subtitle = document.createElement("p")
       subtitle.className = "template-card-subtitle"
-      subtitle.textContent = resolveCatalogPackSubtitle(item) || i18nMessage("market.card.subtitle_fallback", "profile pack")
+      subtitle.textContent = resolveCatalogPackSubtitle(item) || model.subtitle || i18nMessage("market.card.subtitle_fallback", "profile pack")
       card.appendChild(subtitle)
+
+      const packIdLine = document.createElement("p")
+      packIdLine.className = "template-card-pack-id"
+      packIdLine.textContent = String((item && item.pack_id) || "").trim() || "-"
+      card.appendChild(packIdLine)
 
       const desc = document.createElement("p")
       desc.className = "template-card-description"
-      desc.textContent = cardDescription(item) || i18nMessage("market.card.description_fallback", "No description provided.")
+      desc.textContent = model.summary || cardDescription(item) || i18nMessage("market.card.description_fallback", "No description provided.")
       card.appendChild(desc)
+
+      if (Array.isArray(model.badges) && model.badges.length) {
+        const badgeRow = document.createElement("div")
+        badgeRow.className = "pill-row"
+        model.badges.forEach((badge) => {
+          appendPill(badgeRow, enumLabel("review_label", badge), pillTone(badge))
+        })
+        card.appendChild(badgeRow)
+      }
 
       const signals = document.createElement("div")
       signals.className = "template-card-signals"
@@ -2846,36 +3558,28 @@
 
       const meta = document.createElement("div")
       meta.className = "template-card-meta-line"
-      const viewHelper = marketCatalogViewHelpers()
-      const metaEntries = viewHelper && typeof viewHelper.buildCardMetaEntries === "function"
-        ? viewHelper.buildCardMetaEntries(item, {
-          locale: state.uiLocale || "en-US",
-          resolveUpdatedAt: (entry) => resolvedUpdatedAt(entry),
-          engagementValue: (entry, key) => engagementValue(entry, key),
-          catalogRankScore,
-        })
-        : [
-          {
-            key: "market.card.updated",
-            fallback: "Updated {value}",
-            value: resolvedUpdatedAt(item),
-          },
-          {
-            key: "market.card.downloads",
-            fallback: "Installs {value}",
-            value: String(engagementValue(item, "installs")),
-          },
-          {
-            key: "market.card.trials",
-            fallback: "Trials {value}",
-            value: String(engagementValue(item, "trial_requests")),
-          },
-          {
-            key: "market.card.score",
-            fallback: "Score {value}",
-            value: String(catalogRankScore(item)),
-          },
-        ]
+      const metaEntries = [
+        {
+          key: "market.card.updated",
+          fallback: "Updated {value}",
+          value: resolvedUpdatedAt(item),
+        },
+        {
+          key: "market.card.downloads",
+          fallback: "Installs {value}",
+          value: String(engagementValue(item, "installs")),
+        },
+        {
+          key: "market.card.trials",
+          fallback: "Trials {value}",
+          value: String(engagementValue(item, "trial_requests")),
+        },
+        {
+          key: "market.card.score",
+          fallback: "Score {value}",
+          value: String(catalogRankScore(item)),
+        },
+      ]
       metaEntries.forEach((entry) => {
         const cell = document.createElement("span")
         cell.className = "template-card-meta-item"
@@ -2889,46 +3593,34 @@
       const useBtn = document.createElement("button")
       useBtn.type = "button"
       useBtn.className = "btn-ghost"
-      useBtn.textContent = i18nMessage("market.card.open", "Open")
+      useBtn.textContent = model.primaryAction && model.primaryAction.label
+        ? model.primaryAction.label
+        : i18nMessage("market.card.open", "Open")
       useBtn.addEventListener("click", (event) => {
         event.stopPropagation()
         selectCatalogItem(item)
       })
       actions.appendChild(useBtn)
-      const packageUrl = catalogPackageUrl(item)
-      if (packageUrl) {
-        const downloadBtn = document.createElement("button")
-        downloadBtn.type = "button"
-        downloadBtn.className = "btn-primary"
-        downloadBtn.textContent = i18nMessage("button.download_package", "Download Package")
-        downloadBtn.addEventListener("click", (event) => {
-          event.stopPropagation()
-          selectCatalogItem(item)
-          triggerCatalogDownload(item)
-        })
-        actions.appendChild(downloadBtn)
-      } else {
-        const compareBtn = document.createElement("button")
-        compareBtn.type = "button"
-        compareBtn.className = "btn-ghost"
-        compareBtn.textContent = i18nMessage("market.card.compare", "Compare")
-        if (!hasCapability("profile_pack.catalog.read")) {
-          compareBtn.disabled = true
-          compareBtn.classList.add("capability-blocked")
-          compareBtn.setAttribute("aria-disabled", "true")
-          compareBtn.title = i18nFormat(
-            "capability.locked_hint",
-            "Requires capability: {capability}",
-            { capability: "profile_pack.catalog.read" },
-          )
-        }
-        compareBtn.addEventListener("click", (event) => {
-          event.stopPropagation()
-          selectCatalogItem(item)
-          void compareCatalogPack()
-        })
-        actions.appendChild(compareBtn)
-      }
+
+      const likeButton = document.createElement("button")
+      likeButton.type = "button"
+      likeButton.className = "btn-ghost market-card-like-button"
+      likeButton.setAttribute("data-market-like-button", "true")
+      likeButton.setAttribute("aria-pressed", displayedLiked ? "true" : "false")
+      likeButton.addEventListener("click", (event) => {
+        event.stopPropagation()
+        toggleCatalogLike(item)
+      })
+      const likeLabel = document.createElement("span")
+      likeLabel.textContent = i18nMessage("market.card.like", "Like")
+      likeButton.appendChild(likeLabel)
+      const likeCountNode = document.createElement("span")
+      likeCountNode.className = "market-card-like-count"
+      likeCountNode.setAttribute("data-market-like-count", "true")
+      likeCountNode.textContent = String(displayedLikeCount)
+      likeButton.appendChild(likeCountNode)
+      actions.appendChild(likeButton)
+
       card.appendChild(actions)
 
       const onSelect = () => {
@@ -2973,10 +3665,6 @@
   }
 
   function resolveCompareChangeSummary(row) {
-    const helper = marketCompareHelpers()
-    if (helper && typeof helper.resolveCompareChangeSummary === "function") {
-      return helper.resolveCompareChangeSummary(row, { i18nMessage, i18nFormat })
-    }
     const filePath = String((row && row.file_path) || "").trim()
     if (filePath) return filePath
     const section = String((row && row.section) || "").trim()
@@ -3002,15 +3690,10 @@
 
   function compareSizeCell(row) {
     const td = document.createElement("td")
-    const helper = marketCompareHelpers()
-    if (helper && typeof helper.formatCompareSize === "function") {
-      td.textContent = helper.formatCompareSize(row, { i18nMessage, i18nFormat })
-      return td
-    }
     const bytesLabel = i18nMessage("market.compare.bytes", "bytes")
-    const beforeSize = Number(row && row.before_size || 0)
-    const afterSize = Number(row && row.after_size || 0)
-    const delta = Number(row && row.delta_size || 0)
+    const beforeSize = Number(row.before_size || 0)
+    const afterSize = Number(row.after_size || 0)
+    const delta = Number(row.delta_size || 0)
     const deltaLabel = delta >= 0 ? `+${delta}` : `${delta}`
     td.textContent = i18nFormat(
       "market.compare.size_compact",
@@ -3032,17 +3715,6 @@
     const before = byId("marketCompareDetailBefore")
     const after = byId("marketCompareDetailAfter")
     if (!pane || !meta || !diff || !before || !after) return
-    const helper = marketCompareHelpers()
-    if (helper && typeof helper.buildCompareDetailContent === "function") {
-      const detail = helper.buildCompareDetailContent(row, { i18nMessage, i18nFormat })
-      state.compareDetailKey = String(detail.detailKey || "").trim()
-      pane.classList.remove("hidden")
-      meta.textContent = String(detail.metaText || "")
-      diff.textContent = String(detail.diffText || "")
-      before.textContent = String(detail.beforeText || "")
-      after.textContent = String(detail.afterText || "")
-      return
-    }
     state.compareDetailKey = String((row && row.section) || "").trim()
     pane.classList.remove("hidden")
     meta.textContent = i18nFormat(
@@ -3100,13 +3772,10 @@
     const after = byId("marketCompareDetailAfter")
     if (pane) pane.classList.add("hidden")
     if (meta) {
-      const helper = marketCompareHelpers()
-      meta.textContent = helper && typeof helper.emptyDetailMeta === "function"
-        ? helper.emptyDetailMeta({ i18nMessage, i18nFormat })
-        : i18nMessage(
-          "market.compare.detail.empty_meta",
-          'Select one changed row and click "Expand Detail".',
-        )
+      meta.textContent = i18nMessage(
+        "market.compare.detail.empty_meta",
+        'Select one changed row and click "Expand Detail".',
+      )
     }
     if (diff) diff.textContent = ""
     if (before) before.textContent = ""
@@ -3146,33 +3815,36 @@
 
   function updateCatalogTable(rows) {
     state.catalog = Array.isArray(rows) ? rows : []
-    const tbody = byId("marketCatalogTable").querySelector("tbody")
-    tbody.innerHTML = ""
-    state.catalog.forEach((item) => {
-      const tr = document.createElement("tr")
-      const packId = String(item.pack_id || "")
-      tr.dataset.packId = packId
-      tr.classList.add("interactive-row")
-      tr.classList.toggle("is-selected", packId !== "" && packId === state.selectedPackId)
-      const packLabel = resolveCatalogPackLabel(item)
-      tr.appendChild(textCell(packLabel))
-      tr.appendChild(textCell(item.version || ""))
-      tr.appendChild(
-        textCell(
-          item.featured
-            ? i18nMessage("market.state.featured", "featured")
-            : i18nMessage("market.state.normal", "normal"),
-        ),
-      )
-      tr.appendChild(pillsCell(item.risk_level ? [item.risk_level] : [], "risk"))
-      tr.appendChild(pillsCell(item.review_labels, "review_label"))
-      tr.appendChild(pillsCell(item.warning_flags, "warning_flag"))
-      tr.appendChild(textCell(localizedSourceSubmission(item.source_submission_id, item.pack_id)))
-      tr.addEventListener("click", () => {
-        selectCatalogItem(item)
+    const table = byId("marketCatalogTable")
+    const tbody = table ? table.querySelector("tbody") : null
+    if (tbody) {
+      tbody.innerHTML = ""
+      state.catalog.forEach((item) => {
+        const tr = document.createElement("tr")
+        const packId = String(item.pack_id || "")
+        tr.dataset.packId = packId
+        tr.classList.add("interactive-row")
+        tr.classList.toggle("is-selected", packId !== "" && packId === state.selectedPackId)
+        const packLabel = resolveCatalogPackLabel(item)
+        tr.appendChild(textCell(packLabel))
+        tr.appendChild(textCell(item.version || ""))
+        tr.appendChild(
+          textCell(
+            item.featured
+              ? i18nMessage("market.state.featured", "featured")
+              : i18nMessage("market.state.normal", "normal"),
+          ),
+        )
+        tr.appendChild(pillsCell(item.risk_level ? [item.risk_level] : [], "risk"))
+        tr.appendChild(pillsCell(item.review_labels, "review_label"))
+        tr.appendChild(pillsCell(item.warning_flags, "warning_flag"))
+        tr.appendChild(textCell(localizedSourceSubmission(item.source_submission_id, item.pack_id)))
+        tr.addEventListener("click", () => {
+          selectCatalogItem(item)
+        })
+        tbody.appendChild(tr)
       })
-      tbody.appendChild(tr)
-    })
+    }
     renderCatalogCards(state.catalog)
     refreshCatalogInsights(state.catalog, hasActiveLocalFilters() ? null : state.catalogInsights)
   }
@@ -3213,17 +3885,34 @@
     updateCatalogTable(state.catalogRaw)
     await listCatalogInsights(state.catalogRaw)
     applyLocalCatalogView({ updateSummary: false })
-    if (state.selectedPackId) {
-      const selected = state.catalog.find(
-        (item) => String(item && item.pack_id || "").trim() === state.selectedPackId,
-      )
+    if (isDetailPage()) {
+      const requestedPackId = String(state.selectedPackId || "").trim()
+      const nextSelectedPackId = requestedPackId || resolveDefaultCatalogSelection(state.catalogRaw)
+      state.selectedPackId = nextSelectedPackId
+      const selected = nextSelectedPackId
+        ? findCatalogItemByPackId(nextSelectedPackId, state.catalogRaw)
+        : null
       if (selected) {
         setMarketDetailExpanded(true)
+        resetCompareView()
+        renderSelectedDetailShell(selected)
         updateSummary(selected)
+        updateCatalogTable(state.catalog)
+      } else if (requestedPackId) {
+        setMarketDetailExpanded(true)
+        updateSummary({
+          status: "error",
+          pack_id: requestedPackId,
+          message: i18nMessage(
+            "market.error.pack_not_found",
+            "The requested pack is not available in the current catalog.",
+          ),
+        })
       } else {
         setMarketDetailExpanded(false)
       }
     } else {
+      state.selectedPackId = ""
       setMarketDetailExpanded(false)
     }
     updateCatalogDetailActions()
@@ -3251,11 +3940,25 @@
       )
     }
     resetCompareView()
-    updateSummary({ status: "listed", count: state.catalog.length })
+    updateSummary(
+      isDetailPage()
+        ? (
+          findCatalogItemByPackId(state.selectedPackId, state.catalogRaw)
+          || { status: "listed", count: state.catalog.length }
+        )
+        : { status: "listed", count: state.catalog.length },
+    )
     return response
   }
 
   async function loadCatalogDetail() {
+    if (!isDetailPage()) {
+      const packId = String(byId("marketPackId")?.value || state.selectedPackId || "").trim()
+      if (packId) {
+        navigateToDetail(packId)
+      }
+      return
+    }
     if (!hasCapability("profile_pack.catalog.read")) {
       resetCompareView()
       updateSummary({
@@ -3268,7 +3971,7 @@
       })
       return
     }
-    const packId = String(byId("marketPackId").value || "").trim()
+    const packId = String(byId("marketPackId")?.value || "").trim()
     if (!packId) {
       resetCompareView()
       updateSummary({
@@ -3282,6 +3985,7 @@
       state.selectedPackId = packId
       setMarketDetailExpanded(true)
       resetCompareView()
+      renderSelectedDetailShell(selected)
       updateSummary(selected)
       updateCatalogDetailActions()
       return
@@ -3297,6 +4001,7 @@
     setMarketDetailExpanded(true)
     updateCatalogTable(state.catalog)
     resetCompareView()
+    renderSelectedDetailShell(selectedCatalogRow())
     updateSummary(apiData(response))
     updateCatalogDetailActions()
   }
@@ -3349,6 +4054,7 @@
     setMarketDetailExpanded(true)
     updateCatalogTable(state.catalog)
     const payload = apiData(response)
+    renderSelectedDetailShell(selectedCatalogRow())
     updateSummary(payload)
     renderCompareView(payload)
     updateCatalogDetailActions()
@@ -3454,7 +4160,6 @@
     renderLog("market_template_submit", response)
     updateSummary(response.data.ok ? apiData(response) : { status: "error", message: response.data.message || "request_failed" })
     if (response.data.ok) {
-      void listMarketTemplateSubmissions()
       void listCatalog()
     }
   }
@@ -3480,43 +4185,139 @@
     renderLog("market_profile_pack_submit", response)
     updateSummary(response.data.ok ? apiData(response) : { status: "error", message: response.data.message || "request_failed" })
     if (response.data.ok) {
-      void listMarketProfilePackSubmissions()
       void listCatalog()
     }
   }
 
   function bindEvents() {
-    const helper = marketEventBindingHelpers()
-    if (helper && typeof helper.bindMarketEvents === "function") {
-      helper.bindMarketEvents({
-        byId,
-        state,
-        localeQuickButtons,
-        applyUiLocale,
-        login,
-        syncReviewerAuthFields,
-        listCatalog,
-        loadCatalogDetail,
-        compareCatalogPack,
-        triggerCatalogDownload,
-        applyLocalCatalogView,
-        setFilterDrawerOpen,
-        setMarketLogExpanded,
-        loadMarketInstallations,
-        listMarketTemplateSubmissions,
-        listMarketProfilePackSubmissions,
-        downloadMarketProfilePackSubmissionExport,
-        runMarketTemplateTrial,
-        runMarketTemplateInstall,
-        runMarketTemplateSubmit,
-        runMarketProfilePackSubmit,
-        bindUploadDropZone,
-        sortFallback: LOCAL_SORT_OPTIONS.TRENDING,
-        document,
+    const localeNode = byId("marketUiLocale")
+    if (localeNode) {
+      localeNode.addEventListener("change", () => {
+        applyUiLocale(localeNode.value, { persist: true })
       })
-      return
+    }
+    localeQuickButtons().forEach((node) => {
+      node.addEventListener("click", () => {
+        const locale = String(node.getAttribute("data-market-locale-option") || "").trim()
+        if (!locale) return
+        applyUiLocale(locale, { persist: true })
+      })
+    })
+    const loginButton = byId("btnMarketLogin")
+    if (loginButton) {
+      loginButton.addEventListener("click", () => {
+        void login()
+      })
+    }
+    const authRoleNode = byId("marketAuthRole")
+    if (authRoleNode) {
+      authRoleNode.addEventListener("change", syncReviewerAuthFields)
+    }
+    const listCatalogButton = byId("btnMarketListCatalog")
+    if (listCatalogButton) {
+      listCatalogButton.addEventListener("click", () => {
+        void listCatalog()
+      })
+    }
+    const detailButton = byId("btnMarketCatalogDetail")
+    if (detailButton) {
+      detailButton.addEventListener("click", () => {
+        void loadCatalogDetail()
+      })
+    }
+    const searchNode = byId("marketGlobalSearch")
+    if (searchNode) {
+      searchNode.addEventListener("input", () => {
+        state.localSearch = String(searchNode.value || "").trim()
+        applyLocalCatalogView()
+      })
+    }
+    quickFilterButtons().forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = String(button.getAttribute("data-market-quick-filter") || "").trim() || "all"
+        applyQuickFilter(key)
+      })
+    })
+    const sortNode = byId("marketSortBy")
+    if (sortNode) {
+      sortNode.addEventListener("change", () => {
+        state.localSort = String(sortNode.value || LOCAL_SORT_OPTIONS.TRENDING)
+        applyLocalCatalogView()
+      })
+    }
+    const openDrawerButton = byId("btnMarketOpenFilterDrawer")
+    if (openDrawerButton) {
+      openDrawerButton.addEventListener("click", () => {
+        setFilterDrawerOpen(true)
+      })
+    }
+    const closeDrawerButton = byId("btnMarketCloseFilterDrawer")
+    if (closeDrawerButton) {
+      closeDrawerButton.addEventListener("click", () => {
+        setFilterDrawerOpen(false)
+      })
+    }
+    const overlay = byId("marketFilterOverlay")
+    if (overlay) {
+      overlay.addEventListener("click", () => {
+        setFilterDrawerOpen(false)
+      })
+    }
+    const logToggleButton = byId("btnMarketToggleLog")
+    if (logToggleButton) {
+      logToggleButton.addEventListener("click", () => {
+        setMarketLogExpanded(!state.logExpanded)
+      })
+    }
+    const pickNode = (...ids) => {
+      for (const id of ids) {
+        const node = byId(id)
+        if (node) return node
+      }
+      return null
     }
 
+    const refreshInstallationsBtn = pickNode(
+      "btnMarketDetailRefreshInstallations",
+      "btnMarketRefreshInstallations"
+    )
+    if (refreshInstallationsBtn) {
+      refreshInstallationsBtn.addEventListener("click", () => {
+        if (!ensureMemberActionCapability("member.installations.refresh", i18nMessage("button.refresh_local_installations", "Refresh Local Installations"))) return
+        void loadMarketInstallations({ refresh: true })
+      })
+    }
+    const templateTrialBtn = pickNode("btnMarketDetailTrial", "btnMarketTemplateTrial")
+    if (templateTrialBtn) {
+      templateTrialBtn.addEventListener("click", () => {
+        if (!ensureMemberActionCapability("templates.trial.request", i18nMessage("button.request_trial", "Request Trial"))) return
+        void runMarketTemplateTrial()
+      })
+    }
+    const templateInstallBtn = pickNode("btnMarketDetailInstall", "btnMarketTemplateInstall")
+    if (templateInstallBtn) {
+      templateInstallBtn.addEventListener("click", () => {
+        if (!ensureMemberActionCapability("templates.install", i18nMessage("button.install_template", "Install Template"))) return
+        void runMarketTemplateInstall()
+      })
+    }
+    const templateSubmitBtn = pickNode("btnMarketDetailSubmitTemplate", "btnMarketTemplateSubmit")
+    if (templateSubmitBtn) {
+      templateSubmitBtn.addEventListener("click", () => {
+        if (!ensureMemberActionCapability("templates.submit", i18nMessage("button.submit_template", "Submit Template"))) return
+        void runMarketTemplateSubmit()
+      })
+    }
+    const profilePackSubmitBtn = pickNode(
+      "btnMarketDetailSubmitProfilePack",
+      "btnMarketProfilePackSubmit"
+    )
+    if (profilePackSubmitBtn) {
+      profilePackSubmitBtn.addEventListener("click", () => {
+        if (!ensureMemberActionCapability("profile_pack.community.submit", i18nMessage("profile_pack.market.submit_btn", "Submit To Community"))) return
+        void runMarketProfilePackSubmit()
+      })
+    }
     bindUploadDropZone({
       zoneId: "marketUploadDropzone",
       inputId: "marketSubmitPackageFile",
@@ -3524,9 +4325,78 @@
       emptyKey: "market.upload.file_idle",
       emptyFallback: "No file selected. Template submit can still use generated output.",
     })
+    const entryPreviewButton = byId("btnMarketJumpToFeaturedDetail")
+    if (entryPreviewButton) {
+      entryPreviewButton.addEventListener("click", () => {
+        const packId = String(entryPreviewButton.dataset.packId || state.selectedPackId || "").trim()
+        const item = packId ? findCatalogItemByPackId(packId) : null
+        if (item && packId !== state.selectedPackId) {
+          selectCatalogItem(item)
+        } else if (packId && isDetailPage()) {
+          setMarketDetailExpanded(true)
+          updateCatalogDetailActions()
+        }
+        if (isDetailPage()) {
+          scrollMarketDetailIntoView()
+        }
+      })
+    }
+    document.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const actionButton = target
+        ? target.closest(
+          [
+            "#btnMarketCatalogCompare",
+            "#btnMarketCatalogDownload",
+            "#btnMarketDetailTrial",
+            "#btnMarketDetailInstall",
+            "#btnMarketTemplateTrial",
+            "#btnMarketTemplateInstall",
+            "#btnMarketDetailSubmitTemplate",
+            "#btnMarketTemplateSubmit",
+            "#btnMarketDetailSubmitProfilePack",
+            "#btnMarketProfilePackSubmit",
+          ].join(", ")
+        )
+        : null
+      if (!actionButton) return
+      if (actionButton.id === "btnMarketCatalogCompare") {
+        void compareCatalogPack()
+        return
+      }
+      if (actionButton.id === "btnMarketCatalogDownload") {
+        triggerCatalogDownload()
+        return
+      }
+      if (actionButton.id === "btnMarketDetailTrial" || actionButton.id === "btnMarketTemplateTrial") {
+        if (!ensureMemberActionCapability("templates.trial.request", i18nMessage("button.request_trial", "Request Trial"))) return
+        void runMarketTemplateTrial()
+        return
+      }
+      if (actionButton.id === "btnMarketDetailInstall" || actionButton.id === "btnMarketTemplateInstall") {
+        if (!ensureMemberActionCapability("templates.install", i18nMessage("button.install_template", "Install Template"))) return
+        void runMarketTemplateInstall()
+        return
+      }
+      if (actionButton.id === "btnMarketDetailSubmitTemplate" || actionButton.id === "btnMarketTemplateSubmit") {
+        if (!ensureMemberActionCapability("templates.submit", i18nMessage("button.submit_template", "Submit Template"))) return
+        void runMarketTemplateSubmit()
+        return
+      }
+      if (actionButton.id === "btnMarketDetailSubmitProfilePack" || actionButton.id === "btnMarketProfilePackSubmit") {
+        if (!ensureMemberActionCapability("profile_pack.community.submit", i18nMessage("profile_pack.market.submit_btn", "Submit To Community"))) return
+        void runMarketProfilePackSubmit()
+      }
+    })
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && state.filterDrawerOpen) {
+        setFilterDrawerOpen(false)
+      }
+    })
   }
 
   async function init() {
+    state.likedPackIds = readStoredMarketLikes()
     bindUiEventBusSync()
     bindStorageSync()
     bindEvents()
@@ -3537,6 +4407,7 @@
     state.localSearch = String(byId("marketGlobalSearch")?.value || state.localSearch || "").trim()
     state.localSort = validSortOption(byId("marketSortBy")?.value || state.localSort || LOCAL_SORT_OPTIONS.TRENDING)
     renderFacetFilters([])
+    updateQuickFilterButtons([])
     updateCatalogCountChips([], [])
     setMarketLogExpanded(false)
     setMarketDetailExpanded(Boolean(state.selectedPackId))
@@ -3545,10 +4416,7 @@
     updateCatalogDetailActions()
     await refreshHealth()
     await initAuth()
-    await loadMarketInstallations()
-    await listMarketTemplateSubmissions()
-    await listMarketProfilePackSubmissions()
-    if (!state.authRequired && hasCapability("profile_pack.catalog.read")) {
+    if (hasCapability("profile_pack.catalog.read")) {
       await listCatalog()
     }
   }

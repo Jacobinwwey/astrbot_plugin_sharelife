@@ -2,6 +2,9 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 
 const {
+  buildInstallOptions,
+  buildUploadOptions,
+  buildSubmitOptions,
   buildSubmitPayload,
   buildSubmissionDecisionPayload,
   buildSubmissionFilterQuery,
@@ -10,6 +13,53 @@ const {
   pickProfilePackSubmissionFields,
   pickProfilePackCatalogFields,
 } = require("../../sharelife/webui/profile_pack_market.js")
+
+test("buildInstallOptions includes normalized selected sections for install sync control", () => {
+  const payload = buildInstallOptions({
+    preflight: true,
+    forceReinstall: true,
+    sourcePreference: "generated",
+    selectedSections: " memory_store, conversation_history, memory_store, knowledge_base ",
+  })
+  assert.deepEqual(payload, {
+    preflight: true,
+    force_reinstall: true,
+    source_preference: "generated",
+    selected_sections: ["memory_store", "conversation_history", "knowledge_base"],
+  })
+})
+
+test("buildUploadOptions normalizes upload mode and visibility", () => {
+  const payload = buildUploadOptions({
+    scanMode: "UNKNOWN",
+    visibility: "PRIVATE",
+    replaceExisting: 1,
+    idempotencyKey: "upload-1",
+  })
+  assert.deepEqual(payload, {
+    scan_mode: "balanced",
+    visibility: "private",
+    replace_existing: true,
+    idempotency_key: "upload-1",
+  })
+})
+
+test("buildSubmitOptions normalizes sections, enums, and idempotency key", () => {
+  const payload = buildSubmitOptions({
+    packType: "Extension_Pack",
+    selectedSections: " plugins,providers,plugins ",
+    redactionMode: "not-valid",
+    replaceExisting: true,
+    idempotencyKey: "submit-2",
+  })
+  assert.deepEqual(payload, {
+    pack_type: "extension_pack",
+    selected_sections: ["plugins", "providers"],
+    redaction_mode: "exclude_secrets",
+    replace_existing: true,
+    idempotency_key: "submit-2",
+  })
+})
 
 test("buildSubmitPayload falls back to export artifact id", () => {
   const payload = buildSubmitPayload({

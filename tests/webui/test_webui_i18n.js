@@ -199,6 +199,146 @@ test("getMessage returns locale-specific translation with fallback", () => {
     getMessage("ja-JP", "profile_pack.action.shortcut.prefill_plugin_ids", ""),
     "plugin_ids={plugin_ids}",
   )
+  assert.equal(
+    getMessage("en-US", "market.entry.subtitle_public", ""),
+    "Public discovery first. Compare facts, then cross into protected member actions.",
+  )
+  assert.equal(
+    getMessage("en-US", "market.sidebar.category.all", ""),
+    "All Catalog",
+  )
+  assert.equal(
+    getMessage("zh-CN", "market.sidebar.category.low_risk", ""),
+    "低风险优先",
+  )
+  assert.equal(
+    getMessage("ja-JP", "market.catalog.stage_heading", ""),
+    "公開カタログ",
+  )
+  assert.equal(
+    getMessage("en-US", "member.upload_detail.preview_heading", ""),
+    "Selected Content",
+  )
+  assert.equal(
+    getMessage("zh-CN", "member.upload_detail.preview_empty", ""),
+    "当前节点没有可展示的预览内容。",
+  )
+  assert.equal(
+    getMessage("ja-JP", "member.upload_detail.preview_truncated", ""),
+    "プレビューは途中で切り詰められています。",
+  )
+  assert.equal(
+    getMessage("zh-CN", "market.search.spotlight_hint", ""),
+    "先搜索 pack、标签、维护者与风险信号，再决定是否打开 detail。",
+  )
+  assert.equal(
+    getMessage("ja-JP", "market.detail.member_actions", ""),
+    "メンバー操作",
+  )
+  assert.equal(
+    getMessage("en-US", "market.entry.default_detail_open", ""),
+    "Open default detail",
+  )
+  assert.equal(
+    getMessage("zh-CN", "market.entry.stat_variant_value", ""),
+    "V3 / 5 个方案",
+  )
+  assert.equal(
+    getMessage("ja-JP", "market.search.capability_selective_sync", ""),
+    "install 時に選択同期",
+  )
+  assert.equal(
+    getMessage("en-US", "button.import_astrbot_config", ""),
+    "Import Local AstrBot Config",
+  )
+  assert.equal(
+    getMessage("zh-CN", "button.import_astrbot_config", ""),
+    "导入本机 AstrBot 配置",
+  )
+  assert.equal(
+    getMessage("ja-JP", "button.import_astrbot_config", ""),
+    "ローカル AstrBot 設定を取り込む",
+  )
+  assert.equal(
+    getMessage("zh-CN", "button.review_imported_configs", ""),
+    "审阅已导入配置包",
+  )
+  assert.equal(
+    getMessage("en-US", "button.withdraw_submission", ""),
+    "Withdraw Submission",
+  )
+  assert.equal(
+    getMessage("zh-CN", "member.imports.heading", ""),
+    "已导入配置包",
+  )
+  assert.equal(
+    getMessage("zh-CN", "member.imports.format_notice", ""),
+    "支持 Sharelife 标准 zip、AstrBot 备份 zip、cmd_config.json 与 abconf_*.json；原始 AstrBot 输入会先转换为降级草稿。",
+  )
+  assert.equal(
+    getMessage("ja-JP", "member.imports.idle", ""),
+    "まだ取り込まれた設定パックはありません。",
+  )
+  assert.equal(
+    getMessage("en-US", "member.upload_detail.title", ""),
+    "Upload Details",
+  )
+  assert.equal(
+    getMessage("en-US", "member.upload_detail.import_source_astrbot_raw", ""),
+    "Raw AstrBot export (converted)",
+  )
+  assert.equal(
+    getMessage("en-US", "member.upload_detail.inspector_title", ""),
+    "Section Inspector",
+  )
+  assert.equal(
+    getMessage("zh-CN", "member.upload_detail.inspector_empty", ""),
+    "从左侧选择一个 section 或条目后，可在这里查看并继续细化上传范围。",
+  )
+  assert.equal(
+    getMessage("ja-JP", "member.upload_detail.children_heading", ""),
+    "選択可能な子項目",
+  )
+  assert.equal(
+    getMessage("zh-CN", "detail.label.compatibility_notes", ""),
+    "兼容性提示",
+  )
+  assert.equal(
+    getMessage("en-US", "profile_pack.issue.astrbot_raw_import_converted", ""),
+    "Converted from a raw AstrBot export. Review every section before submission or apply.",
+  )
+  assert.equal(
+    getMessage("en-US", "profile_pack.issue.astrbot_backup_runtime_payload_omitted", ""),
+    "Full AstrBot backup runtime payloads were omitted during conversion.",
+  )
+  assert.equal(
+    getMessage("en-US", "profile_pack.issue.astrbot_operator_fields_omitted", ""),
+    "AstrBot operator-only fields were omitted during conversion.",
+  )
+  assert.equal(
+    getMessage("en-US", "profile_pack.issue.astrbot_plugin_wildcard_unresolved", ""),
+    "AstrBot plugin wildcard '*' could not be resolved to a concrete plugin list.",
+  )
+  assert.equal(
+    getMessage("en-US", "enum.status.withdrawn", ""),
+    "withdrawn",
+  )
+  assert.equal(
+    getMessage("en-US", "market.install.sections.heading", ""),
+    "Install Sections",
+  )
+  assert.equal(
+    getMessage("zh-CN", "market.install.sections.none_selected", ""),
+    "当前未选择任何 section，安装时将跳过 section 同步。",
+  )
+  assert.equal(
+    getMessage("ja-JP", "market.install.sections.summary_stateful", ""),
+    "{selected}/{total} sections selected · {stateful} stateful/local sections can be skipped",
+  )
+  assert.equal(
+    getMessage("en-US", "market.variant.tab_1", ""),
+    "Variant 1",
+  )
 })
 
 test("applyLocale updates text nodes, placeholder nodes and html lang", () => {

@@ -72,13 +72,27 @@
           </div>
           <div class="inline-form">
             <button
-              id="btnRefreshMemberInstallations"
+              id="btnImportAstrbotConfig"
               type="button"
               class="btn-primary"
-              data-i18n-key="button.refresh_local_installations"
+              data-i18n-key="button.import_astrbot_config"
             >
-              Refresh Local Installations
+              Import Local AstrBot Config
             </button>
+            <button
+              id="btnImportConfigPackFile"
+              type="button"
+              class="btn-ghost"
+              data-i18n-key="button.import_config_pack_file"
+            >
+              Import Config Pack File
+            </button>
+            <input
+              id="memberImportAstrbotConfigFile"
+              class="hidden"
+              type="file"
+              accept=".zip,.json"
+            />
           </div>
           <div class="inline-form wrap top-quick-links">
             <a id="memberConsoleLink" href="/member" class="market-link" data-i18n-key="console.switch.member">Member Console</a>
@@ -203,7 +217,29 @@
                 </details>
               </section>
               <section class="workspace-panel">
-                <h3 data-i18n-key="member.installations.heading">Manage Installations</h3>
+                <div class="workspace-panel-header">
+                  <div>
+                    <h3 data-i18n-key="member.installations.heading">Manage Installations</h3>
+                  </div>
+                  <div class="inline-form wrap action-cluster">
+                    <button
+                      id="btnOpenMemberImportReview"
+                      type="button"
+                      class="btn-ghost hidden"
+                      data-i18n-key="button.review_imported_configs"
+                    >
+                      Review Imported Config Packs
+                    </button>
+                    <button
+                      id="btnRefreshMemberInstallationsInline"
+                      type="button"
+                      class="btn-ghost"
+                      data-i18n-key="button.refresh_local_installations"
+                    >
+                      Refresh Local Installations
+                    </button>
+                  </div>
+                </div>
                 <div id="memberInstallationsState" class="collection-state is-neutral" data-i18n-key="member.installations.idle">
                   Load local installations to manage existing configs.
                 </div>
@@ -215,13 +251,12 @@
                 <div class="workspace-panel-header">
                   <div>
                     <h3 data-i18n-key="member.upload.heading">Upload Center</h3>
-                    <p class="note" data-i18n-key="member.upload.subtitle">Drop a package for template submission, or keep the file empty to publish generated output.</p>
+                    <p class="note" data-i18n-key="member.upload.subtitle">Drag a Sharelife or AstrBot config pack here to import a draft, then review sections before submission.</p>
                   </div>
                 </div>
-                <label id="memberUploadDropzone" class="upload-dropzone" for="submitPackageFile">
-                  <input id="submitPackageFile" class="upload-dropzone-input" type="file" accept=".zip,.json,.txt,.yaml,.yml" />
+                <label id="memberUploadDropzone" class="upload-dropzone" for="memberImportAstrbotConfigFile">
                   <span class="upload-dropzone-title" data-i18n-key="member.upload.dropzone">Drag package here or click to upload</span>
-                  <span id="memberUploadFileName" class="upload-dropzone-file" data-i18n-key="member.upload.file_idle">No file selected. Generated package submit is also supported.</span>
+                  <span id="memberUploadFileName" class="upload-dropzone-file" data-i18n-key="member.upload.file_idle">No file selected. Max 20 MiB. Sharelife standard zip, AstrBot backup zip, cmd_config.json, and abconf_*.json are supported.</span>
                 </label>
                 <div class="grid compact-grid">
                   <label>
@@ -578,7 +613,7 @@
         <button id="btnProfilePackSubmitCommunity" type="button" data-i18n-key="profile_pack.market.submit_btn">Submit To Community</button>
       </div>
       <div class="inline-form wrap">
-        <input id="profilePackSubmissionStatusFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_submission_status_filter" placeholder="status filter (pending/approved/rejected/replaced)" />
+        <input id="profilePackSubmissionStatusFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_submission_status_filter" placeholder="status filter (pending/approved/rejected/replaced/withdrawn)" />
         <input id="profilePackSubmissionPackFilter" type="text" data-i18n-placeholder-key="placeholder.profile_pack_submission_pack_filter" placeholder="filter pack_id" />
         <select id="profilePackSubmissionPackTypeFilter">
           <option value="" data-i18n-key="option.pack_type.all">All Pack Types</option>
@@ -607,6 +642,7 @@
               <th data-i18n-key="table.header.labels">Labels</th>
               <th data-i18n-key="table.header.flags">Flags</th>
               <th data-i18n-key="table.header.review_note">Review Note</th>
+              <th data-i18n-key="table.header.actions">Actions</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -1111,6 +1147,72 @@
           <button id="btnSubmitWizardPrev" class="btn-ghost" type="button" data-i18n-key="button.back">Back</button>
           <button id="btnSubmitWizardNext" type="button" data-i18n-key="button.next">Next</button>
           <button id="btnSubmitWizardPublish" class="btn-primary hidden" type="button" data-i18n-key="button.publish">Publish</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="memberProfilePackUploadModal" class="modal-shell hidden" data-console-scope="member" data-scope-visibility="manual" aria-hidden="true">
+      <div id="memberProfilePackUploadBackdrop" class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-glass" role="dialog" aria-modal="true" aria-labelledby="memberProfilePackUploadTitle">
+        <div class="modal-head">
+          <div>
+            <h3 id="memberProfilePackUploadTitle" data-i18n-key="member.upload_detail.title">Upload Details</h3>
+            <p id="memberProfilePackUploadMeta" class="note" data-i18n-key="member.upload_detail.subtitle">Review the imported config pack and choose upload options before submission.</p>
+          </div>
+          <button id="btnCloseMemberProfilePackUploadModal" class="btn-ghost" type="button" data-i18n-key="button.close">Close</button>
+        </div>
+        <div class="member-upload-review-shell">
+          <aside class="member-upload-review-rail">
+            <div class="member-upload-review-heading">
+              <h4 data-i18n-key="member.imports.heading">Imported Config Packs</h4>
+              <p class="note" data-i18n-key="member.imports.subtitle">Imported Sharelife standard config packs stay owner-bound locally until you review and submit them.</p>
+              <p class="note" data-i18n-key="member.imports.format_notice">Accepted inputs: Sharelife standard zip, AstrBot backup zip, cmd_config.json, and abconf_*.json. Raw AstrBot input is converted into a degraded draft first.</p>
+            </div>
+            <div id="memberImportDraftState" class="collection-state is-neutral" data-i18n-key="member.imports.idle">
+              No imported config packs yet.
+            </div>
+            <div id="memberImportDraftList" class="member-import-list"></div>
+          </aside>
+          <section class="member-upload-review-detail">
+            <div id="memberProfilePackUploadState" class="collection-state is-neutral" data-i18n-key="member.upload_detail.idle">
+              Select an imported config pack to continue.
+            </div>
+            <div id="memberProfilePackUploadDetailGrid" class="detail-grid"></div>
+            <div class="member-upload-detail-workbench">
+              <section id="memberUploadDetailTreePane" class="member-upload-tree-pane">
+                <div class="member-upload-review-heading">
+                  <h4 data-i18n-key="field.submit_selected_sections">Profile-Pack Sections</h4>
+                  <p class="note" data-i18n-key="member.upload_detail.inspector_empty">Select a section or item from the left to inspect it here.</p>
+                </div>
+                <div id="memberUploadDetailSectionList" class="member-upload-section-list"></div>
+              </section>
+              <section id="memberUploadDetailInspector" class="member-upload-inspector-pane">
+                <div class="member-upload-inspector-head">
+                  <div class="detail-card-label" data-i18n-key="member.upload_detail.inspector_title">Section Inspector</div>
+                  <h4 id="memberUploadDetailInspectorHeading">Select a section</h4>
+                  <p id="memberUploadDetailInspectorPath" class="note" data-i18n-key="member.upload_detail.inspector_empty">Select a section or item from the left to inspect it here.</p>
+                </div>
+                <div id="memberUploadDetailInspectorSummary" class="detail-grid"></div>
+                <div class="member-upload-inspector-preview-shell">
+                  <div class="detail-card-label" data-i18n-key="member.upload_detail.preview_heading">Selected Content</div>
+                  <pre id="memberUploadDetailInspectorPreview" class="member-upload-inspector-preview" data-i18n-key="member.upload_detail.preview_empty">Select a section or item from the left to inspect it here.</pre>
+                </div>
+                <div class="member-upload-inspector-children-shell">
+                  <div class="detail-card-label" data-i18n-key="member.upload_detail.children_heading">Selectable Children</div>
+                  <div id="memberUploadDetailInspectorChildren" class="member-upload-inspector-children"></div>
+                </div>
+                <label class="checkbox member-upload-replace-toggle">
+                  <input id="memberUploadDetailReplaceExisting" type="checkbox" />
+                  <span data-i18n-key="field.upload_replace_existing">Replace existing submission</span>
+                </label>
+              </section>
+            </div>
+          </section>
+        </div>
+        <div class="modal-actions">
+          <button id="btnMemberProfilePackUploadCancel" class="btn-ghost" type="button" data-i18n-key="button.close">Close</button>
+          <button id="btnMemberProfilePackUploadDelete" class="btn-ghost" type="button" data-i18n-key="button.delete_import_draft">Delete Draft</button>
+          <button id="btnMemberProfilePackUploadSubmit" class="btn-primary" type="button" data-i18n-key="button.submit_profile_pack">Submit Config Pack</button>
         </div>
       </div>
     </section>

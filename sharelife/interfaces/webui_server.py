@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import secrets
 import time
 from pathlib import Path
@@ -18,7 +17,7 @@ try:
     import uvicorn
     from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+    from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
 
     FASTAPI_AVAILABLE = True
@@ -123,14 +122,40 @@ class SharelifeWebUIServer:
         "health.read",
         "ui.capabilities.read",
     }
+    _ANONYMOUS_MEMBER_UI_OPERATIONS: set[str] = {
+        "member.installations.read",
+        "member.installations.refresh",
+        "member.installations.uninstall",
+        "member.tasks.read",
+        "member.tasks.refresh",
+        "notifications.read",
+        "preferences.read",
+        "preferences.write",
+        "profile_pack.catalog.read",
+        "templates.detail",
+        "templates.install",
+        "templates.list",
+        "templates.package.download",
+        "templates.trial.request",
+        "templates.trial.status",
+    }
     _MEMBER_UI_OPERATIONS: set[str] = {
         "member.installations.read",
         "member.installations.refresh",
+        "member.installations.uninstall",
+        "member.profile_pack.imports.delete",
+        "member.profile_pack.imports.local_astrbot",
+        "member.profile_pack.imports.package_upload",
+        "member.tasks.read",
+        "member.tasks.refresh",
+        "member.profile_pack.imports.read",
+        "member.profile_pack.imports.write",
         "member.submissions.read",
         "member.submissions.detail.read",
         "member.submissions.package.download",
         "member.profile_pack.submissions.read",
         "member.profile_pack.submissions.detail.read",
+        "member.profile_pack.submissions.withdraw",
         "member.profile_pack.submissions.export.download",
         "notifications.read",
         "preferences.read",
@@ -179,6 +204,7 @@ class SharelifeWebUIServer:
         "admin.submissions.read",
         "admin.submissions.review",
     }
+    _ANONYMOUS_MEMBER_COOKIE_NAME = "sharelife_anon_member"
 
     def __init__(
         self,
@@ -198,16 +224,16 @@ class SharelifeWebUIServer:
         self.public_url: str = ""
 
         self._auth_enabled = False
-        self._auth_passwords: dict[str, str] = {}
+        self._active_auth_roles: set[str] = set()
         self._invalid_auth_roles: set[str] = set()
-        self._auth_tokens: dict[str, dict[str, Any]] = {}
-        self._auth_session_tokens: dict[str, str] = {}
         self._auth_token_ttl_seconds = 7200
         self._reviewer_token_ttl_seconds = 7 * 24 * 3600
         self._auth_allow_query_token = False
         self._auth_allow_anonymous_member = False
         self._auth_anonymous_member_user_id = "webui-user"
         self._auth_anonymous_member_allowlist = self._anonymous_member_default_api_paths()
+        self._feature_local_astrbot_import = True
+        self._feature_allow_anonymous_local_astrbot_import = False
         self._login_rate_limit_window_seconds = 60
         self._login_rate_limit_max_attempts = 10
         self._login_attempts: dict[str, list[float]] = {}
@@ -320,6 +346,12 @@ class SharelifeWebUIServer:
     def _refresh_auth(self) -> None:
         cfg = self._webui_config()
         auth = cfg.get("auth", {}) if isinstance(cfg.get("auth"), dict) else {}
+        features = cfg.get("features", {}) if isinstance(cfg.get("features"), dict) else {}
+        member_import_features = (
+            features.get("member_import", {})
+            if isinstance(features.get("member_import"), dict)
+            else {}
+        )
         security_headers = (
             cfg.get("security_headers", {})
             if isinstance(cfg.get("security_headers"), dict)
@@ -358,6 +390,22 @@ class SharelifeWebUIServer:
             self._auth_anonymous_member_allowlist = self._parse_anonymous_member_allowlist(
                 raw_anonymous_member_allowlist,
             )
+        local_astrbot_import_raw = member_import_features.get(
+            "local_astrbot_import",
+            features.get("local_astrbot_import"),
+        )
+        self._feature_local_astrbot_import = _to_bool(
+            local_astrbot_import_raw,
+            default=True,
+        )
+        allow_anonymous_local_import_raw = member_import_features.get(
+            "allow_anonymous_local_astrbot_import",
+            features.get("allow_anonymous_local_astrbot_import"),
+        )
+        self._feature_allow_anonymous_local_astrbot_import = (
+            self._feature_local_astrbot_import
+            and _to_bool(allow_anonymous_local_import_raw, default=False)
+        )
         self._login_rate_limit_window_seconds = max(
             1,
             _to_int(auth.get("login_rate_limit_window_seconds"), 60),
@@ -410,7 +458,8 @@ class SharelifeWebUIServer:
                 continue
             self._security_headers[header_name] = value
 
-        self._auth_passwords = {}
+        auth_service = self._reviewer_auth_service()
+        self._active_auth_roles = set()
         self._invalid_auth_roles = set()
         if _auth_secret_requested(member_password_raw) and not member_password:
             self._invalid_auth_roles.add("member")
@@ -418,16 +467,18 @@ class SharelifeWebUIServer:
             self._invalid_auth_roles.add("reviewer")
         if _auth_secret_requested(admin_password_raw) and not admin_password:
             self._invalid_auth_roles.add("admin")
-        if member_password:
-            self._auth_passwords["member"] = member_password
-        if reviewer_password:
-            self._auth_passwords["reviewer"] = reviewer_password
-        if admin_password:
-            self._auth_passwords["admin"] = admin_password
+        if auth_service is not None:
+            if member_password:
+                auth_service.sync_bootstrap_password("member", member_password)
+                self._active_auth_roles.add("member")
+            if reviewer_password:
+                auth_service.sync_bootstrap_password("reviewer", reviewer_password)
+                self._active_auth_roles.add("reviewer")
+            if admin_password:
+                auth_service.sync_bootstrap_password("admin", admin_password)
+                self._active_auth_roles.add("admin")
 
-        self._auth_enabled = bool(self._auth_passwords) or bool(self._invalid_auth_roles)
-        self._auth_tokens = {}
-        self._auth_session_tokens = {}
+        self._auth_enabled = bool(self._active_auth_roles) or bool(self._invalid_auth_roles)
         self._login_attempts = {}
         self._api_requests = {}
         self._metrics_known_paths = set()
@@ -441,7 +492,7 @@ class SharelifeWebUIServer:
             )
 
     def _available_auth_roles(self) -> list[str]:
-        return [role for role in ("member", "reviewer", "admin") if role in self._auth_passwords]
+        return [role for role in ("member", "reviewer", "admin") if role in self._active_auth_roles]
 
     def _token_from_request(self, request: Request) -> str:
         auth_header = str(request.headers.get("Authorization", "") or "").strip()
@@ -462,6 +513,50 @@ class SharelifeWebUIServer:
         if normalized_role == "admin":
             operations.update(cls._ADMIN_UI_OPERATIONS)
         return sorted(operations)
+
+    def _runtime_feature_payload(self) -> dict[str, Any]:
+        allow_anonymous_local_astrbot_import = (
+            self._feature_local_astrbot_import
+            and self._feature_allow_anonymous_local_astrbot_import
+            and self._auth_allow_anonymous_member
+        )
+        return {
+            "supports_local_astrbot_import": self._feature_local_astrbot_import,
+            "allow_anonymous_local_astrbot_import": allow_anonymous_local_astrbot_import,
+        }
+
+    def _effective_operations_for_role(self, role: str) -> list[str]:
+        operations = set(self._operations_for_role(role))
+        if not self._feature_local_astrbot_import:
+            operations.discard("member.profile_pack.imports.local_astrbot")
+        return sorted(operations)
+
+    def _anonymous_member_import_operations(self) -> set[str]:
+        if not self._runtime_feature_payload()["allow_anonymous_local_astrbot_import"]:
+            return set()
+        return {
+            "member.profile_pack.imports.delete",
+            "member.profile_pack.imports.local_astrbot",
+            "member.profile_pack.imports.read",
+        }
+
+    def _anonymous_member_operations(self) -> list[str]:
+        operations = set(self._PUBLIC_UI_OPERATIONS) | set(self._ANONYMOUS_MEMBER_UI_OPERATIONS)
+        operations.update(self._anonymous_member_import_operations())
+        return sorted(operations)
+
+    def _issue_anonymous_member_subject(self) -> str:
+        base = str(self._auth_anonymous_member_user_id or "webui-user").strip() or "webui-user"
+        return f"{base}-{secrets.token_hex(8)}"
+
+    def _anonymous_member_subject_from_request(self, request: Request) -> str:
+        cookie_value = str(
+            request.cookies.get(self._ANONYMOUS_MEMBER_COOKIE_NAME, "") or "",
+        ).strip()
+        base = str(self._auth_anonymous_member_user_id or "webui-user").strip() or "webui-user"
+        if cookie_value.startswith(f"{base}-") and len(cookie_value) > len(base) + 1:
+            return cookie_value
+        return ""
 
     @staticmethod
     def _console_scopes_for_role(page_mode: str, role: str) -> list[str]:
@@ -499,37 +594,21 @@ class SharelifeWebUIServer:
         inner_api = getattr(self.api, "api", None)
         return getattr(inner_api, "reviewer_auth_service", None)
 
-    @staticmethod
-    def _session_key(role: str, *, subject: str = "", device_id: str = "") -> str:
-        normalized_role = SharelifeWebUIServer._normalize_role(role)
-        if normalized_role == "reviewer":
-            reviewer_id = str(subject or "").strip()
-            reviewer_device_id = str(device_id or "").strip()
-            return f"reviewer:{reviewer_id}:{reviewer_device_id or 'default-device'}"
-        if normalized_role == "member":
-            member_id = str(subject or "").strip()
-            if member_id:
-                return f"member:{member_id}"
-        return normalized_role
-
     def _session_from_token(self, token: str) -> dict[str, Any] | None:
-        text = str(token or "").strip()
-        if not text:
+        service = self._reviewer_auth_service()
+        if service is None:
             return None
-        session = self._auth_tokens.get(text)
-        if session is None:
+        session = service.resolve_session(str(token or "").strip())
+        if not isinstance(session, dict):
             return None
         role = self._normalize_role(str(session.get("role", "") or ""))
-        expires_at = float(session.get("expires_at", 0.0) or 0.0)
-        if time.time() >= expires_at:
-            self._revoke_token(text, role=role)
+        if role not in self._active_auth_roles:
             return None
         if role == "reviewer":
-            reviewer_id = str(session.get("subject", "") or "").strip()
+            reviewer_id = str(session.get("user_id", "") or "").strip()
             device_id = str(session.get("device_id", "") or "").strip()
-            service = self._reviewer_auth_service()
             if not reviewer_id or not device_id or service is None:
-                self._revoke_token(text, role=role, subject=reviewer_id)
+                self._revoke_token(str(token or "").strip(), role=role, subject=reviewer_id)
                 return None
             devices = service.list_devices(user_id=reviewer_id)
             device_exists = any(
@@ -538,9 +617,17 @@ class SharelifeWebUIServer:
                 if isinstance(item, dict)
             )
             if not device_exists:
-                self._revoke_token(text, role=role, subject=reviewer_id)
+                self._revoke_token(str(token or "").strip(), role=role, subject=reviewer_id)
                 return None
-        return session
+        return {
+            "session_id": str(session.get("session_id", "") or "").strip(),
+            "role": role,
+            "subject": str(session.get("user_id", "") or "").strip(),
+            "device_id": str(session.get("device_id", "") or "").strip(),
+            "issued_at": float(session.get("issued_at", 0.0) or 0.0),
+            "expires_at": float(session.get("expires_at", 0.0) or 0.0),
+            "last_seen_at": float(session.get("last_seen_at", 0.0) or 0.0),
+        }
 
     def _role_from_token(self, token: str) -> str | None:
         session = self._session_from_token(token)
@@ -548,40 +635,103 @@ class SharelifeWebUIServer:
             return None
         return self._normalize_role(str(session.get("role", "") or ""))
 
+    @staticmethod
+    def _normalize_page_mode(page_mode: str) -> str:
+        text = str(page_mode or "").strip().lower()
+        if text == "user":
+            return "member"
+        if text in {"member", "reviewer", "admin"}:
+            return text
+        return ""
+
+    def _ui_capability_payload(self, request: Request, *, page_mode: str = "") -> dict[str, Any]:
+        normalized_page_mode = self._normalize_page_mode(page_mode)
+        feature_payload = self._runtime_feature_payload()
+        if not self._auth_enabled:
+            role = self._request_role(request)
+            if role not in {"member", "reviewer", "admin"}:
+                role = "member"
+            operations = self._effective_operations_for_role(role)
+            return {
+                "ok": True,
+                "auth_required": False,
+                "authenticated": True,
+                "anonymous_member": False,
+                "role": role,
+                "available_roles": ["member", "reviewer", "admin"],
+                "operations": operations,
+                **feature_payload,
+                "console_scopes": self._console_scopes_for_role(
+                    page_mode=normalized_page_mode,
+                    role=role,
+                ),
+            }
+
+        token = self._token_from_request(request)
+        role = self._role_from_token(token)
+        if role in {"member", "reviewer", "admin"}:
+            operations = self._effective_operations_for_role(role)
+            return {
+                "ok": True,
+                "auth_required": True,
+                "authenticated": True,
+                "anonymous_member": False,
+                "role": role,
+                "available_roles": self._available_auth_roles(),
+                "operations": operations,
+                **feature_payload,
+                "console_scopes": self._console_scopes_for_role(
+                    page_mode=normalized_page_mode,
+                    role=role,
+                ),
+            }
+
+        anonymous_member = (
+            self._auth_allow_anonymous_member
+            and normalized_page_mode not in {"reviewer", "admin"}
+        )
+        if anonymous_member:
+            role = "member"
+            operations = self._anonymous_member_operations()
+        else:
+            role = "public"
+            operations = sorted(self._PUBLIC_UI_OPERATIONS)
+        return {
+            "ok": True,
+            "auth_required": True,
+            "authenticated": False,
+            "anonymous_member": anonymous_member,
+            "role": role,
+            "available_roles": self._available_auth_roles(),
+            "operations": operations,
+            **feature_payload,
+            "console_scopes": self._console_scopes_for_role(
+                page_mode=normalized_page_mode,
+                role=role,
+            ),
+        }
+
     def _issue_token(self, role: str, *, subject: str = "", device_id: str = "") -> str:
         normalized_role = self._normalize_role(role)
-        if normalized_role not in self._auth_passwords:
+        if normalized_role not in self._active_auth_roles:
             raise ValueError("PROFILE_WEBUI_AUTH_ROLE_UNAVAILABLE")
+        service = self._reviewer_auth_service()
+        if service is None:
+            raise ValueError("PROFILE_WEBUI_AUTH_SERVICE_UNAVAILABLE")
         normalized_subject = str(subject or "").strip()
         normalized_device_id = str(device_id or "").strip()
         if normalized_role == "reviewer" and not normalized_subject:
             raise ValueError("PROFILE_WEBUI_REVIEWER_ID_REQUIRED")
-        session_key = self._session_key(
-            normalized_role,
-            subject=normalized_subject,
-            device_id=normalized_device_id,
-        )
-        previous = self._auth_session_tokens.get(session_key)
-        if previous:
-            self._revoke_token(
-                previous,
-                role=normalized_role,
-                subject=normalized_subject,
-                device_id=normalized_device_id,
-            )
         ttl_seconds = self._auth_token_ttl_seconds
         if normalized_role == "reviewer":
             ttl_seconds = self._reviewer_token_ttl_seconds
-        token = secrets.token_hex(24)
-        self._auth_session_tokens[session_key] = token
-        self._auth_tokens[token] = {
-            "role": normalized_role,
-            "subject": normalized_subject,
-            "device_id": normalized_device_id,
-            "issued_at": float(time.time()),
-            "expires_at": time.time() + float(ttl_seconds),
-        }
-        return token
+        session = service.issue_session(
+            role=normalized_role,
+            subject=normalized_subject,
+            device_id=normalized_device_id,
+            ttl_seconds=ttl_seconds,
+        )
+        return str(session.get("token", "") or "")
 
     def _revoke_token(
         self,
@@ -594,31 +744,10 @@ class SharelifeWebUIServer:
         text = str(token or "").strip()
         if not text:
             return
-        session = self._auth_tokens.pop(text, None)
-        normalized_role = str(role or "").strip().lower()
-        if normalized_role == "user":
-            normalized_role = "member"
-        normalized_subject = str(subject or "").strip()
-        normalized_device_id = str(device_id or "").strip()
-        if isinstance(session, dict):
-            if not normalized_role:
-                normalized_role = self._normalize_role(str(session.get("role", "") or ""))
-            if not normalized_subject:
-                normalized_subject = str(session.get("subject", "") or "").strip()
-            if not normalized_device_id:
-                normalized_device_id = str(session.get("device_id", "") or "").strip()
-        if not normalized_role:
-            for session_key, current in list(self._auth_session_tokens.items()):
-                if current == text:
-                    self._auth_session_tokens.pop(session_key, None)
+        service = self._reviewer_auth_service()
+        if service is None:
             return
-        key = self._session_key(
-            normalized_role,
-            subject=normalized_subject,
-            device_id=normalized_device_id,
-        )
-        if self._auth_session_tokens.get(key) == text:
-            self._auth_session_tokens.pop(key, None)
+        service.revoke_session_token(text)
 
     def _client_key(self, request: Request, role: str) -> str:
         host = "unknown"
@@ -1015,6 +1144,17 @@ class SharelifeWebUIServer:
 
             def finalize(response, *, error_code: str = "", role: str = ""):
                 out = self._apply_security_headers(response)
+                anonymous_cookie_subject = str(
+                    getattr(request.state, "sharelife_auth_anonymous_subject", "") or "",
+                ).strip()
+                if anonymous_cookie_subject:
+                    out.set_cookie(
+                        self._ANONYMOUS_MEMBER_COOKIE_NAME,
+                        anonymous_cookie_subject,
+                        httponly=True,
+                        samesite="lax",
+                        path="/",
+                    )
                 out.headers.setdefault("X-Request-ID", request_id)
                 elapsed_ms = (time.perf_counter() - started) * 1000.0
                 request_role = str(role or "").strip().lower()
@@ -1114,10 +1254,14 @@ class SharelifeWebUIServer:
             role = self._normalize_role(str(session.get("role", "") or "")) if isinstance(session, dict) else None
             if role is None:
                 if self._is_anonymous_member_api_request(path=normalized_path, method=method):
+                    anonymous_subject = self._anonymous_member_subject_from_request(request)
+                    if not anonymous_subject:
+                        anonymous_subject = self._issue_anonymous_member_subject()
                     request.state.sharelife_auth_role = "member"
-                    request.state.sharelife_auth_subject = self._auth_anonymous_member_user_id
+                    request.state.sharelife_auth_subject = anonymous_subject
                     request.state.sharelife_auth_device_id = ""
                     request.state.sharelife_auth_anonymous = True
+                    request.state.sharelife_auth_anonymous_subject = anonymous_subject
                     self._record_auth_event(event="anonymous_member_session", role="member")
                     return await invoke_next(role="member")
                 self._record_auth_event(event="unauthorized", role="public")
@@ -1294,6 +1438,9 @@ class SharelifeWebUIServer:
             ("POST", "/api/templates/install"),
             ("GET", "/api/member/installations"),
             ("POST", "/api/member/installations/refresh"),
+            ("POST", "/api/member/installations/uninstall"),
+            ("GET", "/api/member/tasks"),
+            ("POST", "/api/member/tasks/refresh"),
             ("GET", "/api/preferences"),
             ("POST", "/api/preferences/mode"),
             ("POST", "/api/preferences/observe"),
@@ -1348,7 +1495,23 @@ class SharelifeWebUIServer:
             return False
         normalized_path = self._normalize_api_path(path)
         normalized_method = str(method or "GET").strip().upper() or "GET"
+        if self._runtime_feature_payload()["allow_anonymous_local_astrbot_import"]:
+            if (
+                normalized_method == "POST"
+                and normalized_path == "/api/member/profile-pack/imports/local-astrbot"
+            ):
+                return True
+            if normalized_method == "GET" and normalized_path == "/api/member/profile-pack/imports":
+                return True
+            if (
+                normalized_method == "DELETE"
+                and normalized_path.startswith("/api/member/profile-pack/imports/")
+            ):
+                return True
         return (normalized_method, normalized_path) in self._auth_anonymous_member_allowlist
+
+    def _local_astrbot_import_enabled(self) -> bool:
+        return self._feature_local_astrbot_import
 
     @staticmethod
     def _reviewer_admin_path_allowed(path: str) -> bool:
@@ -1365,21 +1528,19 @@ class SharelifeWebUIServer:
         uid = str(reviewer_id or "").strip()
         if not uid:
             return
+        service = self._reviewer_auth_service()
+        if service is None:
+            return
+        excluded_session_id = ""
         keep = str(exclude_token or "").strip()
-        for token, session in list(self._auth_tokens.items()):
-            if keep and token == keep:
-                continue
-            if not isinstance(session, dict):
-                continue
-            role = self._normalize_role(str(session.get("role", "") or ""))
-            subject = str(session.get("subject", "") or "").strip()
-            if role == "reviewer" and subject == uid:
-                self._revoke_token(
-                    token,
-                    role=role,
-                    subject=subject,
-                    device_id=str(session.get("device_id", "") or "").strip(),
-                )
+        if keep:
+            session = service.resolve_session(keep)
+            if isinstance(session, dict):
+                excluded_session_id = str(session.get("session_id", "") or "").strip()
+        service.revoke_reviewer_sessions(
+            uid,
+            exclude_session_id=excluded_session_id,
+        )
 
     def _revoke_reviewer_sessions(
         self,
@@ -1389,55 +1550,31 @@ class SharelifeWebUIServer:
         session_id: str = "",
         exclude_token: str = "",
     ) -> dict[str, Any]:
+        service = self._reviewer_auth_service()
         uid = str(reviewer_id or "").strip()
         target_device_id = str(device_id or "").strip()
         target_session_id = str(session_id or "").strip()
-        keep = str(exclude_token or "").strip()
-        revoked_sessions = 0
-        revoked_device_ids: set[str] = set()
-        revoked_session_ids: set[str] = set()
-        if not uid:
+        if service is None:
             return {
-                "reviewer_id": "",
+                "reviewer_id": uid,
                 "device_id": target_device_id,
                 "session_id": target_session_id,
                 "revoked_sessions": 0,
                 "revoked_device_ids": [],
                 "revoked_session_ids": [],
             }
-        for token, session in list(self._auth_tokens.items()):
-            if keep and token == keep:
-                continue
-            if not isinstance(session, dict):
-                continue
-            role = self._normalize_role(str(session.get("role", "") or ""))
-            subject = str(session.get("subject", "") or "").strip()
-            if role != "reviewer" or subject != uid:
-                continue
-            session_device_id = str(session.get("device_id", "") or "").strip()
-            token_session_id = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:16]
-            if target_device_id and session_device_id != target_device_id:
-                continue
-            if target_session_id and token_session_id != target_session_id:
-                continue
-            self._revoke_token(
-                token,
-                role=role,
-                subject=subject,
-                device_id=session_device_id,
-            )
-            revoked_sessions += 1
-            if session_device_id:
-                revoked_device_ids.add(session_device_id)
-            revoked_session_ids.add(token_session_id)
-        return {
-            "reviewer_id": uid,
-            "device_id": target_device_id,
-            "session_id": target_session_id,
-            "revoked_sessions": revoked_sessions,
-            "revoked_device_ids": sorted(revoked_device_ids),
-            "revoked_session_ids": sorted(revoked_session_ids),
-        }
+        excluded_session_id = ""
+        keep = str(exclude_token or "").strip()
+        if keep:
+            session = service.resolve_session(keep)
+            if isinstance(session, dict):
+                excluded_session_id = str(session.get("session_id", "") or "").strip()
+        return service.revoke_reviewer_sessions(
+            uid,
+            device_id=target_device_id,
+            session_id=target_session_id,
+            exclude_session_id=excluded_session_id,
+        )
 
     def _list_reviewer_sessions(
         self,
@@ -1445,38 +1582,13 @@ class SharelifeWebUIServer:
         *,
         device_id: str = "",
     ) -> list[dict[str, Any]]:
-        uid = str(reviewer_id or "").strip()
-        target_device_id = str(device_id or "").strip()
-        rows: list[dict[str, Any]] = []
-        if not uid:
-            return rows
-        now = time.time()
-        for token, session in list(self._auth_tokens.items()):
-            if not isinstance(session, dict):
-                continue
-            role = self._normalize_role(str(session.get("role", "") or ""))
-            subject = str(session.get("subject", "") or "").strip()
-            if role != "reviewer" or subject != uid:
-                continue
-            session_device_id = str(session.get("device_id", "") or "").strip()
-            if target_device_id and session_device_id != target_device_id:
-                continue
-            issued_at = float(session.get("issued_at", 0.0) or 0.0)
-            expires_at = float(session.get("expires_at", 0.0) or 0.0)
-            if expires_at <= now:
-                continue
-            rows.append(
-                {
-                    "session_id": hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:16],
-                    "reviewer_id": subject,
-                    "device_id": session_device_id,
-                    "issued_at": issued_at,
-                    "expires_at": expires_at,
-                    "remaining_seconds": max(0, int(expires_at - now)),
-                }
-            )
-        rows.sort(key=lambda item: float(item.get("issued_at", 0.0) or 0.0), reverse=True)
-        return rows
+        service = self._reviewer_auth_service()
+        if service is None:
+            return []
+        return service.list_reviewer_sessions(
+            str(reviewer_id or "").strip(),
+            device_id=str(device_id or "").strip(),
+        )
 
     def _request_role(self, request: Request, payload: dict[str, Any] | None = None) -> str:
         if self._auth_enabled:
@@ -1536,7 +1648,17 @@ class SharelifeWebUIServer:
                 message="Unauthorized. Please login first.",
                 status_code=401,
             )
-        if (enforce_owner_binding or is_anonymous_member) and requested_user_id and requested_user_id != member_subject:
+        allow_legacy_anonymous_alias = (
+            is_anonymous_member
+            and requested_user_id
+            and requested_user_id == self._auth_anonymous_member_user_id
+        )
+        if (
+            (enforce_owner_binding or is_anonymous_member)
+            and requested_user_id
+            and requested_user_id != member_subject
+            and not allow_legacy_anonymous_alias
+        ):
             return None, self._error_response(
                 code="permission_denied",
                 message="permission denied",
@@ -1547,23 +1669,77 @@ class SharelifeWebUIServer:
             return member_subject, None
         return (requested_user_id or member_subject), None
 
+    def _page_request_role(self, request: Request) -> str | None:
+        if not self._auth_enabled:
+            return None
+        token = self._token_from_request(request)
+        session = self._session_from_token(token)
+        role = self._normalize_role(str(session.get("role", "") or "")) if isinstance(session, dict) else None
+        if role is None:
+            return None
+        request.state.sharelife_auth_role = role
+        request.state.sharelife_auth_subject = str(session.get("subject", "") or "")
+        request.state.sharelife_auth_device_id = str(session.get("device_id", "") or "")
+        return role
+
+    def _authorize_console_page(
+        self,
+        request: Request,
+        *,
+        allowed_roles: set[str],
+        denied_event: str,
+    ) -> JSONResponse | None:
+        if not self._auth_enabled:
+            return self._error_response(
+                code="permission_denied",
+                message="permission denied",
+                status_code=403,
+                data={"error": "permission_denied"},
+            )
+        role = self._page_request_role(request)
+        path = self._normalize_api_path(request.url.path)
+        if role is None:
+            self._record_auth_event(event="unauthorized", role="public")
+            self._maybe_emit_security_alert(
+                request=request,
+                event="unauthorized_privileged_route",
+                role="public",
+                path=path,
+                reason="missing_or_expired_token",
+                threshold=1,
+            )
+            return self._error_response(
+                code="unauthorized",
+                message="Unauthorized. Please login first.",
+                status_code=401,
+            )
+        if role not in allowed_roles:
+            self._record_auth_event(event="forbidden", role=role)
+            self._maybe_emit_security_alert(
+                request=request,
+                event=denied_event,
+                role=role,
+                path=path,
+                reason="console_route_denied",
+                threshold=1,
+            )
+            return self._error_response(
+                code="permission_denied",
+                message="permission denied",
+                status_code=403,
+                data={"error": "permission_denied"},
+            )
+        return None
+
     def _register_routes(self) -> None:
         @self.app.get("/")
+        @self.app.get("/index.html")
         async def console_page():
-            index_path = self.web_root / "index.html"
-            if not index_path.exists():
-                return JSONResponse(
-                    {
-                        "ok": False,
-                        "message": "console page not found",
-                        "error": {
-                            "code": "webui_page_not_found",
-                            "message": "console page not found",
-                        },
-                    },
-                    status_code=404,
-                )
-            return FileResponse(path=index_path, media_type="text/html")
+            return RedirectResponse(url="/member", status_code=307)
+
+        @self.app.get("/member.html")
+        async def member_console_page_legacy():
+            return RedirectResponse(url="/member", status_code=307)
 
         @self.app.get("/member")
         @self.app.get("/member/")
@@ -1587,9 +1763,20 @@ class SharelifeWebUIServer:
                 )
             return FileResponse(path=member_path, media_type="text/html")
 
+        @self.app.get("/admin.html")
+        async def admin_console_page_legacy():
+            return RedirectResponse(url="/admin", status_code=307)
+
         @self.app.get("/admin")
         @self.app.get("/admin/")
-        async def admin_console_page():
+        async def admin_console_page(request: Request):
+            denied = self._authorize_console_page(
+                request,
+                allowed_roles={"admin"},
+                denied_event="forbidden_admin_route",
+            )
+            if denied is not None:
+                return denied
             admin_path = self.web_root / "admin.html"
             if not admin_path.exists():
                 admin_path = self.web_root / "index.html"
@@ -1607,9 +1794,20 @@ class SharelifeWebUIServer:
                 )
             return FileResponse(path=admin_path, media_type="text/html")
 
+        @self.app.get("/reviewer.html")
+        async def reviewer_console_page_legacy():
+            return RedirectResponse(url="/reviewer", status_code=307)
+
         @self.app.get("/reviewer")
         @self.app.get("/reviewer/")
-        async def reviewer_console_page():
+        async def reviewer_console_page(request: Request):
+            denied = self._authorize_console_page(
+                request,
+                allowed_roles={"reviewer", "admin"},
+                denied_event="forbidden_reviewer_route",
+            )
+            if denied is not None:
+                return denied
             reviewer_path = self.web_root / "reviewer.html"
             if not reviewer_path.exists():
                 reviewer_path = self.web_root / "index.html"
@@ -1645,6 +1843,23 @@ class SharelifeWebUIServer:
                 )
             return FileResponse(path=market_path, media_type="text/html")
 
+        @self.app.get("/market/packs/{pack_id:path}")
+        async def market_detail_page(pack_id: str):
+            market_detail_path = self.web_root / "market_detail.html"
+            if not market_detail_path.exists():
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "message": "market detail page not found",
+                        "error": {
+                            "code": "webui_page_not_found",
+                            "message": "market detail page not found",
+                        },
+                    },
+                    status_code=404,
+                )
+            return FileResponse(path=market_detail_path, media_type="text/html")
+
         @self.app.get("/api/auth-info")
         async def auth_info():
             return {
@@ -1661,19 +1876,12 @@ class SharelifeWebUIServer:
                     f"{method} {path}"
                     for method, path in self._auth_anonymous_member_allowlist
                 ),
+                **self._runtime_feature_payload(),
             }
 
         @self.app.get("/api/ui/capabilities")
         async def ui_capabilities(request: Request, page_mode: str = ""):
-            role = self._request_ui_capability_role(request)
-            return {
-                "ok": True,
-                "auth_required": self._auth_enabled,
-                "role": role,
-                "available_roles": self._available_auth_roles() if self._auth_enabled else ["member", "reviewer", "admin"],
-                "operations": self._operations_for_role(role),
-                "console_scopes": self._console_scopes_for_role(page_mode=page_mode, role=role),
-            }
+            return self._ui_capability_payload(request, page_mode=page_mode)
 
         @self.app.post("/api/login")
         async def login(request: Request, payload: dict[str, Any]):
@@ -1707,7 +1915,13 @@ class SharelifeWebUIServer:
                     status_code=429,
                 )
             provided = str(payload.get("password", "") or "")
-            expected = self._auth_passwords.get(role, "")
+            reviewer_auth_service = self._reviewer_auth_service()
+            if reviewer_auth_service is None:
+                return self._error_response(
+                    code="reviewer_auth_service_unavailable",
+                    message="reviewer auth service unavailable",
+                    status_code=503,
+                )
             member_user_id = ""
             reviewer_id = ""
             reviewer_device_id = ""
@@ -1716,13 +1930,6 @@ class SharelifeWebUIServer:
             if role == "reviewer":
                 reviewer_id = self._reviewer_id(payload)
                 reviewer_device_key = str(payload.get("reviewer_device_key", "") or "").strip()
-                reviewer_auth_service = self._reviewer_auth_service()
-                if reviewer_auth_service is None:
-                    return self._error_response(
-                        code="reviewer_auth_service_unavailable",
-                        message="reviewer auth service unavailable",
-                        status_code=503,
-                    )
                 if not reviewer_id:
                     return self._error_response(
                         code="reviewer_id_required",
@@ -1746,16 +1953,21 @@ class SharelifeWebUIServer:
                         status_code=401,
                     )
                 reviewer_device_id = str(device.get("device_id", "") or "").strip()
-            if expected and secrets.compare_digest(provided, expected):
+            if role not in self._active_auth_roles:
+                self._record_login_failure(request, role)
+                return self._error_response(
+                    code="invalid_credentials",
+                    message="Password is incorrect.",
+                    status_code=401,
+                )
+            if reviewer_auth_service.verify_bootstrap_password(role, provided):
                 self._clear_login_failures(request, role)
                 self._record_auth_event(event="login_success", role=role)
                 if role == "reviewer":
-                    reviewer_auth_service = self._reviewer_auth_service()
-                    if reviewer_auth_service is not None:
-                        reviewer_auth_service.mark_device_used(
-                            user_id=reviewer_id,
-                            device_id=reviewer_device_id,
-                        )
+                    reviewer_auth_service.mark_device_used(
+                        user_id=reviewer_id,
+                        device_id=reviewer_device_id,
+                    )
                 return {
                     "ok": True,
                     "auth_required": True,
@@ -1885,8 +2097,11 @@ class SharelifeWebUIServer:
             reviewer_id = self._request_reviewer_id(request, payload)
             if self._auth_enabled and role not in {"reviewer", "admin"}:
                 provided = str(payload.get("password", "") or "")
-                expected = self._auth_passwords.get("reviewer", "")
-                if not expected or not secrets.compare_digest(provided, expected):
+                reviewer_auth_service = self._reviewer_auth_service()
+                if reviewer_auth_service is None or not reviewer_auth_service.verify_bootstrap_password(
+                    "reviewer",
+                    provided,
+                ):
                     return self._error_response(
                         code="invalid_credentials",
                         message="Password is incorrect.",
@@ -2167,6 +2382,14 @@ class SharelifeWebUIServer:
                 if isinstance(payload.get("upload_options"), dict)
                 else None
             )
+            header_idempotency_key = str(
+                request.headers.get("idempotency-key")
+                or request.headers.get("x-idempotency-key")
+                or "",
+            ).strip()
+            if header_idempotency_key:
+                upload_options = dict(upload_options or {})
+                upload_options.setdefault("idempotency_key", header_idempotency_key)
             user_id, denied = self._request_member_user_id(request, payload=payload)
             if denied is not None or user_id is None:
                 return denied
@@ -2261,6 +2484,96 @@ class SharelifeWebUIServer:
                 )
             )
 
+        @self.app.get("/api/member/tasks")
+        async def member_tasks(
+            request: Request,
+            user_id: str = "",
+            limit: int = 50,
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.list_member_tasks(
+                    user_id=normalized_user_id,
+                    limit=limit,
+                )
+            )
+
+        @self.app.post("/api/member/tasks/refresh")
+        async def member_tasks_refresh(request: Request, payload: dict[str, Any]):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.refresh_member_tasks(
+                    user_id=normalized_user_id,
+                    limit=_to_int(payload.get("limit"), 50),
+                )
+            )
+
+        @self.app.get("/api/member/transfers")
+        async def member_transfers(
+            request: Request,
+            user_id: str = "",
+            direction: str = "",
+            status: str = "",
+            limit: int = 50,
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.list_member_transfer_jobs(
+                    user_id=normalized_user_id,
+                    direction=direction,
+                    status=status,
+                    limit=limit,
+                )
+            )
+
+        @self.app.post("/api/member/transfers/refresh")
+        async def member_transfers_refresh(request: Request, payload: dict[str, Any]):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.refresh_member_transfer_jobs(
+                    user_id=normalized_user_id,
+                    direction=str(payload.get("direction", "") or ""),
+                    status=str(payload.get("status", "") or ""),
+                    limit=_to_int(payload.get("limit"), 50),
+                )
+            )
+
+        @self.app.post("/api/member/installations/uninstall")
+        async def member_installations_uninstall(request: Request, payload: dict[str, Any]):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                payload=payload,
+                enforce_owner_binding=False,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.uninstall_member_installation(
+                    user_id=normalized_user_id,
+                    template_id=str(payload.get("template_id", "") or ""),
+                )
+            )
+
         @self.app.get("/api/member/submissions")
         async def member_submissions(
             request: Request,
@@ -2319,9 +2632,15 @@ class SharelifeWebUIServer:
             )
             if denied is not None or normalized_user_id is None:
                 return denied
+            idempotency_key = str(
+                request.headers.get("idempotency-key")
+                or request.headers.get("x-idempotency-key")
+                or "",
+            ).strip()
             result = self.api.member_get_submission_package(
                 user_id=normalized_user_id,
                 submission_id=submission_id,
+                idempotency_key=idempotency_key,
             )
             if not result.ok:
                 return self._response(result)
@@ -2339,11 +2658,20 @@ class SharelifeWebUIServer:
                     },
                     status_code=404,
                 )
-            return FileResponse(
+            response = FileResponse(
                 path=path,
                 media_type="application/zip",
                 filename=str(artifact.get("filename", "") or path.name),
             )
+            transfer_job = artifact.get("transfer_job", {}) if isinstance(artifact, dict) else {}
+            if isinstance(transfer_job, dict):
+                job_id = str(transfer_job.get("job_id", "") or "").strip()
+                if job_id:
+                    response.headers["X-Sharelife-Transfer-Job-Id"] = job_id
+                status_value = str(transfer_job.get("status", "") or "").strip()
+                if status_value:
+                    response.headers["X-Sharelife-Transfer-Status"] = status_value
+            return response
 
         @self.app.post("/api/templates/install")
         async def install_template(request: Request, payload: dict[str, Any]):
@@ -2390,6 +2718,14 @@ class SharelifeWebUIServer:
                 if isinstance(payload.get("submit_options"), dict)
                 else None
             )
+            header_idempotency_key = str(
+                request.headers.get("idempotency-key")
+                or request.headers.get("x-idempotency-key")
+                or "",
+            ).strip()
+            if header_idempotency_key:
+                submit_options = dict(submit_options or {})
+                submit_options.setdefault("idempotency_key", header_idempotency_key)
             user_id, denied = self._request_member_user_id(request, payload=payload)
             if denied is not None or user_id is None:
                 return denied
@@ -2398,6 +2734,75 @@ class SharelifeWebUIServer:
                     user_id=user_id,
                     artifact_id=str(payload.get("artifact_id", "") or ""),
                     submit_options=submit_options,
+                )
+            )
+
+        @self.app.post("/api/member/profile-pack/imports")
+        async def member_profile_pack_imports_create(request: Request, payload: dict[str, Any]):
+            user_id, denied = self._request_member_user_id(request, payload=payload)
+            if denied is not None or user_id is None:
+                return denied
+            return self._response(
+                self.api.member_import_profile_pack(
+                    user_id=user_id,
+                    filename=str(payload.get("filename", "") or ""),
+                    content_base64=str(payload.get("content_base64", "") or ""),
+                )
+            )
+
+        @self.app.post("/api/member/profile-pack/imports/local-astrbot")
+        async def member_profile_pack_imports_local_astrbot_create(
+            request: Request,
+            payload: dict[str, Any],
+        ):
+            if not self._local_astrbot_import_enabled():
+                return self._error_response(
+                    code="feature_disabled",
+                    message="local AstrBot import is disabled",
+                    status_code=404,
+                )
+            user_id, denied = self._request_member_user_id(request, payload=payload)
+            if denied is not None or user_id is None:
+                return denied
+            return self._response(
+                self.api.member_import_local_astrbot_config(user_id=user_id)
+            )
+
+        @self.app.get("/api/member/profile-pack/imports")
+        async def member_profile_pack_imports_list(
+            request: Request,
+            user_id: str = "",
+            limit: int = 50,
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.member_list_profile_pack_imports(
+                    user_id=normalized_user_id,
+                    limit=limit,
+                )
+            )
+
+        @self.app.delete("/api/member/profile-pack/imports/{import_id}")
+        async def member_profile_pack_import_delete(
+            request: Request,
+            import_id: str,
+            user_id: str = "",
+        ):
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.member_delete_profile_pack_import(
+                    user_id=normalized_user_id,
+                    import_id=import_id,
                 )
             )
 
@@ -2446,6 +2851,18 @@ class SharelifeWebUIServer:
                 self.api.member_get_profile_pack_submission_detail(
                     user_id=normalized_user_id,
                     submission_id=submission_id,
+                )
+            )
+
+        @self.app.post("/api/member/profile-pack/submissions/withdraw")
+        async def member_profile_pack_submission_withdraw(request: Request, payload: dict[str, Any]):
+            user_id, denied = self._request_member_user_id(request, payload=payload)
+            if denied is not None or user_id is None:
+                return denied
+            return self._response(
+                self.api.member_withdraw_profile_pack_submission(
+                    user_id=user_id,
+                    submission_id=str(payload.get("submission_id", "") or ""),
                 )
             )
 
@@ -3085,6 +3502,32 @@ class SharelifeWebUIServer:
             return self._response(
                 self.api.admin_storage_local_summary(
                     role=self._request_role(request),
+                )
+            )
+
+        @self.app.get("/api/admin/artifacts")
+        async def admin_artifacts_list(request: Request, artifact_kind: str = "", limit: int = 50):
+            return self._response(
+                self.api.admin_list_artifacts(
+                    role=self._request_role(request),
+                    artifact_kind=artifact_kind,
+                    limit=limit,
+                )
+            )
+
+        @self.app.post("/api/admin/artifacts/mirror")
+        async def admin_artifact_mirror(request: Request, payload: dict[str, Any]):
+            return self._response(
+                self.api.admin_mirror_artifact(
+                    role=self._request_role(request, payload),
+                    artifact_id=str(payload.get("artifact_id", "") or ""),
+                    admin_id=self._admin_id(payload),
+                    remote_path=str(payload.get("remote_path", "") or ""),
+                    rclone_binary=str(payload.get("rclone_binary", "") or "rclone"),
+                    timeout_seconds=_to_int(payload.get("timeout_seconds"), 300),
+                    bwlimit=str(payload.get("bwlimit", "") or ""),
+                    encryption_required=_to_bool(payload.get("encryption_required"), True),
+                    remote_encryption_verified=_to_bool(payload.get("remote_encryption_verified"), False),
                 )
             )
 

@@ -17,3 +17,8 @@ Documentation follows Diataxis:
 - How-to guides
 - Reference
 - Explanation
+
+Local-only additions:
+
+- Internal / private workspace notes
+- Internal plans, specs, and solution notes

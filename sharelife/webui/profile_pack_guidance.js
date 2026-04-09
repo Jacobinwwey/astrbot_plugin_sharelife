@@ -121,6 +121,22 @@
       issueKey: "profile_pack.issue.section_hash_mismatch",
       severity: "warning",
     },
+    astrbot_raw_import_converted: {
+      issueKey: "profile_pack.issue.astrbot_raw_import_converted",
+      severity: "warning",
+    },
+    astrbot_backup_runtime_payload_omitted: {
+      issueKey: "profile_pack.issue.astrbot_backup_runtime_payload_omitted",
+      severity: "warning",
+    },
+    astrbot_operator_fields_omitted: {
+      issueKey: "profile_pack.issue.astrbot_operator_fields_omitted",
+      severity: "warning",
+    },
+    astrbot_plugin_wildcard_unresolved: {
+      issueKey: "profile_pack.issue.astrbot_plugin_wildcard_unresolved",
+      severity: "warning",
+    },
   })
 
   const ACTION_TARGETS = Object.freeze({
@@ -205,6 +221,22 @@
       out.push(code)
     })
     return out
+  }
+
+  function buildI18n(options = {}) {
+    const t = typeof options.t === "function"
+      ? options.t
+      : (_key, fallback = "") => String(fallback || "")
+    const f = typeof options.f === "function"
+      ? options.f
+      : (key, fallback = "", tokens = {}) => {
+        const template = t(key, fallback)
+        return String(template).replace(/\{([a-zA-Z0-9_]+)\}/g, (match, token) => {
+          if (!Object.prototype.hasOwnProperty.call(tokens, token)) return match
+          return String(tokens[token] ?? "")
+        })
+      }
+    return { t, f }
   }
 
   function normalizeNameList(values) {
@@ -319,6 +351,31 @@
     }
   }
 
+  function formatIssueLabel(code, options = {}) {
+    const raw = textValue(code)
+    if (!raw) return "-"
+    const i18n = buildI18n(options)
+    if (raw.toLowerCase().startsWith("section_hash_mismatch:")) {
+      const section = raw.split(":", 2)[1] || ""
+      return i18n.f(
+        "profile_pack.issue.section_hash_mismatch_with_section",
+        "Section hash mismatch: {section}",
+        { section: section || "-" },
+      )
+    }
+    const view = buildCompatibilityIssueView({
+      compatibility: "unknown",
+      compatibility_issues: [raw],
+    })
+    const issue = view.issues[0]
+    if (!issue) return raw
+    return i18n.t(issue.issueKey, raw)
+  }
+
+  function formatIssueLabels(values, options = {}) {
+    return normalizeIssueList(values).map((code) => formatIssueLabel(code, options))
+  }
+
   const api = {
     describeSection,
     normalizeIssueList,
@@ -327,6 +384,8 @@
     resolveActionPrefill,
     resolveIssueActionCode,
     buildCompatibilityIssueView,
+    formatIssueLabel,
+    formatIssueLabels,
   }
 
   if (typeof module !== "undefined" && module.exports) {

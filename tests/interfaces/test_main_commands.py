@@ -6,7 +6,12 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.run_sharelife_webui_standalone import build_server as standalone_build_server
+from scripts.migrate_state_to_sqlite import state_store_filenames as migrate_state_store_filenames
+from scripts.run_sharelife_webui_standalone import (
+    apply_standalone_feature_defaults,
+    build_server as standalone_build_server,
+    state_store_filenames as standalone_state_store_filenames,
+)
 
 
 class FakeEvent:
@@ -195,6 +200,36 @@ def test_sharelife_state_store_sqlite_persists_profile_pack_exports_across_reloa
     assert "profile/sqlite@1.0.0" in exports
 
 
+def test_sharelife_state_store_mappings_include_artifact_and_continuity_state(tmp_path: Path) -> None:
+    module = _load_plugin_module(tmp_path)
+
+    assert "artifact_state" in module.SharelifePlugin._state_store_filenames()
+    assert "continuity_state" in module.SharelifePlugin._state_store_filenames()
+    assert "artifact_state" in standalone_state_store_filenames()
+    assert "continuity_state" in standalone_state_store_filenames()
+    assert "artifact_state" in migrate_state_store_filenames()
+    assert "continuity_state" in migrate_state_store_filenames()
+
+
+def test_standalone_feature_defaults_disable_host_local_astrbot_import_by_default() -> None:
+    defaulted = apply_standalone_feature_defaults({"webui": {}})
+    assert defaulted["webui"]["features"]["local_astrbot_import"] is False
+    assert defaulted["webui"]["features"]["allow_anonymous_local_astrbot_import"] is False
+
+    explicit = apply_standalone_feature_defaults(
+        {
+            "webui": {
+                "features": {
+                    "local_astrbot_import": True,
+                    "allow_anonymous_local_astrbot_import": True,
+                }
+            }
+        }
+    )
+    assert explicit["webui"]["features"]["local_astrbot_import"] is True
+    assert explicit["webui"]["features"]["allow_anonymous_local_astrbot_import"] is True
+
+
 def test_sharelife_continuity_retention_is_configurable_from_plugin_config(tmp_path: Path) -> None:
     module = _load_plugin_module(tmp_path)
     plugin = module.SharelifePlugin(
@@ -219,6 +254,26 @@ def test_sharelife_continuity_retention_is_configurable_in_standalone_runner(tmp
     assert server is not None
     assert api.apply_service.continuity_service is not None
     assert api.apply_service.continuity_service.max_entries == 9
+
+
+def test_sharelife_state_store_sqlite_persists_template_artifacts_across_reloads(tmp_path: Path) -> None:
+    module = _load_plugin_module(tmp_path)
+    sqlite_file = tmp_path / "sharelife_state.sqlite3"
+    config = {
+        "webui": {"enabled": False},
+        "state_store": {"backend": "sqlite", "sqlite_file": str(sqlite_file)},
+    }
+
+    plugin = module.SharelifePlugin(module.Context(), config=config)
+    artifact = plugin.package_service.export_template_package("community/basic")
+
+    reloaded_plugin = module.SharelifePlugin(module.Context(), config=config)
+    resolved = reloaded_plugin.package_service.resolve_package_artifact_metadata(
+        {"artifact_id": artifact.artifact_id}
+    )
+
+    assert resolved["artifact_id"] == artifact.artifact_id
+    assert Path(resolved["path"]).exists()
 
 
 def test_sharelife_market_lists_bundled_official_template(tmp_path: Path) -> None:

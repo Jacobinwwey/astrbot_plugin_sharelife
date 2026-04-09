@@ -4,6 +4,7 @@ import io
 import json
 import zipfile
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -56,6 +57,62 @@ def build_service(tmp_path, **service_kwargs):
         **service_kwargs,
     )
     return service, apply_service, runtime
+
+
+def astrbot_cmd_config_fixture(*, plugin_set: list[str] | None = None) -> dict:
+    return {
+        "config_version": 2,
+        "provider": [
+            {
+                "id": "test-openai",
+                "type": "openai_chat_completion",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "key": ["test-key"],
+                "base_url": "https://api.openai.com/v1",
+            }
+        ],
+        "provider_settings": {
+            "default_personality": "default",
+            "prompt_prefix": "",
+            "websearch_tavily_key": ["tvly-secret"],
+            "identifier": True,
+            "group_name_display": True,
+        },
+        "default_personality": "default",
+        "dashboard": {
+            "enable": True,
+            "username": "astrbot",
+            "password": "dashboard-secret",
+            "jwt_secret": "jwt-secret",
+            "port": 6185,
+        },
+        "admins_id": ["owner"],
+        "platform": [],
+        "timezone": "Asia/Shanghai",
+        "plugin_set": list(plugin_set if plugin_set is not None else ["*"]),
+    }
+
+
+def build_astrbot_backup_zip(config_payload: dict, *, astrbot_version: str = "4.16.0") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "astrbot_version": astrbot_version,
+                    "backup_time": "2026-04-07T12:00:00Z",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        zf.writestr("config/cmd_config.json", json.dumps(config_payload, ensure_ascii=False, indent=2))
+        zf.writestr("databases/main_db.json", json.dumps({"messages": []}, ensure_ascii=False))
+        zf.writestr("directories/config/abconf_extra.json", json.dumps({"timezone": "UTC"}, ensure_ascii=False))
+    return buffer.getvalue()
 
 
 def test_export_profile_pack_generates_expected_zip_layout_and_redacts_provider_key(tmp_path):
@@ -256,6 +313,465 @@ def test_profile_pack_service_imports_legacy_state_store_payload_into_sqlite_rep
     assert len(imports) == 1
     assert exports[0]["artifact_id"] == exported.artifact_id
     assert imports[0]["import_id"] == imported.import_id
+
+
+def test_profile_pack_service_converts_raw_astrbot_backup_zip_into_standard_member_artifact(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    backup_bytes = build_astrbot_backup_zip(astrbot_cmd_config_fixture())
+
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="astrbot_backup_20260407.zip",
+        content=backup_bytes,
+    )
+
+    assert imported.user_id == "member-1"
+    assert imported.source_artifact_id
+    assert imported.filename.endswith(".zip")
+    assert imported.compatibility == "degraded"
+    assert "astrbot_raw_import_converted" in imported.compatibility_issues
+    assert "astrbot_backup_runtime_payload_omitted" in imported.compatibility_issues
+    assert "astrbot_operator_fields_omitted" in imported.compatibility_issues
+    assert "astrbot_plugin_wildcard_unresolved" in imported.compatibility_issues
+    assert imported.sections["sharelife_meta"]["astrbot_import"]["source_type"] == "astrbot_backup_zip"
+    assert "dashboard" not in imported.sections["astrbot_core"]
+    assert "admins_id" not in imported.sections["astrbot_core"]
+    assert imported.sections["providers"]["test-openai"]["model"] == "gpt-4o-mini"
+    assert "key" not in imported.sections["providers"]["test-openai"]
+
+    artifact = service.get_export_artifact(imported.source_artifact_id)
+    assert artifact.owner_user_id == "member-1"
+    assert artifact.path.exists()
+    with zipfile.ZipFile(artifact.path, "r") as zf:
+        names = set(zf.namelist())
+        assert "manifest.json" in names
+        assert "sections/astrbot_core.json" in names
+        assert "sections/providers.json" in names
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        meta = json.loads(zf.read("sections/sharelife_meta.json").decode("utf-8"))
+    assert manifest["pack_type"] == "bot_profile_pack"
+    assert meta["astrbot_import"]["source_filename"] == "astrbot_backup_20260407.zip"
+
+    submission = service.submit_export_artifact(
+        user_id="member-1",
+        artifact_id=imported.source_artifact_id,
+    )
+    assert submission.status == "pending"
+    assert submission.compatibility == "degraded"
+    assert "astrbot_raw_import_converted" in submission.compatibility_issues
+
+
+def test_profile_pack_service_converts_raw_astrbot_cmd_config_json(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    raw_bytes = json.dumps(
+        astrbot_cmd_config_fixture(plugin_set=["sharelife", "community_tools"]),
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=raw_bytes,
+    )
+
+    assert imported.compatibility == "degraded"
+    assert "astrbot_raw_import_converted" in imported.compatibility_issues
+    assert "astrbot_operator_fields_omitted" in imported.compatibility_issues
+    assert "astrbot_plugin_wildcard_unresolved" not in imported.compatibility_issues
+    assert imported.sections["sharelife_meta"]["astrbot_import"]["source_type"] == "astrbot_cmd_config_json"
+    assert sorted(imported.sections["plugins"].keys()) == ["community_tools", "sharelife"]
+    assert imported.sections["providers"]["test-openai"]["base_url"] == "https://api.openai.com/v1"
+    assert "key" not in imported.sections["providers"]["test-openai"]
+    assert imported.sections["astrbot_core"]["provider_settings"]["websearch_tavily_key"] == ["***REDACTED***"]
+
+
+def test_profile_pack_service_extracts_persona_and_subagent_sections_from_astrbot_config(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    raw_bytes = json.dumps(
+        {
+            **astrbot_cmd_config_fixture(plugin_set=["sharelife", "community_tools"]),
+            "provider_settings": {
+                "default_personality": "zeroclaw_migrated",
+                "persona_pool": ["*", "analyst"],
+                "websearch_tavily_key": ["tvly-secret"],
+            },
+            "persona": [
+                {
+                    "name": "analyst",
+                    "system_prompt": "Analyze before acting.",
+                }
+            ],
+            "subagent_orchestrator": {
+                "main_enable": True,
+                "agents": [
+                    {"name": "planner_prometheus", "enabled": True},
+                    {"name": "reviewer_oracle", "enabled": False},
+                ],
+            },
+            "platform": [
+                {
+                    "type": "slack",
+                    "enabled": True,
+                    "app_id": "slack-app",
+                }
+            ],
+            "provider_sources": [{"id": "builtin-default", "enabled": True}],
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=raw_bytes,
+    )
+
+    assert "personas" in imported.sections
+    assert imported.sections["personas"]["runtime"]["default_personality"] == "zeroclaw_migrated"
+    assert imported.sections["personas"]["runtime"]["persona_pool"] == ["*", "analyst"]
+    assert imported.sections["personas"]["entries"]["analyst"]["system_prompt"] == "Analyze before acting."
+    assert "environment_manifest" in imported.sections
+    assert imported.sections["environment_manifest"]["subagent_orchestrator"]["agents"][0]["name"] == "planner_prometheus"
+    assert imported.sections["environment_manifest"]["subagent_orchestrator"]["enabled_agents"] == [
+        "planner_prometheus"
+    ]
+    summary = imported.sections["sharelife_meta"]["astrbot_import"]["summary"]
+    assert summary["default_personality"] == "zeroclaw_migrated"
+    assert summary["persona_count"] == 1
+    assert summary["subagent_count"] == 1
+    assert summary["platform_count"] == 1
+
+
+def test_profile_pack_service_exposes_selection_tree_for_astrbot_import(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    raw_bytes = json.dumps(
+        {
+            **astrbot_cmd_config_fixture(plugin_set=["sharelife", "community_tools"]),
+            "provider_settings": {
+                "default_personality": "analyst",
+                "persona_pool": ["analyst", "helper"],
+                "websearch_tavily_key": ["tvly-secret"],
+            },
+            "persona": [
+                {"name": "analyst", "system_prompt": "Analyze before acting."},
+                {"name": "helper", "system_prompt": "Help with rollout tasks."},
+            ],
+            "subagent_orchestrator": {
+                "main_enable": True,
+                "agents": [
+                    {"name": "planner_prometheus", "enabled": True},
+                    {"name": "reviewer_oracle", "enabled": False},
+                ],
+            },
+            "platform": [
+                {"id": "slack-main", "type": "slack", "enabled": True},
+                {"type": "telegram", "enabled": True},
+            ],
+            "provider_sources": [
+                {"id": "builtin-default", "enabled": True},
+                {"id": "community-mirror", "enabled": False},
+            ],
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=raw_bytes,
+    )
+    imports = service.list_imports(limit=10)
+    selection_tree = imports[0]["selection_tree"]
+    section_names = [item["name"] for item in selection_tree]
+
+    assert "personas" in section_names
+    assert "environment_manifest" in section_names
+    assert "astrbot_core" in section_names
+
+    personas_section = next(item for item in selection_tree if item["name"] == "personas")
+    persona_paths = {
+        node["path"]
+        for node in personas_section["items"]
+        if isinstance(node, dict) and isinstance(node.get("path"), str)
+    }
+    assert "personas.runtime" in persona_paths
+    assert "personas.entries" in persona_paths
+
+    runtime_node = next(item for item in personas_section["items"] if item["path"] == "personas.runtime")
+    runtime_paths = {child["path"] for child in runtime_node["children"]}
+    assert "personas.runtime.default_personality" in runtime_paths
+    assert "personas.runtime.persona_pool" in runtime_paths
+    assert runtime_node["preview_lines"]
+    persona_pool_node = next(
+        item for item in runtime_node["children"] if item["path"] == "personas.runtime.persona_pool"
+    )
+    persona_pool_paths = {child["path"] for child in persona_pool_node["children"]}
+    assert "personas.runtime.persona_pool[0]" in persona_pool_paths
+    assert "personas.runtime.persona_pool[1]" in persona_pool_paths
+
+    entries_node = next(item for item in personas_section["items"] if item["path"] == "personas.entries")
+    entry_paths = {child["path"] for child in entries_node["children"]}
+    assert "personas.entries.analyst" in entry_paths
+    assert "personas.entries.helper" in entry_paths
+    analyst_node = next(item for item in entries_node["children"] if item["path"] == "personas.entries.analyst")
+    analyst_paths = {child["path"] for child in analyst_node["children"]}
+    assert "personas.entries.analyst.system_prompt" in analyst_paths
+    assert "Analyze before acting." in "\n".join(analyst_node["preview_lines"])
+    system_prompt_node = next(
+        item for item in analyst_node["children"] if item["path"] == "personas.entries.analyst.system_prompt"
+    )
+    assert system_prompt_node["preview_lines"] == ["Analyze before acting."]
+
+    env_section = next(item for item in selection_tree if item["name"] == "environment_manifest")
+    env_paths = {
+        node["path"]
+        for node in env_section["items"]
+        if isinstance(node, dict) and isinstance(node.get("path"), str)
+    }
+    assert "environment_manifest.subagent_orchestrator" in env_paths
+    assert "environment_manifest.platform" in env_paths
+    assert "environment_manifest.provider_sources" in env_paths
+
+    subagent_node = next(
+        item for item in env_section["items"] if item["path"] == "environment_manifest.subagent_orchestrator"
+    )
+    subagent_paths = {child["path"] for child in subagent_node["children"]}
+    assert "environment_manifest.subagent_orchestrator.agents[0]" in subagent_paths
+    assert "environment_manifest.subagent_orchestrator.agents[1]" in subagent_paths
+    first_agent_node = next(
+        item for item in subagent_node["children"] if item["path"] == "environment_manifest.subagent_orchestrator.agents[0]"
+    )
+    first_agent_paths = {child["path"] for child in first_agent_node["children"]}
+    assert "environment_manifest.subagent_orchestrator.agents[0].name" in first_agent_paths
+    assert "environment_manifest.subagent_orchestrator.agents[0].enabled" in first_agent_paths
+
+    platform_node = next(item for item in env_section["items"] if item["path"] == "environment_manifest.platform")
+    platform_paths = {child["path"] for child in platform_node["children"]}
+    assert "environment_manifest.platform[0]" in platform_paths
+    assert "environment_manifest.platform[1]" in platform_paths
+    first_platform_node = next(
+        item for item in platform_node["children"] if item["path"] == "environment_manifest.platform[0]"
+    )
+    first_platform_paths = {child["path"] for child in first_platform_node["children"]}
+    assert "environment_manifest.platform[0].id" in first_platform_paths
+    assert "environment_manifest.platform[0].type" in first_platform_paths
+    assert "slack-main" in "\n".join(first_platform_node["preview_lines"])
+
+    astrbot_core_section = next(item for item in selection_tree if item["name"] == "astrbot_core")
+    provider_settings_node = next(
+        item for item in astrbot_core_section["items"] if item["path"] == "astrbot_core.provider_settings"
+    )
+    provider_settings_paths = {child["path"] for child in provider_settings_node["children"]}
+    assert "astrbot_core.provider_settings.websearch_tavily_key" in provider_settings_paths
+    tavily_node = next(
+        item
+        for item in provider_settings_node["children"]
+        if item["path"] == "astrbot_core.provider_settings.websearch_tavily_key"
+    )
+    tavily_paths = {child["path"] for child in tavily_node["children"]}
+    assert "astrbot_core.provider_settings.websearch_tavily_key[0]" in tavily_paths
+
+
+def test_profile_pack_service_refreshes_local_astrbot_import_without_duplicate_drafts(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    initial_bytes = json.dumps(
+        {
+            **astrbot_cmd_config_fixture(plugin_set=["sharelife"]),
+            "provider_settings": {"default_personality": "alpha"},
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+    refreshed_bytes = json.dumps(
+        {
+            **astrbot_cmd_config_fixture(plugin_set=["sharelife", "community_tools"]),
+            "provider_settings": {"default_personality": "beta"},
+            "subagent_orchestrator": {
+                "agents": [{"name": "planner_prometheus", "enabled": True}],
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    first = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=initial_bytes,
+        import_origin="local_astrbot_detected",
+        source_fingerprint="local-config-1",
+        refresh_existing=True,
+    )
+    first_artifact_path = service.get_export_artifact(first.source_artifact_id).path
+    assert first_artifact_path.exists()
+
+    second = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=refreshed_bytes,
+        import_origin="local_astrbot_detected",
+        source_fingerprint="local-config-1",
+        refresh_existing=True,
+    )
+
+    imports = service.list_imports(limit=10, user_id="member-1")
+    assert [item["import_id"] for item in imports] == [second.import_id]
+    assert imports[0]["import_origin"] == "local_astrbot_detected"
+    assert imports[0]["import_summary"]["default_personality"] == "beta"
+    assert imports[0]["import_summary"]["subagent_count"] == 1
+    assert not first_artifact_path.exists()
+    with pytest.raises(ValueError, match="PROFILE_IMPORT_NOT_FOUND"):
+        service.get_import_record(first.import_id)
+
+
+def test_profile_pack_service_deletes_unsubmitted_member_import_draft(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=json.dumps(astrbot_cmd_config_fixture(), ensure_ascii=False, indent=2).encode("utf-8"),
+    )
+    artifact_path = service.get_export_artifact(imported.source_artifact_id).path
+
+    deleted = service.delete_import(
+        user_id="member-1",
+        import_id=imported.import_id,
+    )
+
+    assert deleted.import_id == imported.import_id
+    assert service.list_imports(limit=10, user_id="member-1") == []
+    assert not artifact_path.exists()
+    with pytest.raises(ValueError, match="PROFILE_IMPORT_NOT_FOUND"):
+        service.get_import_record(imported.import_id)
+
+
+def test_profile_pack_service_rejects_deleting_import_draft_once_submission_exists(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=json.dumps(astrbot_cmd_config_fixture(), ensure_ascii=False, indent=2).encode("utf-8"),
+    )
+    service.submit_export_artifact(
+        user_id="member-1",
+        artifact_id=imported.source_artifact_id,
+    )
+
+    with pytest.raises(ValueError, match="PROFILE_IMPORT_IN_USE"):
+        service.delete_import(
+            user_id="member-1",
+            import_id=imported.import_id,
+        )
+
+
+def test_profile_pack_service_submit_export_artifact_materializes_partial_selection(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    raw_bytes = json.dumps(
+        {
+            **astrbot_cmd_config_fixture(plugin_set=["sharelife", "community_tools"]),
+            "provider_settings": {
+                "default_personality": "analyst",
+                "persona_pool": ["analyst", "helper"],
+            },
+            "persona": [
+                {"name": "analyst", "system_prompt": "Analyze before acting."},
+                {"name": "helper", "system_prompt": "Help with rollout tasks."},
+            ],
+            "subagent_orchestrator": {
+                "main_enable": True,
+                "agents": [
+                    {"name": "planner_prometheus", "enabled": True},
+                    {"name": "reviewer_oracle", "enabled": False},
+                ],
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=raw_bytes,
+    )
+
+    submission = service.submit_export_artifact(
+        user_id="member-1",
+        artifact_id=imported.source_artifact_id,
+        submit_options={
+            "pack_type": "bot_profile_pack",
+            "selected_sections": ["personas", "environment_manifest"],
+            "selected_item_paths": [
+                "personas.runtime.default_personality",
+                "personas.entries.analyst.system_prompt",
+                "environment_manifest.subagent_orchestrator.agents[0].name",
+            ],
+        },
+    )
+
+    assert submission.status == "pending"
+    assert submission.sections == ["personas", "environment_manifest"]
+    assert submission.import_id != imported.import_id
+    assert submission.artifact_id != imported.source_artifact_id
+    assert submission.submit_options["selected_item_paths"] == [
+        "personas.runtime.default_personality",
+        "personas.entries.analyst.system_prompt",
+        "environment_manifest.subagent_orchestrator.agents[0].name",
+    ]
+
+    materialized_import = service.get_import_record(submission.import_id)
+    assert materialized_import.sections["personas"]["runtime"] == {"default_personality": "analyst"}
+    assert list(materialized_import.sections["personas"]["entries"].keys()) == ["analyst"]
+    assert materialized_import.sections["personas"]["entries"]["analyst"] == {
+        "system_prompt": "Analyze before acting."
+    }
+    assert materialized_import.sections["environment_manifest"]["subagent_orchestrator"]["agents"] == [
+        {"name": "planner_prometheus"}
+    ]
+    assert "enabled_agents" not in materialized_import.sections["environment_manifest"]["subagent_orchestrator"]
+
+    artifact = service.get_export_artifact(submission.artifact_id)
+    with zipfile.ZipFile(artifact.path, "r") as zf:
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        personas = json.loads(zf.read("sections/personas.json").decode("utf-8"))
+        environment = json.loads(zf.read("sections/environment_manifest.json").decode("utf-8"))
+
+    assert manifest["sections"] == ["personas", "environment_manifest"]
+    assert personas["runtime"] == {"default_personality": "analyst"}
+    assert list(personas["entries"].keys()) == ["analyst"]
+    assert personas["entries"]["analyst"] == {"system_prompt": "Analyze before acting."}
+    assert environment["subagent_orchestrator"]["agents"] == [{"name": "planner_prometheus"}]
+
+
+def test_profile_pack_service_converts_raw_astrbot_abconf_json(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    raw_bytes = json.dumps(
+        {
+            "provider_settings": {
+                "default_personality": "work",
+                "websearch_bocha_key": ["bocha-secret"],
+            },
+            "timezone": "UTC",
+            "plugin_set": ["community_tools"],
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="abconf_team.json",
+        content=raw_bytes,
+    )
+
+    assert imported.compatibility == "degraded"
+    assert "astrbot_raw_import_converted" in imported.compatibility_issues
+    assert imported.sections["sharelife_meta"]["astrbot_import"]["source_type"] == "astrbot_abconf_json"
+    assert imported.sections["plugins"] == {"community_tools": {"enabled": True}}
+    assert imported.sections["astrbot_core"]["provider_settings"]["websearch_bocha_key"] == ["***REDACTED***"]
 
 
 def test_profile_pack_export_applies_field_level_redaction_policy(tmp_path):

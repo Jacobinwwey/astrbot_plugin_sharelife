@@ -14,6 +14,9 @@
     const text = String(pathname || "")
       .trim()
       .toLowerCase()
+    if (text === "/member.html") return "member"
+    if (text === "/reviewer.html") return "reviewer"
+    if (text === "/admin.html") return "admin"
     if (text === "/user" || text === "/user/") return "member"
     if (text === "/member" || text === "/member/") return "member"
     if (text === "/reviewer" || text === "/reviewer/") return "reviewer"
