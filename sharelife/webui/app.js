@@ -2,6 +2,7 @@ const state = {
   token: "",
   authRequired: false,
   allowAnonymousMember: false,
+  authPromptRequested: false,
   authRole: "",
   availableRoles: [],
   uiLocale: "en-US",
@@ -227,6 +228,8 @@ const dialogFocusState = {
   },
 }
 
+let openDialogScopes = []
+
 let storageSyncBound = false
 let uiEventBusBound = false
 const uiEventBusUnsubscribe = []
@@ -323,6 +326,14 @@ function marketCardHelpers() {
 
 function uiEventBusHelpers() {
   return globalThis.SharelifeUiEventBus || null
+}
+
+function authSurfaceHelpers() {
+  return globalThis.SharelifeMarketAuthSurface || null
+}
+
+function dialogScrollLockHelpers() {
+  return globalThis.SharelifeDialogScrollLock || null
 }
 
 function readStoredUiLocale() {
@@ -1365,26 +1376,50 @@ function syncReviewerAuthFields() {
 }
 
 function updateAuthUi() {
-  const rolesText = state.availableRoles.length ? state.availableRoles.join(", ") : "none"
+  const helper = authSurfaceHelpers()
+  const optionalAnonymousMember = (
+    state.allowAnonymousMember
+    && state.pageMode !== "reviewer"
+    && state.pageMode !== "admin"
+  )
+  const surface = helper && typeof helper.describeMarketAuthSurface === "function"
+    ? helper.describeMarketAuthSurface({
+      authRequired: state.authRequired,
+      allowAnonymousMember: optionalAnonymousMember,
+      authenticated: state.capabilities.authenticated === true,
+      availableRoles: state.availableRoles,
+      promptRequested: state.authPromptRequested,
+    })
+    : {
+      mode: state.authRequired ? "required" : "disabled",
+      rolesText: state.availableRoles.length ? state.availableRoles.join(", ") : "none",
+      canBrowseAnonymously: false,
+      showAuthPanel: state.authRequired,
+    }
+  const rolesText = surface.rolesText
   const reviewerReadonly = state.pageMode === "reviewer" && !isReviewerAdminBridgeActive()
   const authPanel = byId("authPanel")
   const authHelp = byId("authHelp")
+  const authGuidance = byId("authGuidance")
+  const openLoginButton = byId("btnAuthOpenLoginPanel")
   const readonlyNotice = byId("reviewerReadonlyNotice")
   const adminLinkedNotice = byId("reviewerAdminLinkedNotice")
   byId("authLine").textContent = i18nFormat(
     "auth.line",
     "auth: {status}",
     {
-      status: state.authRequired
-        ? i18nFormat("auth.status.required", "required ({roles})", { roles: rolesText })
-        : i18nMessage("auth.status.disabled", "disabled"),
+      status: surface.mode === "optional"
+        ? i18nFormat("auth.status.optional", "optional ({roles})", { roles: rolesText })
+        : (state.authRequired
+          ? i18nFormat("auth.status.required", "required ({roles})", { roles: rolesText })
+          : i18nMessage("auth.status.disabled", "disabled")),
     },
   )
   byId("authRoleLine").textContent = i18nFormat("auth.role.line", "role: {role}", {
     role: state.authRole || i18nMessage("auth.role.not_logged_in", "not logged in"),
   })
   if (authPanel) {
-    const shouldShowAuthPanel = state.pageMode !== "reviewer" && state.authRequired
+    const shouldShowAuthPanel = state.pageMode !== "reviewer" && surface.showAuthPanel
     if (state.pageMode === "reviewer") {
       authPanel.classList.add("hidden")
     } else {
@@ -1399,17 +1434,36 @@ function updateAuthUi() {
         "auth.help.reviewer_locked",
         "Reviewer direct login is disabled on this route. Login on /admin and open /reviewer from there.",
       )
+    } else if (surface.mode === "optional") {
+      authHelp.textContent = i18nMessage(
+        "auth.help.optional",
+        "Anonymous browsing and installation stay available. Login is only required for uploads, submission management, or other protected actions.",
+      )
     } else {
       authHelp.textContent = state.authRequired
         ? i18nMessage(
-            "auth.help.enabled",
-            "Choose member/reviewer/admin login. Admin-only APIs are enforced by token role, not request body.",
+            "auth.help.required",
+            "This deployment requires credentials before protected actions can run. Use the operator-provided onboarding flow if you do not have an account yet.",
           )
         : i18nMessage(
             "auth.help.disabled",
             "If auth is disabled in plugin config, this panel stays hidden.",
           )
     }
+  }
+  if (authGuidance) {
+    const shouldShowGuidance = surface.mode === "optional" && !surface.showAuthPanel
+    authGuidance.textContent = i18nMessage(
+      "auth.guidance.optional",
+      "Continue anonymously for browsing and installation. Open login only when you need upload, submission management, or a higher-privilege role.",
+    )
+    authGuidance.classList.toggle("hidden", !shouldShowGuidance)
+    authGuidance.toggleAttribute("hidden", !shouldShowGuidance)
+  }
+  if (openLoginButton) {
+    const shouldShowOpenButton = surface.mode === "optional" && !surface.showAuthPanel
+    openLoginButton.classList.toggle("hidden", !shouldShowOpenButton)
+    openLoginButton.toggleAttribute("hidden", !shouldShowOpenButton)
   }
   if (readonlyNotice) {
     readonlyNotice.classList.toggle("hidden", !reviewerReadonly)
@@ -5223,6 +5277,7 @@ function activateDialogFocus(scopeKey, container, options = {}) {
   if (!container) return
   const entry = dialogFocusState[scopeKey]
   if (!entry) return
+  const scrollLock = dialogScrollLockHelpers()
   const activeElement = document.activeElement
   if (activeElement && typeof activeElement.focus === "function") {
     entry.restoreFocusTarget = activeElement
@@ -5249,6 +5304,12 @@ function activateDialogFocus(scopeKey, container, options = {}) {
     trapFocus(container, event)
   }
   document.addEventListener("keydown", entry.keydownHandler, true)
+  if (scrollLock && typeof scrollLock.nextOpenDialogScopes === "function") {
+    openDialogScopes = scrollLock.nextOpenDialogScopes(openDialogScopes, scopeKey, true)
+    if (typeof scrollLock.syncBodyScrollLock === "function") {
+      scrollLock.syncBodyScrollLock(document.body, openDialogScopes)
+    }
+  }
   container.setAttribute("tabindex", "-1")
   if (!focusFirstInteractiveNode(container)) {
     container.focus()
@@ -5259,9 +5320,16 @@ function deactivateDialogFocus(scopeKey, container) {
   if (!container) return
   const entry = dialogFocusState[scopeKey]
   if (!entry) return
+  const scrollLock = dialogScrollLockHelpers()
   if (entry.keydownHandler) {
     document.removeEventListener("keydown", entry.keydownHandler, true)
     entry.keydownHandler = null
+  }
+  if (scrollLock && typeof scrollLock.nextOpenDialogScopes === "function") {
+    openDialogScopes = scrollLock.nextOpenDialogScopes(openDialogScopes, scopeKey, false)
+    if (typeof scrollLock.syncBodyScrollLock === "function") {
+      scrollLock.syncBodyScrollLock(document.body, openDialogScopes)
+    }
   }
   let restore = entry.restoreFocusTarget
   entry.restoreFocusTarget = null
@@ -6576,6 +6644,7 @@ async function initAuth() {
   const auth = await api("/api/auth-info")
   state.authRequired = Boolean(auth.data.auth_required)
   state.allowAnonymousMember = Boolean(auth.data.allow_anonymous_member)
+  state.authPromptRequested = false
   state.runtimeFeatures.supportsLocalAstrbotImport = auth.data.supports_local_astrbot_import !== false
   state.runtimeFeatures.allowAnonymousLocalAstrbotImport = Boolean(
     auth.data.allow_anonymous_local_astrbot_import,
@@ -6619,6 +6688,7 @@ async function login() {
   if (res.data.ok && res.data.token) {
     state.token = res.data.token
     state.authRole = res.data.role || role
+    state.authPromptRequested = true
     state.availableRoles = Array.isArray(res.data.available_roles) ? res.data.available_roles : state.availableRoles
     persistAdminAuthSession()
     applyAuthOptions(state.availableRoles)
@@ -8917,6 +8987,17 @@ function bindButtons() {
   })
   byId("loginBtn").addEventListener("click", login)
   byId("authRole").addEventListener("change", syncReviewerAuthFields)
+  const openLoginButton = byId("btnAuthOpenLoginPanel")
+  if (openLoginButton) {
+    openLoginButton.addEventListener("click", () => {
+      state.authPromptRequested = true
+      updateAuthUi()
+      const passwordNode = byId("authPassword")
+      if (passwordNode && typeof passwordNode.focus === "function") {
+        passwordNode.focus()
+      }
+    })
+  }
   byId("role").addEventListener("change", () => {
     applyConsoleScope()
     void refreshCapabilities({ updateScope: false })

@@ -109,6 +109,7 @@
     authRequired: false,
     allowAnonymousMember: false,
     authResolved: false,
+    authPromptRequested: false,
     authRole: "",
     availableRoles: [],
     capabilities: {
@@ -199,6 +200,10 @@
 
   function uiEventBusHelpers() {
     return globalScope.SharelifeUiEventBus || null
+  }
+
+  function marketAuthSurfaceHelpers() {
+    return globalScope.SharelifeMarketAuthSurface || null
   }
 
   function byId(id) {
@@ -1393,6 +1398,7 @@
 
   function ensureMemberActionCapability(capability, actionKey) {
     if (hasCapability(capability)) return true
+    state.authPromptRequested = true
     setMarketDetailExpanded(true)
     updateSummary({
       ...(selectedCatalogRow() || {}),
@@ -1403,6 +1409,7 @@
         { action: actionKey },
       ),
     })
+    updateAuthUi()
     const passwordNode = byId("marketAuthPassword")
     if (passwordNode && typeof passwordNode.focus === "function") {
       passwordNode.focus()
@@ -2406,18 +2413,38 @@
   }
 
   function updateAuthUi() {
-    const rolesText = state.availableRoles.length ? state.availableRoles.join(", ") : "none"
+    const helper = marketAuthSurfaceHelpers()
+    const surface = helper && typeof helper.describeMarketAuthSurface === "function"
+      ? helper.describeMarketAuthSurface({
+        authRequired: state.authRequired,
+        allowAnonymousMember: state.allowAnonymousMember,
+        authenticated: state.capabilities.authenticated === true,
+        availableRoles: state.availableRoles,
+        promptRequested: state.authPromptRequested,
+      })
+      : {
+        mode: state.authRequired ? "required" : "disabled",
+        rolesText: state.availableRoles.length ? state.availableRoles.join(", ") : "none",
+        canBrowseAnonymously: false,
+        showAuthPanel: state.authRequired,
+      }
+    const rolesText = surface.rolesText
     const authLine = byId("marketAuthLine")
     const roleLine = byId("marketRoleLine")
     const authPanel = byId("marketAuthPanel")
+    const authHelp = byId("marketAuthHelp")
+    const authGuidance = byId("marketAuthGuidance")
+    const openLoginButton = byId("btnMarketOpenLoginPanel")
     if (authLine) {
       authLine.textContent = i18nFormat(
         "market.auth.line",
         "auth: {status}",
         {
-          status: state.authRequired
-            ? i18nFormat("auth.status.required", "required ({roles})", { roles: rolesText })
-            : i18nMessage("auth.status.disabled", "disabled"),
+          status: surface.mode === "optional"
+            ? i18nFormat("auth.status.optional", "optional ({roles})", { roles: rolesText })
+            : (state.authRequired
+              ? i18nFormat("auth.status.required", "required ({roles})", { roles: rolesText })
+              : i18nMessage("auth.status.disabled", "disabled")),
         },
       )
     }
@@ -2431,10 +2458,40 @@
       )
     }
     if (authPanel) {
-      const shouldShowAuthPanel = state.authRequired
+      const shouldShowAuthPanel = surface.showAuthPanel
       authPanel.classList.toggle("hidden", !shouldShowAuthPanel)
       authPanel.toggleAttribute("hidden", !shouldShowAuthPanel)
       authPanel.setAttribute("aria-hidden", shouldShowAuthPanel ? "false" : "true")
+    }
+    if (authHelp) {
+      authHelp.textContent = surface.mode === "optional"
+        ? i18nMessage(
+          "market.login.hint.optional",
+          "Anonymous browsing and installation are available. Login is only required for submission and other protected actions.",
+        )
+        : (state.authRequired
+          ? i18nMessage(
+            "market.login.hint.required",
+            "This deployment requires credentials before protected actions can run. Use the operator-provided onboarding flow if you do not have an account yet.",
+          )
+          : i18nMessage(
+            "market.login.hint",
+            "When auth is disabled, this panel remains hidden.",
+          ))
+    }
+    if (authGuidance) {
+      const shouldShowGuidance = surface.mode === "optional" && !surface.showAuthPanel
+      authGuidance.textContent = i18nMessage(
+        "market.auth.guidance.optional",
+        "Browse and install anonymously. Open login only when you need to submit, manage protected actions, or use a higher-privilege role.",
+      )
+      authGuidance.classList.toggle("hidden", !shouldShowGuidance)
+      authGuidance.toggleAttribute("hidden", !shouldShowGuidance)
+    }
+    if (openLoginButton) {
+      const shouldShowOpenButton = surface.mode === "optional" && !surface.showAuthPanel
+      openLoginButton.classList.toggle("hidden", !shouldShowOpenButton)
+      openLoginButton.toggleAttribute("hidden", !shouldShowOpenButton)
     }
     syncReviewerAuthFields()
     updateConsoleLinkVisibility()
@@ -2499,6 +2556,7 @@
     const response = await api("/api/auth-info")
     state.authRequired = Boolean(response.data.auth_required)
     state.allowAnonymousMember = Boolean(response.data.allow_anonymous_member)
+    state.authPromptRequested = false
     state.authResolved = true
     state.availableRoles = Array.isArray(response.data.available_roles) ? response.data.available_roles : []
     applyAuthOptions(state.availableRoles)
@@ -2536,6 +2594,7 @@
     state.availableRoles = Array.isArray(response.data.available_roles)
       ? response.data.available_roles
       : state.availableRoles
+    state.authPromptRequested = true
     state.memberInstallationsRequested = false
     applyAuthOptions(state.availableRoles)
     updateAuthUi()
@@ -4207,6 +4266,17 @@
     if (loginButton) {
       loginButton.addEventListener("click", () => {
         void login()
+      })
+    }
+    const openLoginButton = byId("btnMarketOpenLoginPanel")
+    if (openLoginButton) {
+      openLoginButton.addEventListener("click", () => {
+        state.authPromptRequested = true
+        updateAuthUi()
+        const passwordNode = byId("marketAuthPassword")
+        if (passwordNode && typeof passwordNode.focus === "function") {
+          passwordNode.focus()
+        }
       })
     }
     const authRoleNode = byId("marketAuthRole")

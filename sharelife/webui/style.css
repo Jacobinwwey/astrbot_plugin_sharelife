@@ -1966,7 +1966,13 @@ tr:last-child td {
   inset: 0;
   z-index: 70;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 1.5rem 1rem 1rem;
+}
+
+body.modal-scroll-locked {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .modal-backdrop {
@@ -1988,6 +1994,7 @@ tr:last-child td {
   display: grid;
   gap: 0.8rem;
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .modal-panel-glass {
@@ -2040,11 +2047,13 @@ tr:last-child td {
   padding-right: 0.9rem;
   border-right: 1px solid rgba(148, 163, 184, 0.18);
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .member-upload-review-detail {
   overflow: auto;
   padding-right: 0.15rem;
+  overscroll-behavior: contain;
 }
 
 .member-upload-review-heading h4 {
@@ -2082,6 +2091,7 @@ tr:last-child td {
 
 .member-upload-tree-pane {
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .member-upload-inspector-pane {
@@ -2089,6 +2099,7 @@ tr:last-child td {
   gap: 0.85rem;
   align-content: start;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .member-upload-inspector-head h4 {
@@ -2121,6 +2132,7 @@ tr:last-child td {
   word-break: break-word;
   max-height: 240px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .member-upload-inspector-children {

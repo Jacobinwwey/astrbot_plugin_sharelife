@@ -115,6 +115,12 @@
             <div id="healthLine">health: loading...</div>
             <div id="authLine">auth: unknown</div>
             <div id="authRoleLine">role: not logged in</div>
+            <small id="authGuidance" class="note hidden" hidden data-i18n-key="auth.guidance.optional">
+              Continue anonymously for browsing and installation. Open login only when you need upload, submission management, or a higher-privilege role.
+            </small>
+            <button id="btnAuthOpenLoginPanel" class="btn-ghost hidden" type="button" hidden data-i18n-key="button.open_login_panel">
+              Open Login
+            </button>
             <div id="consoleScopeLine">view: member</div>
           </div>
         </header>
@@ -1237,6 +1243,8 @@
     <script src="/webui_i18n.js"></script>
     <script src="/ui_event_bus.js"></script>
     <script src="/console_scope.js"></script>
+    <script src="/market_auth_surface.js"></script>
+    <script src="/dialog_scroll_lock.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

@@ -52,6 +52,12 @@
               <div id="marketHealthLine">health: loading...</div>
               <div id="marketAuthLine">auth: unknown</div>
               <div id="marketRoleLine">role: not logged in</div>
+              <small id="marketAuthGuidance" class="note hidden" hidden data-i18n-key="market.auth.guidance.optional">
+                Browse and install anonymously. Open login only when you need to submit, manage protected actions, or use a higher-privilege role.
+              </small>
+              <button id="btnMarketOpenLoginPanel" class="btn-ghost hidden" type="button" hidden data-i18n-key="market.open_login_panel">
+                Open Login
+              </button>
             </div>
           </div>
         </section>
@@ -86,7 +92,7 @@
               />
             </div>
           </form>
-          <small data-i18n-key="market.login.hint">When auth is disabled, this panel remains hidden.</small>
+          <small id="marketAuthHelp" data-i18n-key="market.login.hint">When auth is disabled, this panel remains hidden.</small>
         </section>
 
         <div class="market-shell-grid market-shell-grid-detail">
@@ -268,6 +274,7 @@
     <script src="/profile_pack_compare_view.js"></script>
     <script src="/webui_i18n.js"></script>
     <script src="/ui_event_bus.js"></script>
+    <script src="/market_auth_surface.js"></script>
     <script src="/market_detail_page.js"></script>
     <script src="/market_page.js"></script>
   </body>
