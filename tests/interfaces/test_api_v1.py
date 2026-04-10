@@ -164,6 +164,7 @@ def test_api_install_preflight_and_member_installations_surface(tmp_path):
             "preflight": True,
             "source_preference": "generated",
             "force_reinstall": True,
+            "selected_sections": "memory_store, conversation_history, memory_store",
         },
     )
     assert preflight["status"] == "preflight_ready"
@@ -171,20 +172,26 @@ def test_api_install_preflight_and_member_installations_surface(tmp_path):
         "preflight": True,
         "force_reinstall": True,
         "source_preference": "generated",
+        "selected_sections": ["memory_store", "conversation_history"],
     }
 
     installed = api.install_template(
         user_id="u1",
         session_id="s1",
         template_id="community/basic",
-        install_options={"source_preference": "generated"},
+        install_options={
+            "source_preference": "generated",
+            "selected_sections": ["knowledge_base", "knowledge_base"],
+        },
     )
     assert installed["package_artifact"]["source"] == "generated"
+    assert installed["install_options"]["selected_sections"] == ["knowledge_base"]
 
     listed = api.list_member_installations(user_id="u1")
     assert listed["count"] == 1
     assert listed["installations"][0]["template_id"] == "community/basic"
     assert listed["installations"][0]["install_options"]["source_preference"] == "generated"
+    assert listed["installations"][0]["install_options"]["selected_sections"] == ["knowledge_base"]
 
     refreshed = api.refresh_member_installations(user_id="u1", limit=10)
     assert refreshed["count"] == 1

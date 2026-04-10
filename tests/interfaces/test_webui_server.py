@@ -2155,12 +2155,17 @@ def test_webui_member_installation_routes_support_refresh_and_install_options(tm
                 "preflight": True,
                 "source_preference": "generated",
                 "force_reinstall": True,
+                "selected_sections": "memory_store,conversation_history,memory_store",
             },
         },
     )
     assert preflight.status_code == 200
     assert preflight.json()["data"]["status"] == "preflight_ready"
     assert preflight.json()["data"]["install_options"]["source_preference"] == "generated"
+    assert preflight.json()["data"]["install_options"]["selected_sections"] == [
+        "memory_store",
+        "conversation_history",
+    ]
 
     installed = client.post(
         "/api/templates/install",
@@ -2168,11 +2173,15 @@ def test_webui_member_installation_routes_support_refresh_and_install_options(tm
             "user_id": "u1",
             "session_id": "s1",
             "template_id": "community/basic",
-            "install_options": {"source_preference": "generated"},
+            "install_options": {
+                "source_preference": "generated",
+                "selected_sections": ["knowledge_base", "knowledge_base"],
+            },
         },
     )
     assert installed.status_code == 200
     assert installed.json()["data"]["package_artifact"]["source"] == "generated"
+    assert installed.json()["data"]["install_options"]["selected_sections"] == ["knowledge_base"]
 
     listed = client.get(
         "/api/member/installations",
@@ -2181,6 +2190,7 @@ def test_webui_member_installation_routes_support_refresh_and_install_options(tm
     assert listed.status_code == 200
     assert listed.json()["data"]["count"] == 1
     assert listed.json()["data"]["installations"][0]["template_id"] == "community/basic"
+    assert listed.json()["data"]["installations"][0]["install_options"]["selected_sections"] == ["knowledge_base"]
 
     refreshed = client.post(
         "/api/member/installations/refresh",

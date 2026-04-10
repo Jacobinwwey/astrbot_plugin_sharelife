@@ -3390,6 +3390,27 @@ class SharelifeApiV1:
                 return False
         return default
 
+    @staticmethod
+    def _normalize_string_list(value: object, *, max_items: int = 256) -> list[str]:
+        raw_items: list[object]
+        if isinstance(value, str):
+            raw_items = [item for item in value.split(",")]
+        elif isinstance(value, (list, tuple, set)):
+            raw_items = list(value)
+        else:
+            raw_items = []
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            normalized = str(item or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            out.append(normalized)
+            if len(out) >= max_items:
+                break
+        return out
+
     @classmethod
     def _normalize_install_options(cls, install_options: dict | None) -> dict:
         payload = install_options if isinstance(install_options, dict) else {}
@@ -3400,6 +3421,7 @@ class SharelifeApiV1:
             "preflight": cls._as_bool(payload.get("preflight"), default=False),
             "force_reinstall": cls._as_bool(payload.get("force_reinstall"), default=False),
             "source_preference": source_preference,
+            "selected_sections": cls._normalize_string_list(payload.get("selected_sections")),
         }
 
     @classmethod
@@ -3435,22 +3457,8 @@ class SharelifeApiV1:
             "include_encrypted_secrets",
         }:
             redaction_mode = "exclude_secrets"
-        selected_sections_raw = payload.get("selected_sections")
-        selected_sections: list[str] = []
-        if isinstance(selected_sections_raw, list):
-            selected_sections = [str(item or "").strip() for item in selected_sections_raw if str(item or "").strip()]
-        elif isinstance(selected_sections_raw, str):
-            selected_sections = [item.strip() for item in selected_sections_raw.split(",") if item.strip()]
-        selected_item_paths_raw = payload.get("selected_item_paths")
-        selected_item_paths: list[str] = []
-        if isinstance(selected_item_paths_raw, list):
-            selected_item_paths = [
-                str(item or "").strip()
-                for item in selected_item_paths_raw
-                if str(item or "").strip()
-            ]
-        elif isinstance(selected_item_paths_raw, str):
-            selected_item_paths = [item.strip() for item in selected_item_paths_raw.split(",") if item.strip()]
+        selected_sections = cls._normalize_string_list(payload.get("selected_sections"))
+        selected_item_paths = cls._normalize_string_list(payload.get("selected_item_paths"))
         normalized = {
             "pack_type": pack_type,
             "selected_sections": selected_sections,

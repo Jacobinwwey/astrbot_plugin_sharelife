@@ -247,6 +247,27 @@ def test_api_submit_profile_pack_returns_normalized_submit_options(tmp_path):
     }
 
 
+def test_api_profile_pack_submit_option_normalizer_deduplicates_selected_sections_and_item_paths():
+    normalized = SharelifeApiV1._normalize_profile_pack_submit_options(
+        {
+            "selected_sections": ["plugins", "plugins", "providers"],
+            "selected_item_paths": (
+                "plugins.enabled,"
+                "plugins.enabled,"
+                "providers.openai.model"
+            ),
+        },
+    )
+    assert normalized["selected_sections"] == [
+        "plugins",
+        "providers",
+    ]
+    assert normalized["selected_item_paths"] == [
+        "plugins.enabled",
+        "providers.openai.model",
+    ]
+
+
 def test_api_submit_profile_pack_preserves_selected_item_paths_and_materializes_filtered_submission(tmp_path):
     api, _ = build_interfaces(tmp_path)
     raw_bytes = json.dumps(

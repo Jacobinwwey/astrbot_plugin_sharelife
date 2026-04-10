@@ -177,25 +177,35 @@ def test_web_api_install_preflight_and_member_installation_endpoints(tmp_path):
             "preflight": True,
             "source_preference": "generated",
             "force_reinstall": True,
+            "selected_sections": "memory_store,conversation_history,memory_store",
         },
     )
     assert preflight.ok is True
     assert preflight.data["status"] == "preflight_ready"
     assert preflight.data["install_options"]["source_preference"] == "generated"
+    assert preflight.data["install_options"]["selected_sections"] == [
+        "memory_store",
+        "conversation_history",
+    ]
 
     installed = web_api.install_template(
         user_id="u1",
         session_id="s1",
         template_id="community/basic",
-        install_options={"source_preference": "generated"},
+        install_options={
+            "source_preference": "generated",
+            "selected_sections": ["knowledge_base", "knowledge_base"],
+        },
     )
     assert installed.ok is True
     assert installed.data["package_artifact"]["source"] == "generated"
+    assert installed.data["install_options"]["selected_sections"] == ["knowledge_base"]
 
     listed = web_api.list_member_installations(user_id="u1")
     assert listed.ok is True
     assert listed.data["count"] == 1
     assert listed.data["installations"][0]["template_id"] == "community/basic"
+    assert listed.data["installations"][0]["install_options"]["selected_sections"] == ["knowledge_base"]
 
     refreshed = web_api.refresh_member_installations(user_id="u1")
     assert refreshed.ok is True
