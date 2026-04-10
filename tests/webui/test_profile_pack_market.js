@@ -5,6 +5,7 @@ const {
   buildInstallOptions,
   buildUploadOptions,
   buildSubmitOptions,
+  buildProfilePackSubmitOptions,
   buildSubmitPayload,
   buildSubmissionDecisionPayload,
   buildSubmissionFilterQuery,
@@ -58,6 +59,40 @@ test("buildSubmitOptions normalizes sections, enums, and idempotency key", () =>
     redaction_mode: "exclude_secrets",
     replace_existing: true,
     idempotency_key: "submit-2",
+  })
+})
+
+test("buildProfilePackSubmitOptions supports member selection payload including selected_item_paths and source", () => {
+  const payload = buildProfilePackSubmitOptions(
+    {
+      packType: "bot_profile_pack",
+      selectedSections: ["personas", "personas", "environment_manifest"],
+      selectedItemPaths: [
+        "personas.entries.alpha",
+        "personas.entries.alpha",
+        "environment_manifest.subagent_orchestrator.agents[0]",
+      ],
+      redactionMode: "exclude_provider",
+      replaceExisting: 1,
+      source: "member_import",
+      idempotencyKey: "member-submit-ignored",
+    },
+    {
+      includeSelectedItemPaths: true,
+      includeSource: true,
+      includeIdempotencyKey: false,
+    },
+  )
+  assert.deepEqual(payload, {
+    pack_type: "bot_profile_pack",
+    selected_sections: ["personas", "environment_manifest"],
+    redaction_mode: "exclude_provider",
+    replace_existing: true,
+    selected_item_paths: [
+      "personas.entries.alpha",
+      "environment_manifest.subagent_orchestrator.agents[0]",
+    ],
+    source: "member_import",
   })
 })
 

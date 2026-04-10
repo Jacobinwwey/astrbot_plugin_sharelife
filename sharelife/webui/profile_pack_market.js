@@ -21,6 +21,21 @@
     return out
   }
 
+  function normalizeStringList(value) {
+    if (Array.isArray(value)) {
+      const out = []
+      const seen = new Set()
+      value.forEach((item) => {
+        const normalized = textValue(item)
+        if (!normalized || seen.has(normalized)) return
+        seen.add(normalized)
+        out.push(normalized)
+      })
+      return out
+    }
+    return splitList(value)
+  }
+
   function normalizeSubmissionDecision(value) {
     const normalized = textValue(value).toLowerCase()
     if (normalized === "approve" || normalized === "approved") return "approve"
@@ -48,9 +63,7 @@
 
   function buildInstallOptions(input) {
     const data = input || {}
-    const selectedSections = Array.isArray(data.selectedSections)
-      ? splitList(data.selectedSections.join(","))
-      : splitList(data.selectedSections)
+    const selectedSections = normalizeStringList(data.selectedSections)
     return {
       preflight: Boolean(data.preflight),
       force_reinstall: Boolean(data.forceReinstall),
@@ -74,10 +87,18 @@
   }
 
   function buildSubmitOptions(input) {
+    return buildProfilePackSubmitOptions(input, {
+      includeSelectedItemPaths: false,
+      includeSource: false,
+      includeIdempotencyKey: true,
+    })
+  }
+
+  function buildProfilePackSubmitOptions(input, options) {
     const data = input || {}
-    const selectedSections = Array.isArray(data.selectedSections)
-      ? splitList(data.selectedSections.join(","))
-      : splitList(data.selectedSections)
+    const config = options && typeof options === "object" ? options : {}
+    const selectedSections = normalizeStringList(data.selectedSections)
+    const selectedItemPaths = normalizeStringList(data.selectedItemPaths)
     const normalized = {
       pack_type: normalizeChoice(data.packType, ["bot_profile_pack", "extension_pack"], "bot_profile_pack"),
       selected_sections: selectedSections,
@@ -93,9 +114,25 @@
       ),
       replace_existing: Boolean(data.replaceExisting),
     }
-    const idempotencyKey = textValue(data.idempotencyKey)
-    if (idempotencyKey) {
-      normalized.idempotency_key = idempotencyKey
+    const includeSelectedItemPaths = config.includeSelectedItemPaths === true
+    if (includeSelectedItemPaths) {
+      normalized.selected_item_paths = selectedItemPaths
+    }
+
+    const includeSource = config.includeSource === true
+    if (includeSource) {
+      const source = textValue(data.source)
+      if (source) {
+        normalized.source = source
+      }
+    }
+
+    const includeIdempotencyKey = config.includeIdempotencyKey !== false
+    if (includeIdempotencyKey) {
+      const idempotencyKey = textValue(data.idempotencyKey)
+      if (idempotencyKey) {
+        normalized.idempotency_key = idempotencyKey
+      }
     }
     return normalized
   }
@@ -174,10 +211,12 @@
 
   const api = {
     splitList,
+    normalizeStringList,
     normalizeSubmissionDecision,
     buildInstallOptions,
     buildUploadOptions,
     buildSubmitOptions,
+    buildProfilePackSubmitOptions,
     buildSubmitPayload,
     buildSubmissionDecisionPayload,
     buildSubmissionFilterQuery,

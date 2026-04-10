@@ -2697,6 +2697,13 @@
       redactionMode: String(byId("marketSubmitRedactionMode")?.value || "exclude_secrets").trim() || "exclude_secrets",
       replaceExisting: Boolean(byId("marketSubmitReplaceExisting") && byId("marketSubmitReplaceExisting").checked),
     }
+    if (helper && typeof helper.buildProfilePackSubmitOptions === "function") {
+      return helper.buildProfilePackSubmitOptions(input, {
+        includeSelectedItemPaths: false,
+        includeSource: false,
+        includeIdempotencyKey: true,
+      })
+    }
     if (helper && typeof helper.buildSubmitOptions === "function") {
       return helper.buildSubmitOptions(input)
     }

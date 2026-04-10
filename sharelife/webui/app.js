@@ -6785,14 +6785,24 @@ async function selectedPackagePayload() {
 }
 
 function readInstallOptionsFromForm() {
+  const helper = profilePackMarketHelpers()
   const sourcePreferenceNode = byId("installSourcePreference")
   const sourcePreference = sourcePreferenceNode
     ? String(sourcePreferenceNode.value || "auto").trim()
     : "auto"
-  return {
+  const input = {
     preflight: Boolean(byId("installPreflight") && byId("installPreflight").checked),
-    force_reinstall: Boolean(byId("installForceReinstall") && byId("installForceReinstall").checked),
-    source_preference: sourcePreference || "auto",
+    forceReinstall: Boolean(byId("installForceReinstall") && byId("installForceReinstall").checked),
+    sourcePreference: sourcePreference || "auto",
+  }
+  if (helper && typeof helper.buildInstallOptions === "function") {
+    return helper.buildInstallOptions(input)
+  }
+  return {
+    preflight: Boolean(input.preflight),
+    force_reinstall: Boolean(input.forceReinstall),
+    source_preference: String(input.sourcePreference || "auto").trim() || "auto",
+    selected_sections: [],
   }
 }
 
@@ -8221,12 +8231,27 @@ async function importMemberProfilePackFromSelection() {
 
 function memberProfilePackSubmitOptionsFromModal(item) {
   const selection = readMemberUploadDetailSelection(item)
-  return {
-    pack_type: String(item && item.pack_type || "bot_profile_pack").trim() || "bot_profile_pack",
-    selected_sections: selection.selectedSections,
-    selected_item_paths: selection.selectedItemPaths,
-    replace_existing: Boolean(byId("memberUploadDetailReplaceExisting") && byId("memberUploadDetailReplaceExisting").checked),
+  const helper = profilePackMarketHelpers()
+  const input = {
+    packType: String(item && item.pack_type || "bot_profile_pack").trim() || "bot_profile_pack",
+    selectedSections: selection.selectedSections,
+    selectedItemPaths: selection.selectedItemPaths,
+    replaceExisting: Boolean(byId("memberUploadDetailReplaceExisting") && byId("memberUploadDetailReplaceExisting").checked),
     source: "member_import",
+  }
+  if (helper && typeof helper.buildProfilePackSubmitOptions === "function") {
+    return helper.buildProfilePackSubmitOptions(input, {
+      includeSelectedItemPaths: true,
+      includeSource: true,
+      includeIdempotencyKey: false,
+    })
+  }
+  return {
+    pack_type: input.packType,
+    selected_sections: Array.isArray(input.selectedSections) ? input.selectedSections : [],
+    selected_item_paths: Array.isArray(input.selectedItemPaths) ? input.selectedItemPaths : [],
+    replace_existing: Boolean(input.replaceExisting),
+    source: String(input.source || ""),
   }
 }
 
