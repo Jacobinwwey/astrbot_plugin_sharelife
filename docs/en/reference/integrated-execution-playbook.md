@@ -54,6 +54,11 @@
 1. Anonymous-member default API allowlist was aligned with published capability surfaces by adding package-download and notifications read endpoints.
 2. Interface tests now pin both sides of the contract: default allowlist permits these reads, and explicit allowlist override still blocks them.
 
+### 1.8 Incremental progress (`2026-04-10`, owner-binding hardening pass)
+
+1. Member uninstall route now enforces owner binding under auth-enabled mode, closing a cross-owner uninstall path.
+2. Interface tests now cover both branches explicitly: cross-owner uninstall is denied (`403`), own uninstall still succeeds.
+
 ## 2. Cross-Plan Decisions
 
 ### 2.1 Unified state vocabulary

@@ -129,6 +129,8 @@ Member routes:
 | `GET /api/profile-pack/catalog/insights` | `public` | N/A |
 | `POST /api/trial` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `POST /api/templates/install` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
+| `GET /api/templates/package/download` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
+| `GET /api/notifications` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/tasks` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `POST /api/member/tasks/refresh` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/transfers` | `member` | `401 unauthorized` or `403 permission_denied` |
@@ -139,7 +141,7 @@ Member routes:
 | `GET /api/member/profile-pack/imports` | `member` | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/installations` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `POST /api/member/installations/refresh` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
-| `POST /api/member/installations/uninstall` | `member` | `401 unauthorized` or `403 permission_denied` |
+| `POST /api/member/installations/uninstall` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/submissions` | `member` | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/submissions/detail` | `member` | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/submissions/package/download` | `member` | `401 unauthorized` or `403 permission_denied` |

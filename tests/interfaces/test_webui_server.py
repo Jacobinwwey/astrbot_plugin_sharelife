@@ -3095,6 +3095,66 @@ def test_webui_member_owner_binding_applies_to_upload_submission_and_installatio
     assert cross_refresh_installations.status_code == 403
     assert cross_refresh_installations.json()["error"]["code"] == "permission_denied"
 
+    publish_for_uninstall = client.post(
+        "/api/templates/submit",
+        json={
+            "user_id": "owner-u1",
+            "template_id": "community/install-owner-binding",
+            "version": "1.0.0",
+        },
+        headers=admin_headers,
+    )
+    assert publish_for_uninstall.status_code == 200
+    publish_approved = client.post(
+        "/api/admin/submissions/decide",
+        json={
+            "submission_id": publish_for_uninstall.json()["data"]["submission_id"],
+            "decision": "approve",
+        },
+        headers=admin_headers,
+    )
+    assert publish_approved.status_code == 200
+
+    admin_install_own = client.post(
+        "/api/templates/install",
+        json={
+            "user_id": "owner-u1",
+            "session_id": "s-owner-u1",
+            "template_id": "community/install-owner-binding",
+        },
+        headers=admin_headers,
+    )
+    assert admin_install_own.status_code == 200
+    assert admin_install_own.json()["ok"] is True
+
+    admin_install_other = client.post(
+        "/api/templates/install",
+        json={
+            "user_id": "owner-u2",
+            "session_id": "s-owner-u2",
+            "template_id": "community/install-owner-binding",
+        },
+        headers=admin_headers,
+    )
+    assert admin_install_other.status_code == 200
+    assert admin_install_other.json()["ok"] is True
+
+    cross_uninstall = client.post(
+        "/api/member/installations/uninstall",
+        json={"user_id": "owner-u2", "template_id": "community/install-owner-binding"},
+        headers=member_headers,
+    )
+    assert cross_uninstall.status_code == 403
+    assert cross_uninstall.json()["error"]["code"] == "permission_denied"
+
+    own_uninstall = client.post(
+        "/api/member/installations/uninstall",
+        json={"user_id": "owner-u1", "template_id": "community/install-owner-binding"},
+        headers=member_headers,
+    )
+    assert own_uninstall.status_code == 200
+    assert own_uninstall.json()["data"]["status"] == "uninstalled"
+
     own_tasks = client.get(
         "/api/member/tasks",
         params={"user_id": "owner-u1", "limit": 10},
@@ -3142,8 +3202,13 @@ def test_webui_member_owner_binding_applies_to_upload_submission_and_installatio
     )
     assert own_rows.status_code == 200
     assert own_rows.json()["data"]["user_id"] == "owner-u1"
-    assert len(own_rows.json()["data"]["submissions"]) == 1
-    assert own_rows.json()["data"]["submissions"][0]["submission_id"] == own_submission_id
+    own_submission_ids = {
+        str(item.get("submission_id", "") or "")
+        for item in own_rows.json()["data"]["submissions"]
+        if isinstance(item, dict)
+    }
+    assert own_submission_id in own_submission_ids
+    assert other_submission_id not in own_submission_ids
 
     cross_rows = client.get(
         "/api/member/submissions",

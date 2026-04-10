@@ -129,6 +129,8 @@
 | `GET /api/profile-pack/catalog/insights` | `public` | N/A |
 | `POST /api/trial` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `POST /api/templates/install` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/templates/package/download` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/notifications` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/tasks` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `POST /api/member/tasks/refresh` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/transfers` | `member` | `401 unauthorized` 或 `403 permission_denied` |
@@ -139,7 +141,7 @@
 | `GET /api/member/profile-pack/imports` | `member` | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/installations` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `POST /api/member/installations/refresh` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
-| `POST /api/member/installations/uninstall` | `member` | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/member/installations/uninstall` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/submissions` | `member` | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/submissions/detail` | `member` | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/submissions/package/download` | `member` | `401 unauthorized` 或 `403 permission_denied` |

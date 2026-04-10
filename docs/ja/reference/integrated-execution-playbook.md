@@ -54,6 +54,11 @@
 1. 匿名 member の既定 API allowlist を capability 面と整合させ、テンプレート package download と notifications read を追加しました。
 2. interface テストで契約の両面を固定しました。既定 allowlist では read が通り、明示 override 時は拒否されます。
 
+### 1.8 増分進捗（`2026-04-10`、owner binding 強化）
+
+1. auth 有効時の member uninstall ルートで owner binding を強制し、cross-owner uninstall 経路を閉じました。
+2. interface テストで両分岐を固定しました。cross-owner uninstall は `403`、own uninstall は成功します。
+
 ## 2. 交差分析での決定
 
 ### 2.1 状態語彙の統一
