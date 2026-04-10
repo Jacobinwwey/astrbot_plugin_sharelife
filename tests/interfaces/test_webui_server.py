@@ -552,6 +552,17 @@ def test_webui_auth_enabled_supports_anonymous_member_mode_with_owner_binding(tm
     assert anonymous_installations.status_code == 200
     assert anonymous_installations.json()["data"]["count"] == 1
 
+    anonymous_package_download = client.get(
+        "/api/templates/package/download",
+        params={"template_id": "community/basic"},
+    )
+    assert anonymous_package_download.status_code == 200
+    assert anonymous_package_download.headers["content-type"].startswith("application/zip")
+
+    anonymous_notifications = client.get("/api/notifications")
+    assert anonymous_notifications.status_code == 200
+    assert anonymous_notifications.json()["ok"] is True
+
     anonymous_installations_cross_owner = client.get("/api/member/installations", params={"user_id": "other-user"})
     assert anonymous_installations_cross_owner.status_code == 403
     assert anonymous_installations_cross_owner.json()["error"]["code"] == "permission_denied"
@@ -627,6 +638,17 @@ def test_webui_auth_enabled_anonymous_member_allowlist_override_is_enforced(tmp_
     )
     assert blocked_install.status_code == 401
     assert blocked_install.json()["error"]["code"] == "unauthorized"
+
+    blocked_package_download = client.get(
+        "/api/templates/package/download",
+        params={"template_id": "community/basic"},
+    )
+    assert blocked_package_download.status_code == 401
+    assert blocked_package_download.json()["error"]["code"] == "unauthorized"
+
+    blocked_notifications = client.get("/api/notifications")
+    assert blocked_notifications.status_code == 401
+    assert blocked_notifications.json()["error"]["code"] == "unauthorized"
 
 
 def test_webui_security_headers_support_custom_values(tmp_path):

@@ -49,6 +49,11 @@
 1. member/market の主要な文字色と背景色トークンに対するコントラスト検証を meta テストとして追加しました。
 2. 重要トークンのコントラスト劣化は CI で fail するようになりました。
 
+### 1.7 増分進捗（`2026-04-10`、匿名 member 認可整合パス）
+
+1. 匿名 member の既定 API allowlist を capability 面と整合させ、テンプレート package download と notifications read を追加しました。
+2. interface テストで契約の両面を固定しました。既定 allowlist では read が通り、明示 override 時は拒否されます。
+
 ## 2. 交差分析での決定
 
 ### 2.1 状態語彙の統一

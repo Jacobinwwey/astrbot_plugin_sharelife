@@ -49,6 +49,11 @@
 1. A deterministic meta-level contrast guard was added for core WebUI theme tokens (member + market critical text/background pairs).
 2. Contrast regressions on key semantic tokens now fail CI before merge.
 
+### 1.7 Incremental progress (`2026-04-10`, anonymous-member authz consistency pass)
+
+1. Anonymous-member default API allowlist was aligned with published capability surfaces by adding package-download and notifications read endpoints.
+2. Interface tests now pin both sides of the contract: default allowlist permits these reads, and explicit allowlist override still blocks them.
+
 ## 2. Cross-Plan Decisions
 
 ### 2.1 Unified state vocabulary
