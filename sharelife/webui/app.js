@@ -338,6 +338,10 @@ function memberSurfacePruneHelpers() {
   return globalThis.SharelifeMemberSurfacePrune || null
 }
 
+function capabilityRoleHelpers() {
+  return globalThis.SharelifeCapabilityRoleRuntime || null
+}
+
 function marketCardHelpers() {
   return globalThis.SharelifeMarketCards || null
 }
@@ -1172,6 +1176,12 @@ function responseErrorCode(response) {
 }
 
 function fixedRoleByPageMode() {
+  const helper = capabilityRoleHelpers()
+  if (helper && helper.fixedRoleByPageMode) {
+    return helper.fixedRoleByPageMode(state.pageMode, {
+      reviewerAdminBridgeActive: isReviewerAdminBridgeActive(),
+    })
+  }
   if (state.pageMode === "member" || state.pageMode === "admin") {
     return state.pageMode
   }
@@ -1182,12 +1192,20 @@ function fixedRoleByPageMode() {
 }
 
 function fallbackCapabilityRole() {
+  const helper = capabilityRoleHelpers()
+  const roleField = byId("role")
+  if (helper && helper.fallbackCapabilityRole) {
+    return helper.fallbackCapabilityRole({
+      pageMode: state.pageMode,
+      reviewerAdminBridgeActive: isReviewerAdminBridgeActive(),
+      roleFieldValue: roleField && roleField.value ? roleField.value : "",
+    })
+  }
   if (state.pageMode === "reviewer" && !isReviewerAdminBridgeActive()) {
     return "public"
   }
   const fixedRole = fixedRoleByPageMode()
   if (fixedRole) return fixedRole
-  const roleField = byId("role")
   if (roleField && roleField.value) {
     return String(roleField.value || "").trim().toLowerCase() || "member"
   }
