@@ -149,6 +149,23 @@
     btnMarketCatalogDetail: "profile_pack.catalog.read",
     btnMarketCatalogCompare: "profile_pack.catalog.read",
   })
+  const MARKET_BASE_FALLBACK_OPERATIONS = Object.freeze([
+    "auth.info.read",
+    "auth.login",
+    "health.read",
+    "ui.capabilities.read",
+  ])
+  const MARKET_MEMBER_FALLBACK_OPERATIONS = Object.freeze([
+    "member.installations.read",
+    "member.installations.refresh",
+    "member.installations.uninstall",
+    "templates.trial.request",
+    "templates.install",
+    "templates.submit",
+    "profile_pack.catalog.read",
+    "profile_pack.community.submit",
+    "notifications.read",
+  ])
   const ANONYMOUS_MEMBER_FALLBACK_OPERATIONS = Object.freeze([
     "auth.info.read",
     "auth.login",
@@ -204,6 +221,14 @@
 
   function marketAuthSurfaceHelpers() {
     return globalScope.SharelifeMarketAuthSurface || null
+  }
+
+  function capabilityGuardHelpers() {
+    return globalScope.SharelifeCapabilityGuardRuntime || null
+  }
+
+  function capabilityGuardDomHelpers() {
+    return globalScope.SharelifeCapabilityGuardDomRuntime || null
   }
 
   function byId(id) {
@@ -1574,26 +1599,23 @@
   }
 
   function fallbackCapabilityOperations(role, options = {}) {
+    const helper = capabilityGuardHelpers()
+    if (helper && helper.fallbackCapabilityOperations) {
+      return helper.fallbackCapabilityOperations(role, {
+        authenticated: options.authenticated,
+        allowAnonymousMember: options.allowAnonymousMember,
+        baseOperations: MARKET_BASE_FALLBACK_OPERATIONS,
+        memberOperations: MARKET_MEMBER_FALLBACK_OPERATIONS,
+        reviewerOperations: [],
+        adminOperations: [],
+        anonymousMemberFallbackOperations: ANONYMOUS_MEMBER_FALLBACK_OPERATIONS,
+      })
+    }
     const normalized = String(role || "").trim().toLowerCase()
     const authenticated = options.authenticated !== false
     const allowAnonymousMember = options.allowAnonymousMember === true
-    const base = [
-      "auth.info.read",
-      "auth.login",
-      "health.read",
-      "ui.capabilities.read",
-    ]
-    const member = [
-      "member.installations.read",
-      "member.installations.refresh",
-      "member.installations.uninstall",
-      "templates.trial.request",
-      "templates.install",
-      "templates.submit",
-      "profile_pack.catalog.read",
-      "profile_pack.community.submit",
-      "notifications.read",
-    ]
+    const base = MARKET_BASE_FALLBACK_OPERATIONS
+    const member = MARKET_MEMBER_FALLBACK_OPERATIONS
     if (normalized === "admin" || normalized === "reviewer" || normalized === "member") {
       if (normalized === "member" && !authenticated && allowAnonymousMember) {
         return ANONYMOUS_MEMBER_FALLBACK_OPERATIONS.slice()
@@ -1604,11 +1626,19 @@
   }
 
   function hasCapability(capability) {
+    const helper = capabilityGuardHelpers()
     const required = String(capability || "").trim()
     if (!required) return true
     const operations = Array.isArray(state.capabilities.operations)
       ? state.capabilities.operations
       : []
+    if (helper && helper.hasCapability) {
+      return helper.hasCapability(required, {
+        pageMode: state.pageMode,
+        reviewerAdminBridgeActive: false,
+        operations,
+      })
+    }
     return operations.includes(required)
   }
 
@@ -1618,6 +1648,19 @@
     const node = byId(controlId)
     if (!node) return
     const allowed = hasCapability(required)
+    const domHelper = capabilityGuardDomHelpers()
+    if (domHelper && domHelper.applyCapabilityGuardToNode) {
+      domHelper.applyCapabilityGuardToNode(node, {
+        allowed,
+        requiredCapability: required,
+        lockedHint: i18nFormat(
+          "capability.locked_hint",
+          "Requires capability: {capability}",
+          { capability: required },
+        ),
+      })
+      return
+    }
     node.classList.toggle("capability-blocked", !allowed)
     node.setAttribute("aria-disabled", allowed ? "false" : "true")
     if ("disabled" in node) {

@@ -85,3 +85,67 @@ def test_promotion_gate_cli_passes_for_empty_diff_and_writes_json(tmp_path: Path
     assert report["status"] == "PASS"
     assert report["comparison_mode"] == "merge-base"
     assert report["changed_files_count"] == 0
+
+
+def test_promotion_gate_blocks_gitlink_mode_entries() -> None:
+    gate = _load_gate_module()
+    report = gate.evaluate_change_set(
+        changed_paths=["ref/AstrBot"],
+        added_lines_by_path={},
+        changed_entries=[
+            {
+                "path": "ref/AstrBot",
+                "old_path": "",
+                "status": "A",
+                "old_mode": "000000",
+                "new_mode": "160000",
+            }
+        ],
+        projection_manifest={
+            "include": ["sharelife/**", "docs/**", "tests/**"],
+            "exclude": ["ref/**"],
+        },
+    )
+    assert report["promotable"] is False
+    rules = {item["rule"] for item in report["blocked_paths"]}
+    assert "gitlink_mode_block" in rules
+
+
+def test_promotion_gate_blocks_added_paths_outside_projection_manifest_allowlist() -> None:
+    gate = _load_gate_module()
+    manifest = {
+        "include": ["sharelife/**", "docs/**", "tests/**"],
+        "exclude": ["docs/private/**", "ref/**"],
+    }
+    blocked = gate.evaluate_change_set(
+        changed_paths=["tmp/new-notes.md"],
+        added_lines_by_path={},
+        changed_entries=[
+            {
+                "path": "tmp/new-notes.md",
+                "old_path": "",
+                "status": "A",
+                "old_mode": "000000",
+                "new_mode": "100644",
+            }
+        ],
+        projection_manifest=manifest,
+    )
+    assert blocked["promotable"] is False
+    assert any(item["rule"] == "manifest_path_not_projectable" for item in blocked["blocked_paths"])
+
+    allowed = gate.evaluate_change_set(
+        changed_paths=["sharelife/webui/market_page.js"],
+        added_lines_by_path={},
+        changed_entries=[
+            {
+                "path": "sharelife/webui/market_page.js",
+                "old_path": "",
+                "status": "A",
+                "old_mode": "000000",
+                "new_mode": "100644",
+            }
+        ],
+        projection_manifest=manifest,
+    )
+    assert allowed["promotable"] is True

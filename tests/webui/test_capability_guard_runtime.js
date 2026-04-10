@@ -36,6 +36,27 @@ test("fallbackCapabilityOperations respects anonymous member fallback policy", (
   assert.ok(authenticatedMemberOps.includes("profile_pack.community.submit"))
 })
 
+test("fallbackCapabilityOperations accepts custom role bundles for per-surface policy", () => {
+  const ops = fallbackCapabilityOperations("member", {
+    authenticated: true,
+    allowAnonymousMember: false,
+    baseOperations: ["auth.login", "health.read"],
+    memberOperations: ["profile_pack.catalog.read", "templates.install"],
+    reviewerOperations: [],
+    adminOperations: [],
+  })
+  assert.ok(ops.includes("auth.login"))
+  assert.ok(ops.includes("profile_pack.catalog.read"))
+  assert.ok(!ops.includes("admin.submissions.read"))
+
+  const anonymousOps = fallbackCapabilityOperations("member", {
+    authenticated: false,
+    allowAnonymousMember: true,
+    anonymousMemberFallbackOperations: ["auth.login", "profile_pack.catalog.read"],
+  })
+  assert.deepEqual(anonymousOps, ["auth.login", "profile_pack.catalog.read"])
+})
+
 test("hasCapability enforces reviewer-readonly lock and capability lookup", () => {
   assert.equal(
     hasCapability("templates.list", {
