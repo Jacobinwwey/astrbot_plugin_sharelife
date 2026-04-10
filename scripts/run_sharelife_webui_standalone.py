@@ -179,7 +179,12 @@ def apply_standalone_auth_defaults(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def apply_standalone_feature_defaults(config: dict[str, Any]) -> dict[str, Any]:
+def apply_standalone_feature_defaults(
+    config: dict[str, Any],
+    *,
+    enable_local_astrbot_import: bool = False,
+    allow_anonymous_local_astrbot_import: bool = False,
+) -> dict[str, Any]:
     webui = config.setdefault("webui", {})
     if not isinstance(webui, dict):
         config["webui"] = {}
@@ -190,13 +195,20 @@ def apply_standalone_feature_defaults(config: dict[str, Any]) -> dict[str, Any]:
         webui["features"] = {}
         features = webui["features"]
 
-    if "local_astrbot_import" not in features:
+    if allow_anonymous_local_astrbot_import:
+        enable_local_astrbot_import = True
+
+    if enable_local_astrbot_import:
+        features["local_astrbot_import"] = True
+    elif "local_astrbot_import" not in features:
         features["local_astrbot_import"] = False
     if not _as_bool(str(features.get("local_astrbot_import", "false")), default=False):
         features["local_astrbot_import"] = False
         features["allow_anonymous_local_astrbot_import"] = False
         return config
-    if "allow_anonymous_local_astrbot_import" not in features:
+    if allow_anonymous_local_astrbot_import:
+        features["allow_anonymous_local_astrbot_import"] = True
+    elif "allow_anonymous_local_astrbot_import" not in features:
         features["allow_anonymous_local_astrbot_import"] = _as_bool(
             str(auth.get("allow_anonymous_member", "false")),
             default=False,
@@ -417,6 +429,18 @@ def parse_args() -> argparse.Namespace:
         default=_as_bool(os.getenv("SHARELIFE_ALLOW_CONFIG_ADMIN_PASSWORD", "0"), default=False),
         help="Allow standalone WebUI to honor admin_password from the regular config file. Disabled by default for safer public deployments.",
     )
+    parser.add_argument(
+        "--enable-local-astrbot-import",
+        action="store_true",
+        default=_as_bool(os.getenv("SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT", "0"), default=False),
+        help="Enable importing local AstrBot cmd_config.json in standalone mode. Disabled by default.",
+    )
+    parser.add_argument(
+        "--allow-anonymous-local-astrbot-import",
+        action="store_true",
+        default=_as_bool(os.getenv("SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT", "0"), default=False),
+        help="Allow anonymous member subject to trigger local AstrBot import. Implies --enable-local-astrbot-import.",
+    )
     return parser.parse_args()
 
 
@@ -430,7 +454,11 @@ def main() -> None:
     config = merge_local_webui_auth_override(config, data_root=data_root)
     config = merge_env_auth(config)
     config = apply_standalone_auth_defaults(config)
-    config = apply_standalone_feature_defaults(config)
+    config = apply_standalone_feature_defaults(
+        config,
+        enable_local_astrbot_import=bool(args.enable_local_astrbot_import),
+        allow_anonymous_local_astrbot_import=bool(args.allow_anonymous_local_astrbot_import),
+    )
     config = merge_env_state_store(config)
     pre_strip_auth = (
         config.get("webui", {}).get("auth", {})

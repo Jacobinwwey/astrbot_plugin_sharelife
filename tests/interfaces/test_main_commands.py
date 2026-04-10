@@ -244,6 +244,30 @@ def test_standalone_feature_defaults_disable_host_local_astrbot_import_by_defaul
     assert inherited["webui"]["features"]["local_astrbot_import"] is True
     assert inherited["webui"]["features"]["allow_anonymous_local_astrbot_import"] is True
 
+    override_enabled = apply_standalone_feature_defaults(
+        {"webui": {}},
+        enable_local_astrbot_import=True,
+    )
+    assert override_enabled["webui"]["features"]["local_astrbot_import"] is True
+    assert override_enabled["webui"]["features"]["allow_anonymous_local_astrbot_import"] is False
+
+    override_enabled_over_config = apply_standalone_feature_defaults(
+        {"webui": {"features": {"local_astrbot_import": False}}},
+        enable_local_astrbot_import=True,
+    )
+    assert override_enabled_over_config["webui"]["features"]["local_astrbot_import"] is True
+    assert (
+        override_enabled_over_config["webui"]["features"]["allow_anonymous_local_astrbot_import"]
+        is False
+    )
+
+    override_anonymous = apply_standalone_feature_defaults(
+        {"webui": {}},
+        allow_anonymous_local_astrbot_import=True,
+    )
+    assert override_anonymous["webui"]["features"]["local_astrbot_import"] is True
+    assert override_anonymous["webui"]["features"]["allow_anonymous_local_astrbot_import"] is True
+
 
 def test_sharelife_continuity_retention_is_configurable_from_plugin_config(tmp_path: Path) -> None:
     module = _load_plugin_module(tmp_path)
