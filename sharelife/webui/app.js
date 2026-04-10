@@ -181,27 +181,34 @@ const CONTROL_CAPABILITY_MAP = Object.freeze({
   btnMemberProfilePackUploadSubmit: "profile_pack.community.submit",
 })
 
-const ANONYMOUS_MEMBER_FALLBACK_OPERATIONS = Object.freeze([
-  "auth.info.read",
-  "auth.login",
-  "health.read",
-  "member.installations.read",
-  "member.installations.refresh",
-  "member.installations.uninstall",
-  "member.tasks.read",
-  "member.tasks.refresh",
-  "notifications.read",
-  "preferences.read",
-  "preferences.write",
-  "profile_pack.catalog.read",
-  "templates.detail",
-  "templates.install",
-  "templates.list",
-  "templates.package.download",
-  "templates.trial.request",
-  "templates.trial.status",
-  "ui.capabilities.read",
-])
+const ANONYMOUS_MEMBER_FALLBACK_OPERATIONS = Object.freeze(
+  (
+    globalThis.SharelifeCapabilityPolicyRuntime
+    && globalThis.SharelifeCapabilityPolicyRuntime.anonymousMemberFallbackOperations
+  )
+    ? globalThis.SharelifeCapabilityPolicyRuntime.anonymousMemberFallbackOperations()
+    : [
+      "auth.info.read",
+      "auth.login",
+      "health.read",
+      "member.installations.read",
+      "member.installations.refresh",
+      "member.installations.uninstall",
+      "member.tasks.read",
+      "member.tasks.refresh",
+      "notifications.read",
+      "preferences.read",
+      "preferences.write",
+      "profile_pack.catalog.read",
+      "templates.detail",
+      "templates.install",
+      "templates.list",
+      "templates.package.download",
+      "templates.trial.request",
+      "templates.trial.status",
+      "ui.capabilities.read",
+    ],
+)
 
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
