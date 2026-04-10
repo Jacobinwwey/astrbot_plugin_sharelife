@@ -37,6 +37,13 @@
 3. WebUI binding decomposition moved to a shared slice registry (`app_binding_slices.js`) and `bindButtons()` is now an orchestration shell over slice-level binders.
 4. Slice-surface and route-surface meta tests were added to prevent regressions in script order, boundary serving, and member DOM safety.
 
+### 1.5 Incremental progress (`2026-04-10`, observability pass)
+
+1. Public-market autopublish now emits deterministic pipeline trace metadata (`pipeline_trace_id` + stable stage event ids) across decision/publish/snapshot/backup-handoff stages.
+2. Entry payload and API publish response now carry the same pipeline trace envelope to support deterministic cross-system correlation.
+3. Audit chain adds explicit `profile_pack.public_market.snapshot_rebuilt` and `profile_pack.public_market.backup_handoff` events for operator-facing lifecycle visibility.
+4. Public-market backup manifest now includes snapshot-level pipeline summary fields (`pipeline_trace_count`, latest trace and stage events).
+
 ## 2. Cross-Plan Decisions
 
 ### 2.1 Unified state vocabulary

@@ -37,6 +37,13 @@
 3. WebUI の bind ロジックは `app_binding_slices.js` レジストリへさらに分割され、`bindButtons()` はオーケストレーション層へ収束しました。
 4. script 順序、member 安全面、境界配信を守る meta テストを追加し、回帰防止を強化しました。
 
+### 1.5 増分進捗（`2026-04-10`、可観測性強化）
+
+1. public-market 自動 publish で、決定的なパイプライントレース（`pipeline_trace_id` と decision/publish/snapshot/backup-handoff の固定イベント ID）を出力するようにしました。
+2. market entry と API の publish 応答が同一トレース構造を共有し、相関追跡を安定化しました。
+3. 監査イベントに `profile_pack.public_market.snapshot_rebuilt` と `profile_pack.public_market.backup_handoff` を追加し、運用側のライフサイクル可視性を強化しました。
+4. public-market backup manifest に snapshot 起点のトレース集計（`pipeline_trace_count`、latest trace / events）を追加しました。
+
 ## 2. 交差分析での決定
 
 ### 2.1 状態語彙の統一

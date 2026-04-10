@@ -2755,6 +2755,8 @@ def test_webui_profile_pack_decision_can_auto_publish_to_public_market(tmp_path)
     data = decided.json()["data"]
     assert data["status"] == "approved"
     assert data["public_market_publish"]["status"] == "succeeded"
+    assert data["public_market_publish"]["pipeline"]["trace_id"]
+    assert data["public_market_publish"]["backup"]["status"] == "queued"
 
     entry_path = Path(data["public_market_publish"]["entry_path"])
     package_path = Path(data["public_market_publish"]["package_path"])

@@ -24,7 +24,25 @@ def test_backup_public_market_directory_creates_local_archive_and_manifest(tmp_p
     (source_dir / "packages" / "official").mkdir(parents=True, exist_ok=True)
     (source_dir / "packages" / "official" / "pack.zip").write_bytes(b"zip-bytes")
     (source_dir / "catalog.snapshot.json").write_text(
-        json.dumps({"schema_version": "v1", "rows": [{"pack_id": "profile/example", "version": "1.0.0"}]}),
+        json.dumps(
+            {
+                "schema_version": "v1",
+                "rows": [
+                    {
+                        "pack_id": "profile/example",
+                        "version": "1.0.0",
+                        "published_at": "2026-04-05T08:00:00+00:00",
+                        "pipeline_trace_id": "trace-1",
+                        "pipeline_events": {
+                            "decision": "pm-trace-1-decision",
+                            "publish": "pm-trace-1-publish",
+                            "snapshot": "pm-trace-1-snapshot",
+                            "backup": "pm-trace-1-backup",
+                        },
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -49,6 +67,9 @@ def test_backup_public_market_directory_creates_local_archive_and_manifest(tmp_p
     assert manifest["kind"] == "sharelife_public_market_backup"
     assert manifest["snapshot"]["schema_version"] == "v1"
     assert manifest["snapshot"]["row_count"] == 1
+    assert manifest["snapshot"]["pipeline_trace_count"] == 1
+    assert manifest["snapshot"]["latest_pipeline_trace_id"] == "trace-1"
+    assert manifest["snapshot"]["latest_pipeline_events"]["backup"] == "pm-trace-1-backup"
 
 
 def test_backup_public_market_directory_syncs_archive_and_manifest_via_rclone(tmp_path, monkeypatch):

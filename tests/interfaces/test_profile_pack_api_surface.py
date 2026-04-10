@@ -809,6 +809,12 @@ def test_api_profile_pack_approval_auto_publishes_to_public_market(tmp_path):
 
     publish = decided.get("public_market_publish", {})
     assert publish.get("status") == "succeeded"
+    pipeline = publish.get("pipeline", {})
+    assert pipeline.get("trace_id")
+    assert pipeline.get("events", {}).get("decision")
+    assert pipeline.get("events", {}).get("publish")
+    assert pipeline.get("events", {}).get("snapshot")
+    assert pipeline.get("events", {}).get("backup")
     entry_path = Path(str(publish["entry_path"]))
     package_path = Path(str(publish["package_path"]))
     assert entry_path.exists()
@@ -820,11 +826,38 @@ def test_api_profile_pack_approval_auto_publishes_to_public_market(tmp_path):
     assert entry_payload["pack_id"] == "profile/community-autopublish"
     assert entry_payload["source_submission_id"] == submitted["submission_id"]
     assert entry_payload["redaction_mode"] == "exclude_secrets"
+    assert entry_payload["pipeline_trace_id"] == pipeline["trace_id"]
+    assert entry_payload["pipeline_events"]["publish"] == pipeline["events"]["publish"]
 
     snapshot = public_market_root / "market" / "catalog.snapshot.json"
     assert snapshot.exists()
     snapshot_rows = json.loads(snapshot.read_text(encoding="utf-8"))["rows"]
     assert any(item.get("pack_id") == "profile/community-autopublish" for item in snapshot_rows)
+    assert publish["snapshot"]["pipeline_event_id"] == pipeline["events"]["snapshot"]
+    assert publish["backup"]["pipeline_event_id"] == pipeline["events"]["backup"]
+
+    audit = api.admin_list_audit(role="admin", limit=60)
+    events = audit.get("events", [])
+    assert any(
+        item.get("action") == "profile_pack.submission_decided"
+        and (item.get("detail") or {}).get("pipeline_event_id") == pipeline["events"]["decision"]
+        for item in events
+    )
+    assert any(
+        item.get("action") == "profile_pack.public_market.publish"
+        and (item.get("detail") or {}).get("pipeline_event_id") == pipeline["events"]["publish"]
+        for item in events
+    )
+    assert any(
+        item.get("action") == "profile_pack.public_market.snapshot_rebuilt"
+        and (item.get("detail") or {}).get("pipeline_event_id") == pipeline["events"]["snapshot"]
+        for item in events
+    )
+    assert any(
+        item.get("action") == "profile_pack.public_market.backup_handoff"
+        and (item.get("detail") or {}).get("pipeline_event_id") == pipeline["events"]["backup"]
+        for item in events
+    )
 
 
 def test_api_profile_pack_approval_does_not_publish_when_flag_disabled(tmp_path):
@@ -1646,6 +1679,8 @@ def test_web_api_profile_pack_decision_exposes_public_market_publish_payload(tmp
     assert decided.ok is True
     publish = decided.data.get("public_market_publish", {})
     assert publish.get("status") == "succeeded"
+    assert publish.get("pipeline", {}).get("trace_id")
+    assert publish.get("backup", {}).get("status") == "queued"
     assert Path(str(publish.get("entry_path", ""))).exists()
     assert Path(str(publish.get("package_path", ""))).exists()
 

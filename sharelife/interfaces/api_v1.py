@@ -2619,22 +2619,69 @@ class SharelifeApiV1:
             )
         except ValueError as exc:
             return self._profile_pack_error_payload(exc=exc, fallback_id=submission_id)
+        normalized_decision = str(decision or "").strip().lower()
+        pipeline_trace_id = ""
+        pipeline_decision_event_id = ""
+        pipeline_backup_event_id = ""
+        if normalized_decision == "approve":
+            pipeline_trace_id = self._public_market_pipeline_trace_id(
+                submission_id=str(getattr(submission, "submission_id", "") or ""),
+                pack_id=str(getattr(submission, "pack_id", "") or ""),
+                version=str(getattr(submission, "version", "") or ""),
+            )
+            pipeline_decision_event_id = self._public_market_pipeline_event_id(
+                pipeline_trace_id,
+                "decision",
+            )
+            pipeline_backup_event_id = self._public_market_pipeline_event_id(
+                pipeline_trace_id,
+                "backup",
+            )
+        decision_detail: dict[str, Any] = {
+            "pack_id": submission.pack_id,
+            "version": submission.version,
+        }
+        if pipeline_trace_id:
+            decision_detail.update(
+                {
+                    "pipeline_trace_id": pipeline_trace_id,
+                    "pipeline_event_id": pipeline_decision_event_id,
+                    "pipeline_next_event_id": self._public_market_pipeline_event_id(
+                        pipeline_trace_id,
+                        "publish",
+                    ),
+                    "pipeline_backup_event_id": pipeline_backup_event_id,
+                },
+            )
         self._audit(
             action="profile_pack.submission_decided",
             actor_id=actor_id,
             actor_role=actor_role,
             target_id=submission.submission_id,
             status=submission.status,
-            detail={"pack_id": submission.pack_id, "version": submission.version},
+            detail=decision_detail,
         )
         payload = self._profile_pack_submission_payload(submission)
         publish_result = self._auto_publish_profile_pack_submission(
             submission=submission,
             actor_id=actor_id,
             actor_role=actor_role,
+            pipeline_trace_id=pipeline_trace_id,
+            previous_event_id=pipeline_decision_event_id,
+            backup_event_id=pipeline_backup_event_id,
         )
         if publish_result:
             payload["public_market_publish"] = publish_result
+            if pipeline_trace_id:
+                payload["public_market_pipeline"] = {
+                    "trace_id": pipeline_trace_id,
+                    "events": {
+                        "decision": pipeline_decision_event_id,
+                        "publish": self._public_market_pipeline_event_id(pipeline_trace_id, "publish"),
+                        "snapshot": self._public_market_pipeline_event_id(pipeline_trace_id, "snapshot"),
+                        "backup": pipeline_backup_event_id,
+                    },
+                }
         return payload
 
     def admin_set_profile_pack_featured(
@@ -3752,6 +3799,33 @@ class SharelifeApiV1:
         return slug or "profile-pack"
 
     @staticmethod
+    def _public_market_pipeline_trace_id(
+        *,
+        submission_id: str,
+        pack_id: str,
+        version: str,
+    ) -> str:
+        encoded = "|".join(
+            [
+                str(submission_id or "").strip(),
+                str(pack_id or "").strip(),
+                str(version or "").strip(),
+            ],
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:24]
+
+    @staticmethod
+    def _public_market_pipeline_event_id(trace_id: str, stage: str) -> str:
+        normalized_trace = str(trace_id or "").strip() or "trace"
+        normalized_stage = "".join(
+            ch if ch.isalnum() else "-"
+            for ch in str(stage or "").strip().lower()
+        ).strip("-")
+        if not normalized_stage:
+            normalized_stage = "stage"
+        return f"pm-{normalized_trace}-{normalized_stage}"
+
+    @staticmethod
     def _file_sha256(path: Path) -> str:
         digest = hashlib.sha256()
         with path.open("rb") as handle:
@@ -3765,6 +3839,9 @@ class SharelifeApiV1:
         submission,
         actor_id: str,
         actor_role: str,
+        pipeline_trace_id: str = "",
+        previous_event_id: str = "",
+        backup_event_id: str = "",
     ) -> dict[str, Any]:
         if not self.public_market_auto_publish_profile_pack_approve:
             return {}
@@ -3773,9 +3850,40 @@ class SharelifeApiV1:
         status = str(getattr(submission, "status", "") or "").strip().lower()
         if status != "approved":
             return {"status": "skipped", "reason": "submission_not_approved"}
+        source_submission_id = str(getattr(submission, "submission_id", "") or "").strip()
+        pack_id = str(getattr(submission, "pack_id", "") or "").strip()
+        version = str(getattr(submission, "version", "") or "").strip()
+        normalized_trace_id = str(pipeline_trace_id or "").strip() or self._public_market_pipeline_trace_id(
+            submission_id=source_submission_id,
+            pack_id=pack_id,
+            version=version,
+        )
+        decision_event_id = str(previous_event_id or "").strip() or self._public_market_pipeline_event_id(
+            normalized_trace_id,
+            "decision",
+        )
+        publish_event_id = self._public_market_pipeline_event_id(normalized_trace_id, "publish")
+        snapshot_event_id = self._public_market_pipeline_event_id(normalized_trace_id, "snapshot")
+        normalized_backup_event_id = str(backup_event_id or "").strip() or self._public_market_pipeline_event_id(
+            normalized_trace_id,
+            "backup",
+        )
+        pipeline_payload = {
+            "trace_id": normalized_trace_id,
+            "events": {
+                "decision": decision_event_id,
+                "publish": publish_event_id,
+                "snapshot": snapshot_event_id,
+                "backup": normalized_backup_event_id,
+            },
+        }
         redaction_mode = str(getattr(submission, "redaction_mode", "") or "").strip().lower()
         if redaction_mode not in {"exclude_secrets", "masked_secrets"}:
-            result = {"status": "failed", "error": "public_market_redaction_not_allowed"}
+            result = {
+                "status": "failed",
+                "error": "public_market_redaction_not_allowed",
+                "pipeline": pipeline_payload,
+            }
             self._audit(
                 action="profile_pack.public_market.publish",
                 actor_id=actor_id,
@@ -3784,9 +3892,13 @@ class SharelifeApiV1:
                 status=result["status"],
                 detail={
                     "error": result["error"],
-                    "pack_id": str(getattr(submission, "pack_id", "") or ""),
-                    "version": str(getattr(submission, "version", "") or ""),
+                    "pack_id": pack_id,
+                    "version": version,
                     "redaction_mode": redaction_mode,
+                    "pipeline_trace_id": normalized_trace_id,
+                    "pipeline_event_id": publish_event_id,
+                    "pipeline_previous_event_id": decision_event_id,
+                    "pipeline_next_event_id": snapshot_event_id,
                 },
             )
             return result
@@ -3797,7 +3909,11 @@ class SharelifeApiV1:
         except ValueError:
             artifact = None
         if artifact is None or not artifact.path.exists():
-            result = {"status": "failed", "error": "profile_pack_not_found"}
+            result = {
+                "status": "failed",
+                "error": "profile_pack_not_found",
+                "pipeline": pipeline_payload,
+            }
             self._audit(
                 action="profile_pack.public_market.publish",
                 actor_id=actor_id,
@@ -3806,14 +3922,15 @@ class SharelifeApiV1:
                 status=result["status"],
                 detail={
                     "error": result["error"],
-                    "pack_id": str(getattr(submission, "pack_id", "") or ""),
-                    "version": str(getattr(submission, "version", "") or ""),
+                    "pack_id": pack_id,
+                    "version": version,
+                    "pipeline_trace_id": normalized_trace_id,
+                    "pipeline_event_id": publish_event_id,
+                    "pipeline_previous_event_id": decision_event_id,
+                    "pipeline_next_event_id": snapshot_event_id,
                 },
             )
             return result
-
-        pack_id = str(getattr(submission, "pack_id", "") or "").strip()
-        version = str(getattr(submission, "version", "") or "").strip()
         package_filename = f"{self._safe_slug(pack_id)}-{self._safe_slug(version)}.zip"
         packages_dir = self.public_market_root / "market" / "packages" / "community"
         entries_dir = self.public_market_root / "market" / "entries"
@@ -3836,7 +3953,6 @@ class SharelifeApiV1:
         compatibility = str(getattr(submission, "compatibility", "") or "compatible").strip() or "compatible"
         review_note = str(getattr(submission, "review_note", "") or "").strip()
         published_at = str(getattr(submission, "updated_at", "") or "").strip()
-        source_submission_id = str(getattr(submission, "submission_id", "") or "").strip()
         maintainer = "community"
 
         entry_payload = {
@@ -3875,6 +3991,8 @@ class SharelifeApiV1:
             "package_path": f"/market/packages/community/{target_package.name}",
             "catalog_origin": "public",
             "runtime_available": False,
+            "pipeline_trace_id": normalized_trace_id,
+            "pipeline_events": dict(pipeline_payload["events"]),
         }
         entry_name = f"{self._safe_slug(pack_id)}-{self._safe_slug(version)}.json"
         entry_path = (entries_dir / entry_name).resolve()
@@ -3882,38 +4000,109 @@ class SharelifeApiV1:
             json.dumps(entry_payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        self._audit(
+            action="profile_pack.public_market.publish",
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_id=source_submission_id or pack_id,
+            status="succeeded",
+            detail={
+                "pack_id": pack_id,
+                "version": version,
+                "entry_path": str(entry_path),
+                "package_path": str(target_package),
+                "pipeline_trace_id": normalized_trace_id,
+                "pipeline_event_id": publish_event_id,
+                "pipeline_previous_event_id": decision_event_id,
+                "pipeline_next_event_id": snapshot_event_id,
+            },
+        )
         snapshot_result: dict[str, Any] = {"status": "skipped", "reason": "snapshot_rebuild_disabled"}
         if self.public_market_rebuild_snapshot_on_publish:
-            snapshot_result = self._rebuild_public_market_snapshot()
+            snapshot_result = self._rebuild_public_market_snapshot(
+                pipeline_trace_id=normalized_trace_id,
+                pipeline_event_id=snapshot_event_id,
+                previous_event_id=publish_event_id,
+                next_event_id=normalized_backup_event_id,
+            )
+        else:
+            snapshot_result = {
+                "status": "skipped",
+                "reason": "snapshot_rebuild_disabled",
+                "pipeline_trace_id": normalized_trace_id,
+                "pipeline_event_id": snapshot_event_id,
+                "pipeline_previous_event_id": publish_event_id,
+                "pipeline_next_event_id": normalized_backup_event_id,
+            }
+        self._audit(
+            action="profile_pack.public_market.snapshot_rebuilt",
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_id=source_submission_id or pack_id,
+            status=str(snapshot_result.get("status", "") or "unknown"),
+            detail={
+                "pack_id": pack_id,
+                "version": version,
+                "snapshot": dict(snapshot_result),
+                "pipeline_trace_id": normalized_trace_id,
+                "pipeline_event_id": snapshot_event_id,
+                "pipeline_previous_event_id": publish_event_id,
+                "pipeline_next_event_id": normalized_backup_event_id,
+            },
+        )
+        backup_result = {
+            "status": "queued",
+            "mode": "workflow_handoff",
+            "pipeline_trace_id": normalized_trace_id,
+            "pipeline_event_id": normalized_backup_event_id,
+            "pipeline_previous_event_id": snapshot_event_id,
+            "suggested_workflow": "public-market-backup",
+        }
+        self._audit(
+            action="profile_pack.public_market.backup_handoff",
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_id=source_submission_id or pack_id,
+            status="queued",
+            detail={
+                "pack_id": pack_id,
+                "version": version,
+                "entry_path": str(entry_path),
+                "package_path": str(target_package),
+                "backup": dict(backup_result),
+                "pipeline_trace_id": normalized_trace_id,
+                "pipeline_event_id": normalized_backup_event_id,
+                "pipeline_previous_event_id": snapshot_event_id,
+            },
+        )
 
         result = {
             "status": "succeeded",
             "entry_path": str(entry_path),
             "package_path": str(target_package),
             "entry_id": entry_name,
+            "pipeline": pipeline_payload,
             "snapshot": snapshot_result,
+            "backup": backup_result,
         }
-        self._audit(
-            action="profile_pack.public_market.publish",
-            actor_id=actor_id,
-            actor_role=actor_role,
-            target_id=source_submission_id or pack_id,
-            status=result["status"],
-            detail={
-                "pack_id": pack_id,
-                "version": version,
-                "entry_path": str(entry_path),
-                "package_path": str(target_package),
-                "snapshot": snapshot_result,
-            },
-        )
         return result
 
-    def _rebuild_public_market_snapshot(self) -> dict[str, Any]:
+    def _rebuild_public_market_snapshot(
+        self,
+        *,
+        pipeline_trace_id: str = "",
+        pipeline_event_id: str = "",
+        previous_event_id: str = "",
+        next_event_id: str = "",
+    ) -> dict[str, Any]:
         market_dir = self.public_market_root / "market"
         snapshot_path = market_dir / "catalog.snapshot.json"
         entries_dir = market_dir / "entries"
         rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        normalized_trace_id = str(pipeline_trace_id or "").strip()
+        normalized_event_id = str(pipeline_event_id or "").strip()
+        normalized_previous_event_id = str(previous_event_id or "").strip()
+        normalized_next_event_id = str(next_event_id or "").strip()
         try:
             if snapshot_path.exists():
                 previous = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -3965,13 +4154,37 @@ class SharelifeApiV1:
             changed = content != previous_text
             snapshot_path.parent.mkdir(parents=True, exist_ok=True)
             snapshot_path.write_text(content, encoding="utf-8")
-            return {"status": "succeeded", "changed": changed}
+            result = {
+                "status": "succeeded",
+                "changed": changed,
+                "row_count": len(rows),
+            }
+            if normalized_trace_id:
+                result.update(
+                    {
+                        "pipeline_trace_id": normalized_trace_id,
+                        "pipeline_event_id": normalized_event_id,
+                        "pipeline_previous_event_id": normalized_previous_event_id,
+                        "pipeline_next_event_id": normalized_next_event_id,
+                    },
+                )
+            return result
         except Exception as exc:  # pragma: no cover - runtime guard
-            return {
+            result = {
                 "status": "failed",
                 "error": "snapshot_rebuild_failed",
                 "reason": f"{type(exc).__name__}:{exc}",
             }
+            if normalized_trace_id:
+                result.update(
+                    {
+                        "pipeline_trace_id": normalized_trace_id,
+                        "pipeline_event_id": normalized_event_id,
+                        "pipeline_previous_event_id": normalized_previous_event_id,
+                        "pipeline_next_event_id": normalized_next_event_id,
+                    },
+                )
+            return result
 
     def _filtered_profile_pack_catalog_rows(
         self,

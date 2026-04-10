@@ -85,6 +85,9 @@ def _snapshot_summary(source_dir: Path) -> dict[str, object]:
             "exists": False,
             "schema_version": "",
             "row_count": 0,
+            "pipeline_trace_count": 0,
+            "latest_pipeline_trace_id": "",
+            "latest_pipeline_events": {},
         }
     try:
         payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -93,12 +96,37 @@ def _snapshot_summary(source_dir: Path) -> dict[str, object]:
             "exists": True,
             "schema_version": "",
             "row_count": 0,
+            "pipeline_trace_count": 0,
+            "latest_pipeline_trace_id": "",
+            "latest_pipeline_events": {},
         }
     rows = payload.get("rows", [])
+    normalized_rows = rows if isinstance(rows, list) else []
+    pipeline_trace_ids: set[str] = set()
+    latest_trace_id = ""
+    latest_events: dict[str, object] = {}
+    latest_at = ""
+    for item in normalized_rows:
+        if not isinstance(item, dict):
+            continue
+        trace_id = str(item.get("pipeline_trace_id", "") or "").strip()
+        if trace_id:
+            pipeline_trace_ids.add(trace_id)
+        published_at = str(item.get("published_at", "") or "").strip()
+        if not published_at:
+            continue
+        if published_at >= latest_at:
+            latest_at = published_at
+            latest_trace_id = trace_id
+            events = item.get("pipeline_events")
+            latest_events = dict(events) if isinstance(events, dict) else {}
     return {
         "exists": True,
         "schema_version": str(payload.get("schema_version", "") or ""),
-        "row_count": len(rows) if isinstance(rows, list) else 0,
+        "row_count": len(normalized_rows),
+        "pipeline_trace_count": len(pipeline_trace_ids),
+        "latest_pipeline_trace_id": latest_trace_id,
+        "latest_pipeline_events": latest_events,
     }
 
 

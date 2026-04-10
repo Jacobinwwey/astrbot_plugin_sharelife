@@ -37,6 +37,13 @@
 3. WebUI 绑定逻辑进一步拆分到 `app_binding_slices.js` 注册表，`bindButtons()` 收敛为编排壳层。
 4. 新增切片表面与路由表面 meta 测试，覆盖脚本装载顺序、member 安全面与边界回归风险。
 
+### 1.5 增量进展（`2026-04-10`，可观测性补强）
+
+1. 公共市场自动发布链路新增确定性流水线追踪元数据：`pipeline_trace_id` 与固定阶段事件 ID（decision/publish/snapshot/backup-handoff）。
+2. market entry 载荷与 API 发布返回结果共享同一追踪结构，可用于跨系统链路对齐。
+3. 审计链新增 `profile_pack.public_market.snapshot_rebuilt` 与 `profile_pack.public_market.backup_handoff` 事件，便于 operator 追踪全流程状态。
+4. 公共市场备份 manifest 新增快照级追踪摘要字段（`pipeline_trace_count`、latest trace 与阶段事件）。
+
 ## 2. 两大方案交叉决策
 
 ### 2.1 统一状态词汇
