@@ -330,6 +330,10 @@ function consoleSurfaceHelpers() {
   return globalThis.SharelifeConsoleSurfaceControls || null
 }
 
+function consoleScopeDomHelpers() {
+  return globalThis.SharelifeConsoleScopeDomRuntime || null
+}
+
 function marketCardHelpers() {
   return globalThis.SharelifeMarketCards || null
 }
@@ -923,11 +927,30 @@ function applyConsoleScope() {
   state.activeScope = scope
   const scopeLine = byId("consoleScopeLine")
   if (scopeLine) {
-    scopeLine.textContent = i18nFormat("console.scope.line", "view: {scope}", { scope })
+    const helper = consoleScopeDomHelpers()
+    scopeLine.textContent = helper && helper.buildScopeLineText
+      ? helper.buildScopeLineText(scope, {
+          formatMessage: (key, fallback = "", tokens = {}) => i18nFormat(key, fallback, tokens),
+        })
+      : i18nFormat("console.scope.line", "view: {scope}", { scope })
   }
 
+  const scopeDomHelper = consoleScopeDomHelpers()
   const scopedNodes = document.querySelectorAll("[data-console-scope]")
   scopedNodes.forEach((node) => {
+    const visibility = scopeDomHelper && scopeDomHelper.resolveScopeNodeVisibility
+      ? scopeDomHelper.resolveScopeNodeVisibility(node, scope, {
+          scopeVisible: (targetScope, activeScope) => scopeVisible(targetScope, activeScope),
+        })
+      : null
+    if (visibility && visibility.hide) {
+      node.classList.add("hidden")
+      return
+    }
+    if (visibility && visibility.removeHidden) {
+      node.classList.remove("hidden")
+      return
+    }
     const targetScope = String(node.getAttribute("data-console-scope") || "shared")
     const visible = scopeVisible(targetScope, scope)
     const manualVisibility = String(node.getAttribute("data-scope-visibility") || "").trim() === "manual"
