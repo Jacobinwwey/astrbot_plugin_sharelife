@@ -1760,6 +1760,26 @@ def test_admin_reviewer_lifecycle_routes_cover_invites_accounts_and_devices(tmp_
     assert after_reset.status_code == 200
     assert after_reset.json()["data"]["devices"] == []
 
+    lifecycle_audit = client.get(
+        "/api/admin/audit",
+        params={
+            "limit": 20,
+            "lifecycle_only": "true",
+            "reviewer_id": "reviewer-3",
+            "device_id": second_device_id,
+        },
+        headers=admin_headers,
+    )
+    assert lifecycle_audit.status_code == 200
+    assert lifecycle_audit.json()["data"]["filters"]["lifecycle_only"] is True
+    assert lifecycle_audit.json()["data"]["filters"]["reviewer_id"] == "reviewer-3"
+    assert lifecycle_audit.json()["data"]["filters"]["device_id"] == second_device_id
+    assert lifecycle_audit.json()["data"]["events"]
+    assert all(
+        item["action"] in {"reviewer.device_registered", "reviewer.device_revoked"}
+        for item in lifecycle_audit.json()["data"]["events"]
+    )
+
 
 def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     server = build_server(tmp_path)

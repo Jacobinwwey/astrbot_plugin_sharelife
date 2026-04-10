@@ -1454,8 +1454,26 @@ class SharelifeWebApiV1:
         )
         return self._from_api_error_or_ok(response, default_message="retry request decided")
 
-    def admin_list_audit(self, role: str, limit: int = 100) -> WebApiResult:
-        response = self.api.admin_list_audit(role=role, limit=max(1, min(limit, 200)))
+    def admin_list_audit(
+        self,
+        role: str,
+        limit: int = 100,
+        *,
+        action_prefix: str = "",
+        reviewer_id: str = "",
+        device_id: str = "",
+        lifecycle_only: bool = False,
+        inspect_limit: int = 1000,
+    ) -> WebApiResult:
+        response = self.api.admin_list_audit(
+            role=role,
+            limit=max(1, min(limit, 200)),
+            action_prefix=action_prefix,
+            reviewer_id=reviewer_id,
+            device_id=device_id,
+            lifecycle_only=bool(lifecycle_only),
+            inspect_limit=max(1, min(int(inspect_limit or 1000), 2000)),
+        )
         return self._from_api_error_or_ok(response, default_message="audit events listed")
 
     def list_notifications(self, limit: int = 100) -> WebApiResult:

@@ -85,7 +85,10 @@ class AuditService:
         return list(self._events[-limit:])
 
     def summarize_events(self, limit: int = 100) -> dict[str, Any]:
-        events = self.list_events(limit=limit)
+        return self.summarize_rows(self.list_events(limit=limit))
+
+    @classmethod
+    def summarize_rows(cls, events: list[AuditEvent]) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "total": len(events),
             "first_event_at": "",
@@ -109,14 +112,14 @@ class AuditService:
         device_buckets: dict[tuple[str, str], dict[str, Any]] = {}
 
         for event in events:
-            self._update_simple_bucket(
+            cls._update_simple_bucket(
                 actor_role_buckets,
                 key=str(event.actor_role or "unknown").strip() or "unknown",
                 label_key="actor_role",
                 label_value=str(event.actor_role or "unknown").strip() or "unknown",
                 event=event,
             )
-            self._update_simple_bucket(
+            cls._update_simple_bucket(
                 actor_buckets,
                 key=(str(event.actor_role or "unknown").strip() or "unknown", str(event.actor_id or "").strip() or "-"),
                 label_key="actor_key",
@@ -126,7 +129,7 @@ class AuditService:
                 },
                 event=event,
             )
-            self._update_simple_bucket(
+            cls._update_simple_bucket(
                 action_buckets,
                 key=str(event.action or "unknown").strip() or "unknown",
                 label_key="action",
@@ -134,8 +137,8 @@ class AuditService:
                 event=event,
             )
 
-            reviewer_id = self._event_reviewer_id(event)
-            device_id = self._event_device_id(event)
+            reviewer_id = cls._event_reviewer_id(event)
+            device_id = cls._event_device_id(event)
 
             if reviewer_id:
                 reviewer_bucket = reviewer_buckets.setdefault(
@@ -172,11 +175,11 @@ class AuditService:
                 device_bucket["last_event_at"] = max(device_bucket["last_event_at"], event.created_at)
                 device_bucket["actions"][event.action] = int(device_bucket["actions"].get(event.action, 0) or 0) + 1
 
-        summary["actor_roles"] = self._serialize_simple_buckets(actor_role_buckets)
-        summary["actors"] = self._serialize_actor_buckets(actor_buckets)
-        summary["actions"] = self._serialize_simple_buckets(action_buckets)
-        summary["reviewers"] = self._serialize_reviewer_buckets(reviewer_buckets)
-        summary["devices"] = self._serialize_device_buckets(device_buckets)
+        summary["actor_roles"] = cls._serialize_simple_buckets(actor_role_buckets)
+        summary["actors"] = cls._serialize_actor_buckets(actor_buckets)
+        summary["actions"] = cls._serialize_simple_buckets(action_buckets)
+        summary["reviewers"] = cls._serialize_reviewer_buckets(reviewer_buckets)
+        summary["devices"] = cls._serialize_device_buckets(device_buckets)
         return summary
 
     @staticmethod

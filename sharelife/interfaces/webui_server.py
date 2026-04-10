@@ -3546,8 +3546,27 @@ class SharelifeWebUIServer:
             )
 
         @self.app.get("/api/admin/audit")
-        async def admin_audit(request: Request, role: str = "member", limit: int = 50):
-            return self._response(self.api.admin_list_audit(role=self._request_role(request), limit=limit))
+        async def admin_audit(
+            request: Request,
+            role: str = "member",
+            limit: int = 50,
+            action_prefix: str = "",
+            reviewer_id: str = "",
+            device_id: str = "",
+            lifecycle_only: bool = False,
+            inspect_limit: int = 1000,
+        ):
+            return self._response(
+                self.api.admin_list_audit(
+                    role=self._request_role(request),
+                    limit=limit,
+                    action_prefix=action_prefix,
+                    reviewer_id=reviewer_id,
+                    device_id=device_id,
+                    lifecycle_only=lifecycle_only,
+                    inspect_limit=inspect_limit,
+                )
+            )
 
         @self.app.get("/api/admin/storage/local-summary")
         async def admin_storage_local_summary(request: Request):

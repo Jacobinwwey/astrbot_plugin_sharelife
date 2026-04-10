@@ -445,6 +445,58 @@ def test_api_audit_summary_groups_reviewer_and_device_activity(tmp_path):
     assert any(item["action"] == "reviewer.device_registered" for item in device_row["actions"])
 
 
+def test_api_admin_list_audit_supports_lifecycle_and_scope_filters(tmp_path):
+    api = build_api(tmp_path)
+    invite = api.admin_create_reviewer_invite(role="admin", admin_id="admin-1")
+    api.reviewer_redeem_invite(invite_code=invite["invite_code"], reviewer_id="reviewer-1")
+    device = api.reviewer_register_device(reviewer_id="reviewer-1", label="macbook")
+
+    submitted = api.submit_template(user_id="u1", template_id="community/basic", version="1.0.0")
+    api.admin_decide_submission(
+        role="reviewer",
+        reviewer_id="reviewer-1",
+        submission_id=submitted["submission_id"],
+        decision="approve",
+    )
+
+    lifecycle = api.admin_list_audit(role="admin", limit=20, lifecycle_only=True)
+    assert lifecycle["filters"]["lifecycle_only"] is True
+    assert lifecycle["summary"]["total"] >= 2
+    assert lifecycle["events"]
+    assert all(item["action"].startswith("reviewer.") for item in lifecycle["events"])
+    assert all(not item["action"].startswith("submission.") for item in lifecycle["events"])
+
+    reviewer_only = api.admin_list_audit(
+        role="admin",
+        limit=20,
+        lifecycle_only=True,
+        reviewer_id="reviewer-1",
+    )
+    assert reviewer_only["filters"]["reviewer_id"] == "reviewer-1"
+    assert reviewer_only["events"]
+    assert all(item["action"].startswith("reviewer.") for item in reviewer_only["events"])
+    assert any(item["action"] == "reviewer.device_registered" for item in reviewer_only["events"])
+
+    device_only = api.admin_list_audit(
+        role="admin",
+        limit=20,
+        lifecycle_only=True,
+        device_id=device["device_id"],
+    )
+    assert device_only["filters"]["device_id"] == device["device_id"]
+    assert device_only["events"]
+    assert all(item["action"] in {"reviewer.device_registered", "reviewer.device_revoked"} for item in device_only["events"])
+
+    submission_prefix = api.admin_list_audit(
+        role="admin",
+        limit=20,
+        action_prefix="submission.",
+    )
+    assert submission_prefix["filters"]["action_prefix"] == "submission."
+    assert submission_prefix["events"]
+    assert all(item["action"].startswith("submission.") for item in submission_prefix["events"])
+
+
 def test_api_reviewer_invite_revoke_blocks_redeem_and_requires_admin(tmp_path):
     api = build_api(tmp_path)
     invite = api.admin_create_reviewer_invite(role="admin", admin_id="admin-1")

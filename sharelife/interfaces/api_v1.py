@@ -72,6 +72,15 @@ class SharelifeApiV1:
         "rejected",
         "not_found",
     }
+    _REVIEWER_LIFECYCLE_ACTIONS: set[str] = {
+        "reviewer.invite_created",
+        "reviewer.invite_revoked",
+        "reviewer.invite_redeemed",
+        "reviewer.device_registered",
+        "reviewer.device_revoked",
+        "reviewer.device_force_reset",
+        "reviewer.session_force_revoke",
+    }
 
     def __init__(
         self,
@@ -3288,10 +3297,38 @@ class SharelifeApiV1:
         )
         return result
 
-    def admin_list_audit(self, role: str, limit: int = 100) -> dict:
+    def admin_list_audit(
+        self,
+        role: str,
+        limit: int = 100,
+        *,
+        action_prefix: str = "",
+        reviewer_id: str = "",
+        device_id: str = "",
+        lifecycle_only: bool = False,
+        inspect_limit: int = 1000,
+    ) -> dict:
         if role != "admin":
             return {"error": "permission_denied"}
         normalized_limit = max(1, min(int(limit or 100), 200))
+        normalized_action_prefix = str(action_prefix or "").strip()
+        normalized_reviewer_id = str(reviewer_id or "").strip()
+        normalized_device_id = str(device_id or "").strip()
+        normalized_lifecycle_only = bool(lifecycle_only)
+        normalized_inspect_limit = max(
+            normalized_limit,
+            min(max(int(inspect_limit or 1000), normalized_limit), 2000),
+        )
+
+        inspected_events = self.audit_service.list_events(limit=normalized_inspect_limit)
+        filtered_events = self._filter_audit_events(
+            inspected_events,
+            action_prefix=normalized_action_prefix,
+            reviewer_id=normalized_reviewer_id,
+            device_id=normalized_device_id,
+            lifecycle_only=normalized_lifecycle_only,
+        )
+        selected_events = filtered_events[-normalized_limit:]
         events = [
             {
                 "id": item.id,
@@ -3303,11 +3340,18 @@ class SharelifeApiV1:
                 "detail": item.detail,
                 "created_at": item.created_at.isoformat(),
             }
-            for item in self.audit_service.list_events(limit=normalized_limit)
+            for item in selected_events
         ]
         return {
             "events": events,
-            "summary": self.audit_service.summarize_events(limit=normalized_limit),
+            "summary": self.audit_service.summarize_rows(selected_events),
+            "filters": {
+                "action_prefix": normalized_action_prefix,
+                "reviewer_id": normalized_reviewer_id,
+                "device_id": normalized_device_id,
+                "lifecycle_only": normalized_lifecycle_only,
+                "inspect_limit": normalized_inspect_limit,
+            },
         }
 
     def _request_trial_with_preference(
@@ -3380,6 +3424,59 @@ class SharelifeApiV1:
             status=status,
             detail=detail or {},
         )
+
+    @staticmethod
+    def _audit_event_detail(event: Any) -> dict[str, Any]:
+        detail = getattr(event, "detail", {})
+        return detail if isinstance(detail, dict) else {}
+
+    @classmethod
+    def _audit_event_reviewer_id(cls, event: Any) -> str:
+        detail = cls._audit_event_detail(event)
+        reviewer_id = str(detail.get("reviewer_id", "") or "").strip()
+        if reviewer_id:
+            return reviewer_id
+        if cls._normalize_role(str(getattr(event, "actor_role", "") or "")) == "reviewer":
+            return str(getattr(event, "actor_id", "") or "").strip()
+        return ""
+
+    @classmethod
+    def _audit_event_device_id(cls, event: Any) -> str:
+        detail = cls._audit_event_detail(event)
+        device_id = str(detail.get("device_id", "") or "").strip()
+        if device_id:
+            return device_id
+        action = str(getattr(event, "action", "") or "").strip()
+        if action in {"reviewer.device_registered", "reviewer.device_revoked"}:
+            return str(getattr(event, "target_id", "") or "").strip()
+        return ""
+
+    @classmethod
+    def _filter_audit_events(
+        cls,
+        events: list[Any],
+        *,
+        action_prefix: str = "",
+        reviewer_id: str = "",
+        device_id: str = "",
+        lifecycle_only: bool = False,
+    ) -> list[Any]:
+        normalized_prefix = str(action_prefix or "").strip()
+        normalized_reviewer_id = str(reviewer_id or "").strip()
+        normalized_device_id = str(device_id or "").strip()
+        filtered: list[Any] = []
+        for event in events:
+            action = str(getattr(event, "action", "") or "").strip()
+            if normalized_prefix and not action.startswith(normalized_prefix):
+                continue
+            if lifecycle_only and action not in cls._REVIEWER_LIFECYCLE_ACTIONS:
+                continue
+            if normalized_reviewer_id and cls._audit_event_reviewer_id(event) != normalized_reviewer_id:
+                continue
+            if normalized_device_id and cls._audit_event_device_id(event) != normalized_device_id:
+                continue
+            filtered.append(event)
+        return filtered
 
     @classmethod
     def _normalize_install_options(cls, install_options: dict | None) -> dict:

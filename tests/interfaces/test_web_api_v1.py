@@ -404,6 +404,63 @@ def test_web_api_lists_audit_with_summary_payload(tmp_path):
     assert any(item["device_id"] == device["device_id"] for item in audit.data["summary"]["devices"])
 
 
+def test_web_api_admin_list_audit_supports_lifecycle_filters(tmp_path):
+    web_api = build_web_api(tmp_path)
+    invite = web_api.admin_create_reviewer_invite(role="admin", admin_id="admin-1")
+    assert invite.ok is True
+    redeemed = web_api.reviewer_redeem_invite(invite_code=invite.data["invite_code"], reviewer_id="reviewer-1")
+    assert redeemed.ok is True
+    device = web_api.reviewer_register_device(reviewer_id="reviewer-1", label="macbook")
+    assert device.ok is True
+
+    submitted = web_api.submit_template(user_id="u1", template_id="community/basic", version="1.0.0")
+    assert submitted.ok is True
+    decided = web_api.admin_decide_submission(
+        role="reviewer",
+        reviewer_id="reviewer-1",
+        submission_id=submitted.data["submission_id"],
+        decision="approve",
+    )
+    assert decided.ok is True
+
+    lifecycle = web_api.admin_list_audit(
+        role="admin",
+        limit=20,
+        lifecycle_only=True,
+        reviewer_id="reviewer-1",
+    )
+    assert lifecycle.ok is True
+    assert lifecycle.data["filters"]["lifecycle_only"] is True
+    assert lifecycle.data["filters"]["reviewer_id"] == "reviewer-1"
+    assert lifecycle.data["events"]
+    assert all(item["action"].startswith("reviewer.") for item in lifecycle.data["events"])
+
+    submission = web_api.admin_list_audit(
+        role="admin",
+        limit=20,
+        action_prefix="submission.",
+    )
+    assert submission.ok is True
+    assert submission.data["filters"]["action_prefix"] == "submission."
+    assert submission.data["events"]
+    assert all(item["action"].startswith("submission.") for item in submission.data["events"])
+    assert any(item["action"] == "submission.decided" for item in submission.data["events"])
+
+    device_only = web_api.admin_list_audit(
+        role="admin",
+        limit=20,
+        lifecycle_only=True,
+        device_id=device.data["device_id"],
+    )
+    assert device_only.ok is True
+    assert device_only.data["filters"]["device_id"] == device.data["device_id"]
+    assert device_only.data["events"]
+    assert all(
+        item["action"] in {"reviewer.device_registered", "reviewer.device_revoked"}
+        for item in device_only.data["events"]
+    )
+
+
 def test_web_api_reviewer_invite_revoke_blocks_redeem_and_maps_error_codes(tmp_path):
     web_api = build_web_api(tmp_path)
     invite = web_api.admin_create_reviewer_invite(role="admin", admin_id="admin-1")
