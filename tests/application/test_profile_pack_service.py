@@ -405,7 +405,15 @@ def test_profile_pack_service_extracts_persona_and_subagent_sections_from_astrbo
             "subagent_orchestrator": {
                 "main_enable": True,
                 "agents": [
-                    {"name": "planner_prometheus", "enabled": True},
+                    {
+                        "name": "planner_prometheus",
+                        "enabled": True,
+                        "runtime": {
+                            "limits": {
+                                "token_budget": 2048,
+                            },
+                        },
+                    },
                     {"name": "reviewer_oracle", "enabled": False},
                 ],
             },
@@ -461,7 +469,15 @@ def test_profile_pack_service_exposes_selection_tree_for_astrbot_import(tmp_path
             "subagent_orchestrator": {
                 "main_enable": True,
                 "agents": [
-                    {"name": "planner_prometheus", "enabled": True},
+                    {
+                        "name": "planner_prometheus",
+                        "enabled": True,
+                        "runtime": {
+                            "limits": {
+                                "token_budget": 2048,
+                            },
+                        },
+                    },
                     {"name": "reviewer_oracle", "enabled": False},
                 ],
             },
@@ -547,6 +563,21 @@ def test_profile_pack_service_exposes_selection_tree_for_astrbot_import(tmp_path
     first_agent_paths = {child["path"] for child in first_agent_node["children"]}
     assert "environment_manifest.subagent_orchestrator.agents[0].name" in first_agent_paths
     assert "environment_manifest.subagent_orchestrator.agents[0].enabled" in first_agent_paths
+    assert "environment_manifest.subagent_orchestrator.agents[0].runtime" in first_agent_paths
+    runtime_node = next(
+        item
+        for item in first_agent_node["children"]
+        if item["path"] == "environment_manifest.subagent_orchestrator.agents[0].runtime"
+    )
+    runtime_paths = {child["path"] for child in runtime_node["children"]}
+    assert "environment_manifest.subagent_orchestrator.agents[0].runtime.limits" in runtime_paths
+    limits_node = next(
+        item
+        for item in runtime_node["children"]
+        if item["path"] == "environment_manifest.subagent_orchestrator.agents[0].runtime.limits"
+    )
+    limits_paths = {child["path"] for child in limits_node["children"]}
+    assert "environment_manifest.subagent_orchestrator.agents[0].runtime.limits.token_budget" in limits_paths
 
     platform_node = next(item for item in env_section["items"] if item["path"] == "environment_manifest.platform")
     platform_paths = {child["path"] for child in platform_node["children"]}

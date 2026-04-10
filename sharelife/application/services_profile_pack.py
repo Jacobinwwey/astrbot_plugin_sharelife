@@ -45,6 +45,7 @@ PROFILE_PACK_SUBMISSION_APPROVED = "approved"
 PROFILE_PACK_SUBMISSION_REJECTED = "rejected"
 PROFILE_PACK_SUBMISSION_REPLACED = "replaced"
 PROFILE_PACK_SUBMISSION_WITHDRAWN = "withdrawn"
+SELECTION_TREE_MAX_DEPTH = 3
 
 
 @dataclass(slots=True)
@@ -1176,7 +1177,7 @@ class ProfilePackService:
                             path=f"personas.runtime.{key}",
                             label=self._humanize_key(str(key or "")),
                             value=value,
-                            max_depth=2,
+                            max_depth=SELECTION_TREE_MAX_DEPTH,
                         )
                         for key, value in runtime.items()
                     ],
@@ -1195,7 +1196,7 @@ class ProfilePackService:
                             path=f"personas.entries.{name}",
                             label=str(name or "").strip() or "Persona",
                             value=value,
-                            max_depth=2,
+                            max_depth=SELECTION_TREE_MAX_DEPTH,
                         )
                         for name, value in entries.items()
                     ],
@@ -1222,7 +1223,7 @@ class ProfilePackService:
                                     path=f"{path}.agents[{index}]",
                                     label=self._list_item_label(item, index, fallback_prefix="Agent"),
                                     value=item,
-                                    max_depth=2,
+                                    max_depth=SELECTION_TREE_MAX_DEPTH,
                                 )
                             )
                     else:
@@ -1231,7 +1232,7 @@ class ProfilePackService:
                                 path=f"{path}.{child_key}",
                                 label=self._humanize_key(str(child_key or "")),
                                 value=child_value,
-                                max_depth=2,
+                                max_depth=SELECTION_TREE_MAX_DEPTH,
                             )
                         )
                 items.append(
@@ -1250,7 +1251,7 @@ class ProfilePackService:
                         path=f"{path}[{index}]",
                         label=self._list_item_label(item, index, fallback_prefix=self._humanize_key(key_text)),
                         value=item,
-                        max_depth=2,
+                        max_depth=SELECTION_TREE_MAX_DEPTH,
                     )
                     for index, item in enumerate(value)
                 ]
@@ -1269,7 +1270,7 @@ class ProfilePackService:
                         path=path,
                         label=self._humanize_key(key_text),
                         value=value,
-                        max_depth=2,
+                        max_depth=SELECTION_TREE_MAX_DEPTH,
                     )
                 )
         return items
@@ -1287,7 +1288,7 @@ class ProfilePackService:
                         path=f"{path}.{child_key}",
                         label=self._humanize_key(str(child_key or "")),
                         value=child_value,
-                        max_depth=2,
+                        max_depth=SELECTION_TREE_MAX_DEPTH,
                     )
                     for child_key, child_value in value.items()
                 ]
@@ -1306,7 +1307,7 @@ class ProfilePackService:
                     path=path,
                     label=self._humanize_key(key_text),
                     value=value,
-                    max_depth=2,
+                    max_depth=SELECTION_TREE_MAX_DEPTH,
                 )
             )
         return items
@@ -1318,7 +1319,7 @@ class ProfilePackService:
                     path=f"{section_name}.{key}",
                     label=self._humanize_key(str(key or "")),
                     value=value,
-                    max_depth=2,
+                    max_depth=SELECTION_TREE_MAX_DEPTH,
                 )
                 for key, value in payload.items()
             ]
@@ -1328,7 +1329,7 @@ class ProfilePackService:
                     path=f"{section_name}[{index}]",
                     label=self._list_item_label(item, index, fallback_prefix=self._humanize_key(section_name)),
                     value=item,
-                    max_depth=2,
+                    max_depth=SELECTION_TREE_MAX_DEPTH,
                 )
                 for index, item in enumerate(payload)
             ]

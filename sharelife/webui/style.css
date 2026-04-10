@@ -1999,6 +1999,8 @@ body.modal-scroll-locked {
 
 .modal-panel-glass {
   width: min(980px, calc(100vw - 2rem));
+  max-height: calc(100vh - 3rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(244, 247, 255, 0.78)),
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 38%);
@@ -2033,6 +2035,8 @@ body.modal-scroll-locked {
   gap: 1rem;
   align-items: stretch;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .member-upload-review-rail,
@@ -2051,6 +2055,7 @@ body.modal-scroll-locked {
 }
 
 .member-upload-review-detail {
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: auto;
   padding-right: 0.15rem;
   overscroll-behavior: contain;
@@ -2077,6 +2082,8 @@ body.modal-scroll-locked {
   gap: 0.95rem;
   min-height: 0;
   min-width: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .member-upload-tree-pane,
