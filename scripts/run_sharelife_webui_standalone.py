@@ -184,6 +184,7 @@ def apply_standalone_feature_defaults(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(webui, dict):
         config["webui"] = {}
         webui = config["webui"]
+    auth = webui.get("auth", {}) if isinstance(webui.get("auth"), dict) else {}
     features = webui.setdefault("features", {})
     if not isinstance(features, dict):
         webui["features"] = {}
@@ -196,7 +197,10 @@ def apply_standalone_feature_defaults(config: dict[str, Any]) -> dict[str, Any]:
         features["allow_anonymous_local_astrbot_import"] = False
         return config
     if "allow_anonymous_local_astrbot_import" not in features:
-        features["allow_anonymous_local_astrbot_import"] = False
+        features["allow_anonymous_local_astrbot_import"] = _as_bool(
+            str(auth.get("allow_anonymous_member", "false")),
+            default=False,
+        )
     return config
 
 

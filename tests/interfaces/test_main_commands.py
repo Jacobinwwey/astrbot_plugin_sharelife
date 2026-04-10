@@ -229,6 +229,21 @@ def test_standalone_feature_defaults_disable_host_local_astrbot_import_by_defaul
     assert explicit["webui"]["features"]["local_astrbot_import"] is True
     assert explicit["webui"]["features"]["allow_anonymous_local_astrbot_import"] is True
 
+    inherited = apply_standalone_feature_defaults(
+        {
+            "webui": {
+                "auth": {
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": True,
+                },
+            }
+        }
+    )
+    assert inherited["webui"]["features"]["local_astrbot_import"] is True
+    assert inherited["webui"]["features"]["allow_anonymous_local_astrbot_import"] is True
+
 
 def test_sharelife_continuity_retention_is_configurable_from_plugin_config(tmp_path: Path) -> None:
     module = _load_plugin_module(tmp_path)

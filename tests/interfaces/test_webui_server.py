@@ -861,6 +861,65 @@ def test_webui_ui_capabilities_route_uses_anonymous_member_subset_when_allowed(t
     assert "member.installations.read" not in reviewer_caps.json()["operations"]
 
 
+def test_webui_anonymous_member_defaults_local_astrbot_import_when_feature_flag_missing(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    auth_info = client.get("/api/auth-info")
+    assert auth_info.status_code == 200
+    assert auth_info.json()["supports_local_astrbot_import"] is True
+    assert auth_info.json()["allow_anonymous_local_astrbot_import"] is True
+
+    anonymous_caps = client.get("/api/ui/capabilities")
+    assert anonymous_caps.status_code == 200
+    operations = anonymous_caps.json()["operations"]
+    assert "member.profile_pack.imports.local_astrbot" in operations
+    assert "member.profile_pack.imports.read" in operations
+    assert "member.profile_pack.imports.delete" in operations
+    assert "member.profile_pack.imports.package_upload" not in operations
+    assert "member.profile_pack.imports.write" not in operations
+
+    disabled_server = build_server(
+        tmp_path / "disabled-default",
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": True,
+                    "allow_anonymous_local_astrbot_import": False,
+                },
+            }
+        },
+    )
+    disabled_client = TestClient(disabled_server.app)
+    disabled_auth_info = disabled_client.get("/api/auth-info")
+    assert disabled_auth_info.status_code == 200
+    assert disabled_auth_info.json()["supports_local_astrbot_import"] is True
+    assert disabled_auth_info.json()["allow_anonymous_local_astrbot_import"] is False
+
+    disabled_caps = disabled_client.get("/api/ui/capabilities")
+    assert disabled_caps.status_code == 200
+    disabled_operations = disabled_caps.json()["operations"]
+    assert "member.profile_pack.imports.local_astrbot" not in disabled_operations
+    assert "member.profile_pack.imports.read" not in disabled_operations
+    assert "member.profile_pack.imports.delete" not in disabled_operations
+
+
 def test_webui_ui_capabilities_route_surfaces_anonymous_local_astrbot_import_feature(tmp_path):
     server = build_server(
         tmp_path,

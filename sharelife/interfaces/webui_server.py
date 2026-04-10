@@ -402,9 +402,16 @@ class SharelifeWebUIServer:
             "allow_anonymous_local_astrbot_import",
             features.get("allow_anonymous_local_astrbot_import"),
         )
+        if allow_anonymous_local_import_raw is None:
+            allow_anonymous_local_import = self._auth_allow_anonymous_member
+        else:
+            allow_anonymous_local_import = _to_bool(
+                allow_anonymous_local_import_raw,
+                default=False,
+            )
         self._feature_allow_anonymous_local_astrbot_import = (
             self._feature_local_astrbot_import
-            and _to_bool(allow_anonymous_local_import_raw, default=False)
+            and allow_anonymous_local_import
         )
         self._login_rate_limit_window_seconds = max(
             1,
