@@ -342,6 +342,10 @@ function capabilityRoleHelpers() {
   return globalThis.SharelifeCapabilityRoleRuntime || null
 }
 
+function capabilityGuardHelpers() {
+  return globalThis.SharelifeCapabilityGuardRuntime || null
+}
+
 function marketCardHelpers() {
   return globalThis.SharelifeMarketCards || null
 }
@@ -1213,6 +1217,14 @@ function fallbackCapabilityRole() {
 }
 
 function fallbackCapabilityOperations(role, options = {}) {
+  const helper = capabilityGuardHelpers()
+  if (helper && helper.fallbackCapabilityOperations) {
+    return helper.fallbackCapabilityOperations(role, {
+      authenticated: options.authenticated,
+      allowAnonymousMember: options.allowAnonymousMember,
+      anonymousMemberFallbackOperations: ANONYMOUS_MEMBER_FALLBACK_OPERATIONS,
+    })
+  }
   const normalizedRole = String(role || "").trim().toLowerCase()
   const authenticated = options.authenticated !== false
   const allowAnonymousMember = options.allowAnonymousMember === true
@@ -1338,22 +1350,43 @@ function setCapabilities(payload, options = {}) {
 }
 
 function hasCapability(capability) {
+  const helper = capabilityGuardHelpers()
   const required = String(capability || "").trim()
   if (!required) return true
-  if (state.pageMode === "reviewer" && !isReviewerAdminBridgeActive()) {
-    return false
-  }
   const operations = Array.isArray(state.capabilities.operations)
     ? state.capabilities.operations
     : []
+  if (helper && helper.hasCapability) {
+    return helper.hasCapability(required, {
+      pageMode: state.pageMode,
+      reviewerAdminBridgeActive: isReviewerAdminBridgeActive(),
+      operations,
+    })
+  }
+  if (state.pageMode === "reviewer" && !isReviewerAdminBridgeActive()) {
+    return false
+  }
   return operations.includes(required)
 }
 
 function requiredCapabilityForControl(controlId) {
+  const helper = capabilityGuardHelpers()
+  if (helper && helper.requiredCapabilityForControl) {
+    return helper.requiredCapabilityForControl(controlId, CONTROL_CAPABILITY_MAP)
+  }
   return CONTROL_CAPABILITY_MAP[controlId] || ""
 }
 
 function isControlCapabilityAllowed(controlId) {
+  const helper = capabilityGuardHelpers()
+  if (helper && helper.isControlCapabilityAllowed) {
+    return helper.isControlCapabilityAllowed(controlId, {
+      controlCapabilityMap: CONTROL_CAPABILITY_MAP,
+      pageMode: state.pageMode,
+      reviewerAdminBridgeActive: isReviewerAdminBridgeActive(),
+      operations: Array.isArray(state.capabilities.operations) ? state.capabilities.operations : [],
+    })
+  }
   const required = requiredCapabilityForControl(controlId)
   return hasCapability(required)
 }
