@@ -1068,6 +1068,104 @@ def test_webui_anonymous_local_astrbot_import_isolated_by_cookie_subject(tmp_pat
     assert imports_b_after.json()["data"]["imports"][0]["user_id"] == user_id_b
 
 
+def test_webui_anonymous_local_astrbot_import_refreshes_existing_draft(tmp_path, monkeypatch):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": True,
+                    "allow_anonymous_local_astrbot_import": True,
+                },
+            }
+        },
+    )
+    local_config = tmp_path / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {
+                    "default_personality": "alpha",
+                    "persona_pool": ["alpha"],
+                },
+                "persona": [{"name": "alpha", "prompt": "alpha prompt"}],
+                "plugin_set": ["sharelife"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+
+    client = TestClient(server.app)
+    first = client.post(
+        "/api/member/profile-pack/imports/local-astrbot",
+        json={"user_id": "webui-user"},
+    )
+    assert first.status_code == 200
+    first_import_id = str(first.json()["data"]["import_id"])
+    assert first_import_id
+
+    local_config.write_text(
+        json.dumps(
+            {
+                "provider": [
+                    {
+                        "id": "test-openai",
+                        "type": "openai_chat_completion",
+                        "model": "gpt-4o-mini",
+                        "key": ["test-key"],
+                    }
+                ],
+                "provider_settings": {
+                    "default_personality": "beta",
+                    "persona_pool": ["beta", "alpha"],
+                },
+                "persona": [{"name": "beta", "prompt": "beta prompt"}],
+                "plugin_set": ["sharelife", "community_tools"],
+                "subagent_orchestrator": {
+                    "agents": [{"name": "planner_prometheus", "enabled": True}],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    second = client.post(
+        "/api/member/profile-pack/imports/local-astrbot",
+        json={"user_id": "webui-user"},
+    )
+    assert second.status_code == 200
+    second_import_id = str(second.json()["data"]["import_id"])
+    assert second_import_id
+    assert second_import_id != first_import_id
+
+    imports = client.get("/api/member/profile-pack/imports")
+    assert imports.status_code == 200
+    rows = imports.json()["data"]["imports"]
+    assert len(rows) == 1
+    assert rows[0]["import_id"] == second_import_id
+    assert rows[0]["import_summary"]["default_personality"] == "beta"
+    assert rows[0]["import_summary"]["subagent_count"] == 1
+
+
 def test_webui_admin_storage_routes_flow_and_enforce_auth(tmp_path):
     server = build_server(
         tmp_path,
