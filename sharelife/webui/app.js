@@ -326,6 +326,10 @@ function consoleScopeHelpers() {
   return globalThis.SharelifeConsoleScope || null
 }
 
+function consoleSurfaceHelpers() {
+  return globalThis.SharelifeConsoleSurfaceControls || null
+}
+
 function marketCardHelpers() {
   return globalThis.SharelifeMarketCards || null
 }
@@ -823,9 +827,16 @@ function scopeVisible(targetScope, activeScope) {
 function setConsoleSwitchHint(scope) {
   const hintNode = byId("consoleScopeHint")
   if (!hintNode) return
+  const helper = consoleSurfaceHelpers()
+  const hint = helper && helper.resolveConsoleHint
+    ? helper.resolveConsoleHint(scope, { bridgeActive: isReviewerAdminBridgeActive() })
+    : null
   let hintKey = "console.switch.hint.member"
   let fallback = "Member console focuses on trial/market operations."
-  if (scope === "reviewer") {
+  if (hint && hint.hintKey) {
+    hintKey = String(hint.hintKey)
+    fallback = String(hint.fallback || fallback)
+  } else if (scope === "reviewer") {
     if (isReviewerAdminBridgeActive()) {
       hintKey = "console.switch.hint.reviewer"
       fallback = "Reviewer console focuses on moderation queue and risk labeling."
@@ -862,6 +873,17 @@ function setConsoleLinkVisibility() {
   const hide = (node, value) => {
     if (!node) return
     node.classList.toggle("hidden", Boolean(value))
+  }
+
+  const helper = consoleSurfaceHelpers()
+  if (helper && helper.visibilityForPageMode) {
+    const visibility = helper.visibilityForPageMode(state.pageMode)
+    hide(memberLink, !visibility.member)
+    hide(marketLink, !visibility.market)
+    hide(reviewerLink, !visibility.reviewer)
+    hide(adminLink, !visibility.admin)
+    hide(fullLink, !visibility.full)
+    return
   }
 
   // Member page is intentionally simplified: only member + market entry points.
