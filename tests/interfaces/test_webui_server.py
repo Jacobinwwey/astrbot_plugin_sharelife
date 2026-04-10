@@ -567,6 +567,20 @@ def test_webui_auth_enabled_supports_anonymous_member_mode_with_owner_binding(tm
     assert anonymous_installations_cross_owner.status_code == 403
     assert anonymous_installations_cross_owner.json()["error"]["code"] == "permission_denied"
 
+    anonymous_uninstall_cross_owner = client.post(
+        "/api/member/installations/uninstall",
+        json={"user_id": "other-user", "template_id": "community/basic"},
+    )
+    assert anonymous_uninstall_cross_owner.status_code == 403
+    assert anonymous_uninstall_cross_owner.json()["error"]["code"] == "permission_denied"
+
+    anonymous_uninstall_own = client.post(
+        "/api/member/installations/uninstall",
+        json={"template_id": "community/basic"},
+    )
+    assert anonymous_uninstall_own.status_code == 200
+    assert anonymous_uninstall_own.json()["data"]["status"] == "uninstalled"
+
     anonymous_preferences = client.get("/api/preferences")
     assert anonymous_preferences.status_code == 200
     assert anonymous_preferences.json()["data"]["user_id"] == anonymous_cookie_subject
@@ -638,6 +652,13 @@ def test_webui_auth_enabled_anonymous_member_allowlist_override_is_enforced(tmp_
     )
     assert blocked_install.status_code == 401
     assert blocked_install.json()["error"]["code"] == "unauthorized"
+
+    blocked_uninstall = client.post(
+        "/api/member/installations/uninstall",
+        json={"template_id": "community/basic"},
+    )
+    assert blocked_uninstall.status_code == 401
+    assert blocked_uninstall.json()["error"]["code"] == "unauthorized"
 
     blocked_package_download = client.get(
         "/api/templates/package/download",
