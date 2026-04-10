@@ -4712,3 +4712,24 @@ def test_admin_artifact_list_and_mirror_routes(tmp_path, monkeypatch):
     assert mirrored.status_code == 200
     assert mirrored.json()["data"]["mirror"]["status"] == "succeeded"
     assert calls[0][0:2] == ["rclone", "copyto"]
+
+
+def test_member_route_serves_safe_surface_without_privileged_console_sections(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    response = client.get("/member")
+    assert response.status_code == 200
+    text = response.text
+
+    assert 'id="memberInstallationsList"' in text
+    assert 'id="memberProfilePackUploadModal"' in text
+    assert 'id="section-admin-apply"' not in text
+    assert 'id="section-continuity"' not in text
+    assert 'id="section-profile-pack"' not in text
+    assert 'id="section-admin-submissions"' not in text
+    assert 'id="submissionWorkspaceSection"' not in text
+    assert 'id="section-storage-backup"' not in text
+    assert 'id="btnStorageRunBackup"' not in text
+    assert 'href="/admin"' not in text
+    assert 'href="/reviewer"' not in text

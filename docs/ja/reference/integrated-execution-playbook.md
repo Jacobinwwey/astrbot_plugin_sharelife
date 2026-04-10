@@ -30,6 +30,13 @@
 6. 同一 idempotency key を別 template/version スコープで再利用した場合は、`idempotency_key_conflict` で決定論的に拒否します。
 7. `profile-pack` submit も同じ冪等モデル（`submit_options.idempotency_key` + ヘッダー透過）へ拡張し、リプレイ/競合の監査イベントを追加しました。
 
+### 1.4 増分進捗（`2026-04-10`）
+
+1. member ページはハード境界配信に移行し、`/member` は `member.safe.html` を優先して返却、member ソーステンプレートから admin/reviewer 制御を除去しました。
+2. 認証後の特権 DOM 削除も継続し、テンプレート境界とランタイム境界の二重防御を維持しています。
+3. WebUI の bind ロジックは `app_binding_slices.js` レジストリへさらに分割され、`bindButtons()` はオーケストレーション層へ収束しました。
+4. script 順序、member 安全面、境界配信を守る meta テストを追加し、回帰防止を強化しました。
+
 ## 2. 交差分析での決定
 
 ### 2.1 状態語彙の統一
@@ -69,7 +76,7 @@ installation/task と backup/restore job は同一の状態語彙を使う:
 ### Phase C - Frontend 統合
 
 1. Stitch 出力を適用しつつ runtime ID を保持。
-2. 最上位操作を固定（検索 + 言語 + `刷新本地已有配置`）。
+2. 最上位操作を固定（検索 + 言語 + `ローカル AstrBot 設定をインポート`）。
 3. `/member` と `/market` の option panel 挙動を統一。
 4. 新 API で task/installation 状態を hydration。
 

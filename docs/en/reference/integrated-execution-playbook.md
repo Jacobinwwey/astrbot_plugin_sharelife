@@ -30,6 +30,13 @@
 6. Idempotency scope conflicts are now rejected deterministically (`idempotency_key_conflict`) when the same key is reused for a different template/version scope.
 7. `profile-pack` submit now has the same idempotency model (`submit_options.idempotency_key` + header pass-through) with replay and conflict audit events.
 
+### 1.4 Incremental progress (`2026-04-10`)
+
+1. Member page now has a hard-boundary serving model: `/member` prefers `member.safe.html` and keeps admin/reviewer controls out of the member source template.
+2. Runtime still performs post-auth defensive pruning for privileged scopes, so source-template boundary and runtime boundary are both enforced.
+3. WebUI binding decomposition moved to a shared slice registry (`app_binding_slices.js`) and `bindButtons()` is now an orchestration shell over slice-level binders.
+4. Slice-surface and route-surface meta tests were added to prevent regressions in script order, boundary serving, and member DOM safety.
+
 ## 2. Cross-Plan Decisions
 
 ### 2.1 Unified state vocabulary
@@ -69,7 +76,7 @@ All storage actions and install option mutations must write audit events with re
 ### Phase C - Frontend integration
 
 1. Apply Stitch-generated shell with runtime ID preservation.
-2. Keep top search + locale + `刷新本地已有配置` as first-class actions.
+2. Keep top search + locale + `Import local AstrBot config` as first-class actions.
 3. Unify upload/install option panel behavior in `/member` and `/market`.
 4. Hydrate task and installation states from new endpoints.
 

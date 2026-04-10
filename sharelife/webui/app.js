@@ -246,16 +246,20 @@ function actor() {
   const normalizedRole = fixedRole
     ? fixedRole
     : String(roleNode && roleNode.value ? roleNode.value : "member").trim()
+  const userIdNode = byId("userId")
+  const sessionIdNode = byId("sessionId")
+  const adminIdNode = byId("adminId")
   return {
-    user_id: String(byId("userId").value || "webui-user").trim() || "webui-user",
-    session_id: String(byId("sessionId").value || "webui-session").trim() || "webui-session",
+    user_id: String(userIdNode && userIdNode.value ? userIdNode.value : "webui-user").trim() || "webui-user",
+    session_id: String(sessionIdNode && sessionIdNode.value ? sessionIdNode.value : "webui-session").trim() || "webui-session",
     role: normalizedRole || "member",
-    admin_id: String(byId("adminId").value || "webui-admin").trim() || "webui-admin"
+    admin_id: String(adminIdNode && adminIdNode.value ? adminIdNode.value : "webui-admin").trim() || "webui-admin"
   }
 }
 
 function reviewLabelsArray() {
-  const raw = String(byId("reviewLabels").value || "")
+  const labelsNode = byId("reviewLabels")
+  const raw = String(labelsNode && labelsNode.value ? labelsNode.value : "")
   return raw
     .split(",")
     .map((item) => item.trim())
@@ -924,6 +928,68 @@ function applyConsoleScope() {
   applyCapabilityGuards()
 }
 
+function pruneMemberPrivilegedDom() {
+  if (state.pageMode !== "member") return
+
+  const scopedAdminNodes = document.querySelectorAll('[data-console-scope="admin"]')
+  scopedAdminNodes.forEach((node) => {
+    if (!node || !node.parentNode) return
+    node.parentNode.removeChild(node)
+  })
+
+  const optionalNoiseIds = [
+    "section-preferences",
+    "section-risk-glossary",
+    "section-reliability",
+    "section-storage-backup",
+    "section-retry-queue",
+  ]
+  optionalNoiseIds.forEach((id) => {
+    const node = byId(id)
+    if (!node || !node.parentNode) return
+    node.parentNode.removeChild(node)
+  })
+
+  const authRole = byId("authRole")
+  if (authRole) {
+    Array.from(authRole.options || []).forEach((option) => {
+      const value = String(option && option.value || "").trim().toLowerCase()
+      if (value !== "member") {
+        option.remove()
+      }
+    })
+    authRole.value = "member"
+    authRole.disabled = true
+  }
+
+  const roleNode = byId("role")
+  if (roleNode) {
+    Array.from(roleNode.options || []).forEach((option) => {
+      const value = String(option && option.value || "").trim().toLowerCase()
+      if (value !== "member") {
+        option.remove()
+      }
+    })
+    roleNode.value = "member"
+    roleNode.disabled = true
+  }
+
+  const reviewerAuthFields = byId("reviewerAuthFields")
+  if (reviewerAuthFields && reviewerAuthFields.parentNode) {
+    reviewerAuthFields.parentNode.removeChild(reviewerAuthFields)
+  }
+
+  ;["reviewerConsoleLink", "adminConsoleLink", "fullConsoleLink"].forEach((id) => {
+    const node = byId(id)
+    if (!node || !node.parentNode) return
+    node.parentNode.removeChild(node)
+  })
+
+  if (document && document.body) {
+    document.body.setAttribute("data-member-surface", "minimal")
+  }
+}
+
 function workspacePayload(payload) {
   const helper = payloadHelpers()
   if (helper && helper.extractWorkspacePayload) {
@@ -1481,6 +1547,7 @@ function updateAuthUi() {
   renderReviewerLifecycleAuthState()
   updateDeveloperModeUi()
   applyConsoleScope()
+  pruneMemberPrivilegedDom()
 }
 
 function setScanPanelSource(scanSummary, reviewLabels = [], warningFlags = []) {
@@ -1603,11 +1670,14 @@ function applyCompareEvidenceFocus() {
 async function jumpToCompareWithEvidence(item) {
   const normalized = normalizeRiskEvidenceItem(item)
   if (!normalized) return
+  const scanSummaryNode = byId("scanSummary")
   if (!hasCapability("admin.submissions.compare")) {
-    byId("scanSummary").textContent = i18nMessage(
-      "scan.evidence.compare_unavailable",
-      "Compare evidence is available in reviewer/admin scope only.",
-    )
+    if (scanSummaryNode) {
+      scanSummaryNode.textContent = i18nMessage(
+        "scan.evidence.compare_unavailable",
+        "Compare evidence is available in reviewer/admin scope only.",
+      )
+    }
     return
   }
   const submissionField = byId("decisionSubmissionId")
@@ -1615,10 +1685,12 @@ async function jumpToCompareWithEvidence(item) {
     String(state.selectedSubmissionId || "").trim() ||
     String((submissionField && submissionField.value) || "").trim()
   if (!candidateSubmissionId) {
-    byId("scanSummary").textContent = i18nMessage(
-      "scan.evidence.jump_missing_submission",
-      "No submission selected. Select a submission row first to open compare view.",
-    )
+    if (scanSummaryNode) {
+      scanSummaryNode.textContent = i18nMessage(
+        "scan.evidence.jump_missing_submission",
+        "No submission selected. Select a submission row first to open compare view.",
+      )
+    }
     return
   }
 
@@ -1630,11 +1702,16 @@ async function jumpToCompareWithEvidence(item) {
 
 
 function updateScanPanel(scanSummary, reviewLabels = [], warningFlags = []) {
+  const summaryNode = byId("scanSummary")
+  const labelsNode = byId("scanLabels")
+  const detailsNode = byId("scanDetails")
+  if (!summaryNode || !labelsNode || !detailsNode) return
+
   if (!scanSummary || Object.keys(scanSummary).length === 0) {
-    byId("scanSummary").textContent = i18nMessage("scan.summary_idle", "No package scan loaded yet.")
-    byId("scanLabels").innerHTML = ""
+    summaryNode.textContent = i18nMessage("scan.summary_idle", "No package scan loaded yet.")
+    labelsNode.innerHTML = ""
     clearScanEvidenceList()
-    byId("scanDetails").textContent = state.developerMode
+    detailsNode.textContent = state.developerMode
       ? i18nMessage("scan.evidence.empty", "No localized risk evidence found.")
       : i18nMessage(
           "scan.details.developer_hint",
@@ -1648,10 +1725,9 @@ function updateScanPanel(scanSummary, reviewLabels = [], warningFlags = []) {
   const injection = scanSummary.prompt_injection || {}
   const evidence = Array.isArray(scanSummary.risk_evidence) ? scanSummary.risk_evidence : []
 
-  byId("scanSummary").textContent =
+  summaryNode.textContent =
     `risk=${scanSummary.risk_level || "unknown"} | compatibility=${scanSummary.compatibility || "unknown"} | levels=${(scanSummary.levels || []).join(", ") || "n/a"}`
 
-  const labelsNode = byId("scanLabels")
   labelsNode.innerHTML = ""
   labels.forEach((label) => {
     appendPill(labelsNode, label, badgeTone(label))
@@ -1661,7 +1737,6 @@ function updateScanPanel(scanSummary, reviewLabels = [], warningFlags = []) {
   })
   renderScanEvidenceList(evidence)
 
-  const detailsNode = byId("scanDetails")
   if (!state.developerMode) {
     detailsNode.textContent = i18nFormat(
       "scan.details.developer_hint_count",
@@ -1762,6 +1837,12 @@ function updateComparePanel(payload) {
   if (!data.comparison || !data.details) {
     return
   }
+  const summaryNode = byId("compareSummary")
+  const detailsNode = byId("compareDetails")
+  const highlightsNode = byId("compareHighlights")
+  const sectionsNode = byId("compareSections")
+  if (!summaryNode || !detailsNode || !highlightsNode || !sectionsNode) return
+
   state.submissionCompare = data
   const submissionId = data.submission && (data.submission.submission_id || data.submission.id)
   if (submissionId) {
@@ -1772,29 +1853,27 @@ function updateComparePanel(payload) {
     ? helper.buildCompareViewModel(data)
     : null
   if (!view) {
-    byId("compareSummary").textContent = `status=${data.comparison.status || "unknown"}`
-    byId("compareDetails").textContent = JSON.stringify(data.details, null, 2)
+    summaryNode.textContent = `status=${data.comparison.status || "unknown"}`
+    detailsNode.textContent = JSON.stringify(data.details, null, 2)
     applyCompareEvidenceFocus()
     renderModerationWorkspace()
     return
   }
 
-  byId("compareSummary").textContent =
+  summaryNode.textContent =
     `status=${view.summary.status} | version_changed=${Boolean(view.summary.versionChanged)} | risk_changed=${Boolean(view.summary.riskChanged)} | package=${Boolean(view.summary.hasSubmissionPackage)}/${Boolean(view.summary.hasPublishedPackage)}`
 
-  const highlightsNode = byId("compareHighlights")
   highlightsNode.innerHTML = ""
   view.highlights.forEach((item) => {
     appendPill(highlightsNode, item.label, item.tone || "neutral")
   })
 
-  const sectionsNode = byId("compareSections")
   sectionsNode.innerHTML = ""
   view.sections.forEach((section) => {
     sectionsNode.appendChild(renderCompareSection(section))
   })
 
-  byId("compareDetails").textContent = JSON.stringify(data.details, null, 2)
+  detailsNode.textContent = JSON.stringify(data.details, null, 2)
   applyCompareEvidenceFocus()
   renderModerationWorkspace()
 }
@@ -1802,13 +1881,18 @@ function updateComparePanel(payload) {
 function resetComparePanel(options = {}) {
   state.submissionCompare = null
   state.pendingCompareEvidenceFocus = null
+  const summaryNode = byId("compareSummary")
+  const highlightsNode = byId("compareHighlights")
+  const sectionsNode = byId("compareSections")
+  const detailsNode = byId("compareDetails")
+  if (!summaryNode || !highlightsNode || !sectionsNode || !detailsNode) return
   if (!options.preserveStatus) {
     resetPanelStatus("compare")
   }
-  byId("compareSummary").textContent = i18nMessage("compare.summary_idle", "No comparison loaded yet.")
-  byId("compareHighlights").innerHTML = ""
-  byId("compareSections").innerHTML = ""
-  byId("compareDetails").textContent = ""
+  summaryNode.textContent = i18nMessage("compare.summary_idle", "No comparison loaded yet.")
+  highlightsNode.innerHTML = ""
+  sectionsNode.innerHTML = ""
+  detailsNode.textContent = ""
   renderModerationWorkspace()
 }
 
@@ -1824,6 +1908,9 @@ function updateDetailPanelsFromPayload(payload) {
 
 function renderDetailPanel(summaryId, badgesId, rowsId, view) {
   const summaryNode = byId(summaryId)
+  const badgesNode = byId(badgesId)
+  const rowsNode = byId(rowsId)
+  if (!summaryNode || !badgesNode || !rowsNode) return
   if (view.empty) {
     if (summaryId === "templateDetailSummary") {
       summaryNode.textContent = i18nMessage(
@@ -1842,13 +1929,11 @@ function renderDetailPanel(summaryId, badgesId, rowsId, view) {
     summaryNode.textContent = view.summary
   }
 
-  const badgesNode = byId(badgesId)
   badgesNode.innerHTML = ""
   ;(view.badges || []).forEach((item) => {
     appendPill(badgesNode, item.label, badgeTone(item.label))
   })
 
-  const rowsNode = byId(rowsId)
   rowsNode.innerHTML = ""
   ;(view.rows || []).forEach((item) => {
     const card = document.createElement("div")
@@ -1932,6 +2017,7 @@ function updateTrialStatusPanel(data = null) {
   state.trialStatus = data
   const summaryNode = byId("trialStatusSummary")
   const detailsNode = byId("trialStatusDetails")
+  if (!summaryNode || !detailsNode) return
 
   if (!data || !data.status) {
     summaryNode.textContent = i18nMessage("trial.summary_idle", "No trial status loaded yet.")
@@ -1978,6 +2064,7 @@ function updateApplyWorkflowPanel(data = null) {
   state.applyPlanResult = data
   const summaryNode = byId("dryrunSummary")
   const detailsNode = byId("dryrunDetails")
+  if (!summaryNode || !detailsNode) return
 
   if (!data || (!data.plan_id && !data.status)) {
     summaryNode.textContent = i18nMessage("dryrun.summary_idle", "No apply plan prepared yet.")
@@ -3158,12 +3245,16 @@ function applyProfilePackRecordSelection(group, row) {
 }
 
 function readProfilePackRecordPackFilter() {
-  return String(byId("profilePackRecordPackFilter").value || "").trim()
+  const node = byId("profilePackRecordPackFilter")
+  if (!node) return ""
+  return String(node.value || "").trim()
 }
 
 function setProfilePackRecordPackFilter(value) {
   state.profilePack.recordPackFilter = String(value || "").trim()
-  byId("profilePackRecordPackFilter").value = state.profilePack.recordPackFilter
+  const node = byId("profilePackRecordPackFilter")
+  if (!node) return
+  node.value = state.profilePack.recordPackFilter
 }
 
 function profilePackRecordQuickActionIds(group) {
@@ -3264,6 +3355,7 @@ function renderProfilePackRecordGroup(group, rows) {
 
 function renderProfilePackRecords() {
   const node = byId("profilePackRecords")
+  if (!node) return
   node.innerHTML = ""
   const records = state.profilePack.records || { exports: [], imports: [] }
   const packIdFilter = state.profilePack.recordPackFilter
@@ -3312,6 +3404,7 @@ function clearProfilePackPathErrors() {
   const dropInput = byId("profilePackDropPaths")
   const maskError = byId("profilePackMaskPathError")
   const dropError = byId("profilePackDropPathError")
+  if (!maskInput || !dropInput || !maskError || !dropError) return
   maskInput.classList.remove("input-invalid")
   dropInput.classList.remove("input-invalid")
   maskError.textContent = ""
@@ -4028,6 +4121,7 @@ async function compareProfilePackCatalog() {
 function renderRiskGlossary() {
   const helper = detailHelpers()
   const rowsNode = byId("riskGlossary")
+  if (!rowsNode) return
   rowsNode.innerHTML = ""
   if (!helper || !Array.isArray(helper.riskGlossaryItems)) return
   helper.riskGlossaryItems.forEach((item) => {
@@ -4206,6 +4300,7 @@ function renderPanelState(panelKey) {
   const helper = feedbackHelpers()
   if (!config || !helper || !helper.buildPanelStateView) return
   const node = byId(config.nodeId)
+  if (!node) return
   const view = helper.buildPanelStateView({
     ...config,
     ...(state.panelStatus[panelKey] || {}),
@@ -4241,6 +4336,7 @@ function renderCollectionState(collectionKey) {
   const helper = collectionFeedbackHelpers()
   if (!config || !helper || !helper.buildCollectionStateView) return
   const node = byId(config.nodeId)
+  if (!node) return
   const view = helper.buildCollectionStateView({
     ...config,
     ...(state.collectionStatus[collectionKey] || {}),
@@ -4329,6 +4425,27 @@ function appendWarningItem(container, text) {
 }
 
 function renderModerationWorkspace() {
+  const summaryNode = byId("moderationSummary")
+  const highlightsNode = byId("moderationHighlights")
+  const warningsNode = byId("moderationWarnings")
+  const decisionNode = byId("decisionSubmissionId")
+  const saveButton = byId("btnSaveSubmissionReview")
+  const approveButton = byId("btnApproveSubmission")
+  const rejectButton = byId("btnRejectSubmission")
+  const downloadButton = byId("btnDownloadSubmissionPackage")
+  if (
+    !summaryNode ||
+    !highlightsNode ||
+    !warningsNode ||
+    !decisionNode ||
+    !saveButton ||
+    !approveButton ||
+    !rejectButton ||
+    !downloadButton
+  ) {
+    return
+  }
+
   const helper = workspaceHelpers()
   const view = helper && helper.buildSubmissionModerationViewModel
     ? helper.buildSubmissionModerationViewModel(state.submissionDetail, state.submissionCompare)
@@ -4343,36 +4460,34 @@ function renderModerationWorkspace() {
         warnings: [],
       }
 
-  byId("moderationSummary").textContent = view.empty
+  summaryNode.textContent = view.empty
     ? i18nMessage(
         "moderation.summary_idle",
         view.summary || "Select a submission row to hydrate review fields and compare state.",
       )
     : `${view.title} | ${view.summary}`
 
-  const highlightsNode = byId("moderationHighlights")
   highlightsNode.innerHTML = ""
   ;(view.highlights || []).forEach((item) => {
     appendPill(highlightsNode, item.label, item.tone || badgeTone(item.label))
   })
 
-  const warningsNode = byId("moderationWarnings")
   warningsNode.innerHTML = ""
   ;(view.warnings || []).forEach((item) => {
     appendWarningItem(warningsNode, localizeModerationWarning(item))
   })
 
-  const hasManualSubmission = Boolean(String(byId("decisionSubmissionId").value || "").trim())
-  byId("btnSaveSubmissionReview").disabled =
+  const hasManualSubmission = Boolean(String(decisionNode.value || "").trim())
+  saveButton.disabled =
     !isControlCapabilityAllowed("btnSaveSubmissionReview") ||
     (!view.canReview && !hasManualSubmission)
-  byId("btnApproveSubmission").disabled =
+  approveButton.disabled =
     !isControlCapabilityAllowed("btnApproveSubmission") ||
     (!view.canReview && !hasManualSubmission)
-  byId("btnRejectSubmission").disabled =
+  rejectButton.disabled =
     !isControlCapabilityAllowed("btnRejectSubmission") ||
     (!view.canReview && !hasManualSubmission)
-  byId("btnDownloadSubmissionPackage").disabled =
+  downloadButton.disabled =
     !isControlCapabilityAllowed("btnDownloadSubmissionPackage") ||
     (!view.canDownload && !hasManualSubmission)
 }
@@ -4410,23 +4525,29 @@ function updateWorkspaceContext(route = activeWorkspaceRoute()) {
           ),
   }
 
-  byId("workspaceRoute").textContent = view.routeLabel
-  byId("workspaceSummary").textContent = view.description
-  byId("templateWorkspaceRoute").textContent =
+  const workspaceRouteNode = byId("workspaceRoute")
+  const workspaceSummaryNode = byId("workspaceSummary")
+  const templateWorkspaceRouteNode = byId("templateWorkspaceRoute")
+  const submissionWorkspaceRouteNode = byId("submissionWorkspaceRoute")
+  const submissionWorkspaceSummaryNode = byId("submissionWorkspaceSummary")
+
+  if (workspaceRouteNode) workspaceRouteNode.textContent = view.routeLabel
+  if (workspaceSummaryNode) workspaceSummaryNode.textContent = view.description
+  if (templateWorkspaceRouteNode) templateWorkspaceRouteNode.textContent =
     route.scope === "template"
       ? view.routeLabel
       : i18nMessage(
           "workspace.template_route_idle",
           "Template workspace idle. Select a template row or use Load Template Detail.",
         )
-  byId("submissionWorkspaceRoute").textContent =
+  if (submissionWorkspaceRouteNode) submissionWorkspaceRouteNode.textContent =
     route.scope === "submission"
       ? view.routeLabel
       : i18nMessage(
           "workspace.submission_route_idle",
           "Submission workspace idle. Select a submission row or use Load Submission Detail.",
         )
-  byId("submissionWorkspaceSummary").textContent =
+  if (submissionWorkspaceSummaryNode) submissionWorkspaceSummaryNode.textContent =
     route.scope === "submission"
       ? i18nMessage(
           "workspace.submission_summary_active",
@@ -6411,7 +6532,10 @@ async function revokeReviewerSessions(options = {}) {
 
 function updateTemplatesTable(rows) {
   state.templates = Array.isArray(rows) ? rows : []
-  const tbody = byId("templatesTable").querySelector("tbody")
+  const table = byId("templatesTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
   tbody.innerHTML = ""
   state.templates.forEach((item) => {
     const tr = document.createElement("tr")
@@ -6456,7 +6580,10 @@ function templateSignalsSummary(item) {
 
 function updateSubmissionsTable(rows) {
   state.submissions = Array.isArray(rows) ? rows : []
-  const tbody = byId("submissionsTable").querySelector("tbody")
+  const table = byId("submissionsTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
   tbody.innerHTML = ""
   state.submissions.forEach((item) => {
     const tr = document.createElement("tr")
@@ -6479,7 +6606,10 @@ function updateSubmissionsTable(rows) {
 
 function updateProfilePackSubmissionTable(rows) {
   state.profilePack.market.submissions = Array.isArray(rows) ? rows : []
-  const tbody = byId("profilePackSubmissionTable").querySelector("tbody")
+  const table = byId("profilePackSubmissionTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
   tbody.innerHTML = ""
   state.profilePack.market.submissions.forEach((item) => {
     const tr = document.createElement("tr")
@@ -6568,7 +6698,10 @@ async function withdrawMemberProfilePackSubmission(item, button) {
 
 function updateProfilePackCatalogTable(rows) {
   state.profilePack.market.catalog = Array.isArray(rows) ? rows : []
-  const tbody = byId("profilePackCatalogTable").querySelector("tbody")
+  const table = byId("profilePackCatalogTable")
+  if (!table) return
+  const tbody = table.querySelector("tbody")
+  if (!tbody) return
   tbody.innerHTML = ""
   state.profilePack.market.catalog.forEach((item) => {
     const tr = document.createElement("tr")
@@ -9165,749 +9298,287 @@ function triggerControl(id) {
   node.click()
 }
 
-function bindButtons() {
-  Array.from(document.querySelectorAll(".sidebar-link")).forEach((node) => {
-    node.addEventListener("click", () => {
-      Array.from(document.querySelectorAll(".sidebar-link")).forEach((link) => {
-        link.classList.remove("is-active")
-      })
-      node.classList.add("is-active")
-    })
-  })
-  byId("loginBtn").addEventListener("click", login)
-  byId("authRole").addEventListener("change", syncReviewerAuthFields)
-  const openLoginButton = byId("btnAuthOpenLoginPanel")
-  if (openLoginButton) {
-    openLoginButton.addEventListener("click", () => {
-      state.authPromptRequested = true
-      updateAuthUi()
-      const passwordNode = byId("authPassword")
-      if (passwordNode && typeof passwordNode.focus === "function") {
-        passwordNode.focus()
-      }
-    })
-  }
-  byId("role").addEventListener("change", () => {
-    applyConsoleScope()
-    void refreshCapabilities({ updateScope: false })
-  })
-  byId("uiLocale").addEventListener("change", () => {
-    applyUiLocale(byId("uiLocale").value, { persist: true, refreshCollections: true })
-  })
-  localeQuickButtons().forEach((node) => {
-    node.addEventListener("click", () => {
-      const locale = String(node.getAttribute("data-locale-option") || "").trim()
-      if (!locale) return
-      applyUiLocale(locale, { persist: true, refreshCollections: true })
-    })
-  })
-  const developerToggle = byId("btnToggleDeveloperMode")
-  if (developerToggle) {
-    developerToggle.addEventListener("click", () => {
-      setDeveloperMode(!state.developerMode, { persist: true })
-    })
-  }
-  byId("btnReloadWorkspace").addEventListener("click", () => {
-    void syncWorkspaceFromHash()
-  })
-  byId("btnClearWorkspace").addEventListener("click", clearWorkspaceRoute)
+function bindControlEvent(id, eventName, handler) {
+  const node = byId(id)
+  if (!node) return false
+  node.addEventListener(eventName, handler)
+  return true
+}
 
-  const reviewerInviteCreateButton = byId("btnReviewerInviteCreate")
-  if (reviewerInviteCreateButton) {
-    reviewerInviteCreateButton.addEventListener("click", () => {
-      void createReviewerInvite()
-    })
-  }
-  const reviewerInviteListButton = byId("btnReviewerInviteList")
-  if (reviewerInviteListButton) {
-    reviewerInviteListButton.addEventListener("click", () => {
-      void listReviewerInvites()
-    })
-  }
-  const reviewerAccountListButton = byId("btnReviewerAccountList")
-  if (reviewerAccountListButton) {
-    reviewerAccountListButton.addEventListener("click", () => {
-      void listReviewerAccounts()
-    })
-  }
-  const reviewerDeviceListButton = byId("btnReviewerDeviceList")
-  if (reviewerDeviceListButton) {
-    reviewerDeviceListButton.addEventListener("click", () => {
-      void listReviewerDevices()
-    })
-  }
-  const reviewerDeviceResetButton = byId("btnReviewerDeviceReset")
-  if (reviewerDeviceResetButton) {
-    reviewerDeviceResetButton.addEventListener("click", () => {
-      void resetReviewerDevices()
-    })
-  }
-  const reviewerSessionListButton = byId("btnReviewerSessionList")
-  if (reviewerSessionListButton) {
-    reviewerSessionListButton.addEventListener("click", () => {
-      void listReviewerSessions()
-    })
-  }
-  const reviewerSessionRevokeButton = byId("btnReviewerSessionRevoke")
-  if (reviewerSessionRevokeButton) {
-    reviewerSessionRevokeButton.addEventListener("click", () => {
-      void revokeReviewerSessions()
-    })
-  }
-  const reviewerDeviceTargetNode = byId("reviewerDeviceTargetId")
-  if (reviewerDeviceTargetNode) {
-    reviewerDeviceTargetNode.addEventListener("change", () => {
-      setReviewerLifecycleSelectedReviewer(String(reviewerDeviceTargetNode.value || "").trim())
-    })
-  }
+function bindClick(id, handler) {
+  return bindControlEvent(id, "click", handler)
+}
 
-  byId("btnPrefGet").addEventListener("click", async () => {
-    const a = actor()
-    render("get_preferences", await api(`/api/preferences${queryString({ user_id: a.user_id })}`))
-  })
+function bindChange(id, handler) {
+  return bindControlEvent(id, "change", handler)
+}
 
-  byId("btnModeSet").addEventListener("click", async () => {
-    const a = actor()
-    render("set_mode", await api("/api/preferences/mode", {
-      method: "POST",
-      body: { ...a, mode: byId("modeValue").value }
-    }))
-  })
+function bindInput(id, handler) {
+  return bindControlEvent(id, "input", handler)
+}
 
-  byId("btnObserveSet").addEventListener("click", async () => {
-    const a = actor()
-    render("set_observe", await api("/api/preferences/observe", {
-      method: "POST",
-      body: { ...a, enabled: byId("observeValue").value === "true" }
-    }))
-  })
-
-  const listTemplatesButton = byId("btnTemplates")
-  if (listTemplatesButton) {
-    listTemplatesButton.addEventListener("click", listTemplates)
-  }
-  const memberSearchNode = byId("memberGlobalSearch")
-  if (memberSearchNode) {
-    memberSearchNode.addEventListener("input", () => {
-      const value = String(memberSearchNode.value || "").trim()
-      const packQuery = memberSpotlightProfilePackQuery(value)
-      state.memberPanel.searchQuery = value
-      renderMemberInstallations(state.memberPanel.installations)
-      renderMemberImportDrafts(state.memberPanel.importDrafts)
-      const templateFilter = byId("templateFilterId")
-      const categoryFilter = byId("templateCategoryFilter")
-      if (templateFilter) {
-        templateFilter.value = packQuery ? "" : value
-      }
-      if (value && byId("trialTemplateId")) {
-        byId("trialTemplateId").value = value
-      }
-      if (value && categoryFilter) {
-        categoryFilter.value = ""
-        setActiveMarketChip("")
-      }
-      syncMemberSpotlightMarketJump(packQuery)
-      if (packQuery) return
-      revealInlineMemberMarket()
-      if (templateFilter && categoryFilter) {
-        void listTemplates()
-      }
-    })
-    memberSearchNode.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return
-      event.preventDefault()
-      const value = String(memberSearchNode.value || "").trim()
-      const packQuery = memberSpotlightProfilePackQuery(value)
-      if (packQuery) {
-        openMemberSpotlightMarketQuery(packQuery)
-        return
-      }
-      revealInlineMemberMarket()
-      if (byId("templateFilterId") && byId("templateCategoryFilter")) {
-        void listTemplates()
-      }
-    })
-  }
-  const memberSpotlightMarketJump = byId("memberSpotlightMarketJump")
-  if (memberSpotlightMarketJump) {
-    memberSpotlightMarketJump.addEventListener("click", () => {
-      openMemberSpotlightMarketQuery(
-        String(memberSpotlightMarketJump.dataset.marketQuery || "").trim(),
-      )
-    })
-  }
-  const importAstrbotButton = byId("btnImportAstrbotConfig")
-  if (importAstrbotButton) {
-    importAstrbotButton.addEventListener("click", () => {
-      void importMemberLocalAstrbotConfig()
-    })
-  }
-  const importConfigPackButton = byId("btnImportConfigPackFile")
-  if (importConfigPackButton) {
-    importConfigPackButton.addEventListener("click", () => {
-      promptMemberProfilePackImport()
-    })
-  }
-  const openMemberImportReviewButton = byId("btnOpenMemberImportReview")
-  if (openMemberImportReviewButton) {
-    openMemberImportReviewButton.addEventListener("click", () => {
-      openMemberProfilePackUploadModalById("")
-    })
-  }
-  const importAstrbotInput = byId("memberImportAstrbotConfigFile")
-  if (importAstrbotInput) {
-    importAstrbotInput.addEventListener("change", () => {
-      void importMemberProfilePackFromSelection()
-    })
-  }
-  const refreshMemberInstallationsButton = byId("btnRefreshMemberInstallationsInline")
-  if (refreshMemberInstallationsButton) {
-    refreshMemberInstallationsButton.addEventListener("click", () => {
-      void loadMemberInstallations({ refresh: true })
-    })
-  }
-  const memberProfilePackUploadClose = byId("btnCloseMemberProfilePackUploadModal")
-  if (memberProfilePackUploadClose) {
-    memberProfilePackUploadClose.addEventListener("click", closeMemberProfilePackUploadModal)
-  }
-  const memberProfilePackUploadCancel = byId("btnMemberProfilePackUploadCancel")
-  if (memberProfilePackUploadCancel) {
-    memberProfilePackUploadCancel.addEventListener("click", closeMemberProfilePackUploadModal)
-  }
-  const memberProfilePackUploadBackdrop = byId("memberProfilePackUploadBackdrop")
-  if (memberProfilePackUploadBackdrop) {
-    memberProfilePackUploadBackdrop.addEventListener("click", closeMemberProfilePackUploadModal)
-  }
-  const memberProfilePackUploadSubmit = byId("btnMemberProfilePackUploadSubmit")
-  if (memberProfilePackUploadSubmit) {
-    memberProfilePackUploadSubmit.addEventListener("click", () => {
-      void submitSelectedMemberImportDraft()
-    })
-  }
-  const memberProfilePackUploadDelete = byId("btnMemberProfilePackUploadDelete")
-  if (memberProfilePackUploadDelete) {
-    memberProfilePackUploadDelete.addEventListener("click", () => {
-      void deleteMemberImportDraft()
-    })
-  }
-  bindUploadDropZone({
-    zoneId: "memberUploadDropzone",
-    inputId: "memberImportAstrbotConfigFile",
-    outputId: "memberUploadFileName",
-    emptyKey: "member.upload.file_idle",
-    emptyFallback: "No file selected. Max 20 MiB. Sharelife standard zip, AstrBot backup zip, cmd_config.json, and abconf_*.json are supported.",
-  })
-  marketChipButtons().forEach((node) => {
-    node.addEventListener("click", () => {
-      revealInlineMemberMarket()
-      const value = String(node.getAttribute("data-market-chip") || "").trim()
-      const categoryFilter = byId("templateCategoryFilter")
-      if (categoryFilter) {
-        categoryFilter.value = value
-      }
-      const memberSearch = byId("memberGlobalSearch")
-      if (memberSearch) {
-        memberSearch.value = ""
-      }
-      setActiveMarketChip(value)
-      void listTemplates()
-    })
-  })
-  byId("btnTemplateDrawerClose").addEventListener("click", closeTemplateDrawer)
-  byId("btnDrawerTrial").addEventListener("click", () => {
-    if (state.marketHub.selectedTemplateId) {
-      byId("trialTemplateId").value = state.marketHub.selectedTemplateId
-    }
-    triggerControl("btnTrial")
-  })
-  byId("btnDrawerInstall").addEventListener("click", () => {
-    if (state.marketHub.selectedTemplateId) {
-      byId("trialTemplateId").value = state.marketHub.selectedTemplateId
-    }
-    triggerControl("btnInstall")
-  })
-  byId("btnDrawerPrompt").addEventListener("click", () => {
-    if (state.marketHub.selectedTemplateId) {
-      byId("trialTemplateId").value = state.marketHub.selectedTemplateId
-    }
-    triggerControl("btnPrompt")
-  })
-  byId("btnDrawerPackage").addEventListener("click", () => {
-    if (state.marketHub.selectedTemplateId) {
-      byId("trialTemplateId").value = state.marketHub.selectedTemplateId
-    }
-    triggerControl("btnPackage")
-  })
-  byId("btnDrawerDetail").addEventListener("click", () => {
-    if (state.marketHub.selectedTemplateId) {
-      byId("trialTemplateId").value = state.marketHub.selectedTemplateId
-    }
-    triggerControl("btnTemplateDetail")
-  })
-  byId("btnOpenSubmitWizard").addEventListener("click", openSubmitWizard)
-  byId("btnCloseSubmitWizard").addEventListener("click", closeSubmitWizard)
-  byId("submitWizardBackdrop").addEventListener("click", closeSubmitWizard)
-  byId("btnSubmitWizardPrev").addEventListener("click", () => {
-    setWizardStep(state.marketHub.wizardStep - 1)
-  })
-  byId("btnSubmitWizardNext").addEventListener("click", () => {
-    if (state.marketHub.wizardStep === 1 && !String(byId("wizardTemplateId").value || "").trim()) {
-      byId("wizardTemplateId").focus()
-      return
-    }
-    setWizardStep(state.marketHub.wizardStep + 1)
-  })
-  byId("btnSubmitWizardPublish").addEventListener("click", () => {
-    void submitTemplateFromWizard()
-  })
-
-  byId("btnSubmitTemplate").addEventListener("click", async () => {
-    const a = actor()
-    let packagePayload = {}
-    try {
-      packagePayload = await selectedPackagePayload()
-    } catch (error) {
-      render("submit_template", uploadTooLargeResponse())
-      return
-    }
-    render("submit_template", await api("/api/templates/submit", {
-      method: "POST",
-      body: {
-        ...a,
-        template_id: byId("submitTemplateId").value,
-        version: byId("submitVersion").value || "1.0.0",
-        upload_options: readUploadOptionsFromForm(),
-        ...packagePayload
-      }
-    }))
-  })
-
-  byId("btnTrial").addEventListener("click", async () => {
-    const a = actor()
-    const response = await api("/api/trial", {
-      method: "POST",
-      body: {
-        ...a,
-        template_id: byId("trialTemplateId").value
-      }
-    })
-    render("trial", response)
-    if (!workspaceRequestFailed(response)) {
-      await loadTrialStatus()
-    }
-  })
-
-  byId("btnTrialStatus").addEventListener("click", () => {
-    void loadTrialStatus()
-  })
-
-  byId("btnInstall").addEventListener("click", async () => {
-    const a = actor()
-    render("install", await api("/api/templates/install", {
-      method: "POST",
-      body: {
-        ...a,
-        template_id: byId("trialTemplateId").value,
-        install_options: readInstallOptionsFromForm(),
-      }
-    }))
-  })
-
-  byId("btnPrompt").addEventListener("click", async () => {
-    render("prompt", await api("/api/templates/prompt", {
-      method: "POST",
-      body: { template_id: byId("trialTemplateId").value }
-    }))
-  })
-
-  byId("btnPackage").addEventListener("click", async () => {
-    render("package", await api("/api/templates/package", {
-      method: "POST",
-      body: { template_id: byId("trialTemplateId").value }
-    }))
-  })
-
-  byId("btnTemplateDetail").addEventListener("click", loadTemplateDetail)
-  byId("btnPackageDownload").addEventListener("click", downloadPackage)
-  byId("btnDryrunPlan").addEventListener("click", () => {
-    void prepareDryrunPlan()
-  })
-  byId("btnApplyPlan").addEventListener("click", () => {
-    void applyPlan()
-  })
-  byId("btnRollbackPlan").addEventListener("click", () => {
-    void rollbackPlan()
-  })
-  byId("btnProfilePackExport").addEventListener("click", () => {
-    void exportProfilePack()
-  })
-  byId("btnProfilePackDownloadExport").addEventListener("click", () => {
-    void downloadProfilePackExport()
-  })
-  byId("btnProfilePackListExports").addEventListener("click", () => {
-    void listProfilePackExports()
-  })
-  byId("btnProfilePackImport").addEventListener("click", () => {
-    void importProfilePack()
-  })
-  byId("btnProfilePackImportFromExport").addEventListener("click", () => {
-    void importProfilePackFromExport()
-  })
-  byId("btnProfilePackImportDryrun").addEventListener("click", () => {
-    void importAndDryrunProfilePack()
-  })
-  byId("btnProfilePackListImports").addEventListener("click", () => {
-    void listProfilePackImports()
-  })
-  byId("btnProfilePackDryrun").addEventListener("click", () => {
-    void dryrunProfilePack()
-  })
-  byId("btnProfilePackApply").addEventListener("click", () => {
-    void applyProfilePackPlan()
-  })
-  byId("btnProfilePackRollback").addEventListener("click", () => {
-    void rollbackProfilePackPlan()
-  })
-  byId("btnProfilePackPluginPlan").addEventListener("click", () => {
-    void loadProfilePackPluginInstallPlan()
-  })
-  byId("btnProfilePackPluginConfirm").addEventListener("click", () => {
-    void confirmProfilePackPluginInstall()
-  })
-  byId("btnProfilePackPluginExecute").addEventListener("click", () => {
-    void executeProfilePackPluginInstall()
-  })
-  byId("profilePackRecordPackFilter").addEventListener("input", () => {
-    setProfilePackRecordPackFilter(readProfilePackRecordPackFilter())
-    renderProfilePackRecords()
-  })
-  byId("btnProfilePackClearRecordFilter").addEventListener("click", () => {
-    setProfilePackRecordPackFilter("")
-    renderProfilePackRecords()
-  })
-  byId("btnProfilePackSubmitCommunity").addEventListener("click", () => {
-    void submitProfilePackToCommunity()
-  })
-  byId("btnProfilePackListPackSubmissions").addEventListener("click", () => {
-    void listProfilePackMarketSubmissions()
-  })
-  byId("btnProfilePackDecideSubmission").addEventListener("click", () => {
-    void decideProfilePackSubmission()
-  })
-  byId("btnProfilePackListCatalog").addEventListener("click", () => {
-    void listProfilePackCatalog()
-  })
-  byId("btnProfilePackCatalogDetail").addEventListener("click", () => {
-    void loadProfilePackCatalogDetail()
-  })
-  byId("btnProfilePackCatalogCompare").addEventListener("click", () => {
-    void compareProfilePackCatalog()
-  })
-  byId("btnProfilePackSetFeatured").addEventListener("click", () => {
-    void setProfilePackFeatured()
-  })
-
-  byId("btnListSubmissions").addEventListener("click", listSubmissions)
-
-  byId("btnSaveSubmissionReview").addEventListener("click", saveSubmissionReview)
-  byId("btnApproveSubmission").addEventListener("click", async () => {
-    await decideSubmission("approve")
-  })
-  byId("btnRejectSubmission").addEventListener("click", async () => {
-    await decideSubmission("reject")
-  })
-
-  byId("btnSubmissionDetail").addEventListener("click", loadSubmissionDetail)
-  byId("btnCompareSubmission").addEventListener("click", loadSubmissionCompare)
-
-  byId("btnDownloadSubmissionPackage").addEventListener("click", downloadSubmissionPackage)
-
-  byId("btnListRetry").addEventListener("click", async () => {
-    const a = actor()
-    render("admin_list_retry", await api(`/api/admin/retry-requests${queryString({ role: a.role })}`))
-  })
-
-  byId("btnLockRetry").addEventListener("click", async () => {
-    const a = actor()
-    render("admin_retry_lock", await api("/api/admin/retry-requests/lock", {
-      method: "POST",
-      body: {
-        ...a,
-        request_id: byId("lockRequestId").value,
-        force: byId("lockForce").checked,
-        reason: byId("lockReason").value
-      }
-    }))
-  })
-
-  byId("btnRetryDecide").addEventListener("click", async () => {
-    const a = actor()
-    render("admin_retry_decide", await api("/api/admin/retry-requests/decide", {
-      method: "POST",
-      body: {
-        ...a,
-        request_id: byId("retryRequestId").value,
-        decision: byId("retryDecision").value,
-        request_version: Number(byId("retryRequestVersion").value || 0),
-        lock_version: Number(byId("retryLockVersion").value || 0)
-      }
-    }))
-  })
-
-  byId("btnAudit").addEventListener("click", async () => {
-    const a = actor()
-    const auditParams = {
-      role: a.role,
-      limit: readIntegerField("auditLimit", 20, 1),
-      lifecycle_only: readCheckboxField("auditLifecycleOnly", false),
-      reviewer_id: readTextField("auditReviewerId", ""),
-      device_id: readTextField("auditDeviceId", ""),
-      action_prefix: readTextField("auditActionPrefix", ""),
-      inspect_limit: readIntegerField("auditInspectLimit", 1000, 1),
-    }
-    const response = await api(`/api/admin/audit${queryString({
-      ...auditParams,
-    })}`)
-    render("admin_audit", response)
-    const data = apiData(response)
-    setAuditOutput("auditSummaryOutput", buildAuditSummaryText(data), data && data.summary ? data.summary : data)
-    setAuditOutput("auditEventsOutput", buildAuditEventsText(data), data && data.events ? data.events : data)
-  })
-
-  byId("btnNotice").addEventListener("click", async () => {
-    render("notifications", await api(`/api/notifications${queryString({
-      limit: Number(byId("noticeLimit").value || 50)
-    })}`))
-  })
-
-  byId("btnStorageSummary").addEventListener("click", async () => {
-    const a = actor()
-    const response = await api(`/api/admin/storage/local-summary${queryString({ role: a.role })}`)
-    render("admin_storage_local_summary", response)
-    const data = apiData(response)
-    setStorageOutput("storageSummaryOutput", buildStorageLocalSummaryText(data), data)
-  })
-
-  byId("btnContinuityList").addEventListener("click", () => {
-    void listContinuityEntries()
-  })
-
-  byId("btnContinuityGet").addEventListener("click", () => {
-    void getContinuityDetail()
-  })
-
-  byId("btnStoragePoliciesGet").addEventListener("click", async () => {
-    const a = actor()
-    const response = await api(`/api/admin/storage/policies${queryString({ role: a.role })}`)
-    render("admin_storage_get_policies", response)
-    const data = apiData(response)
-    if (data && typeof data === "object" && data.policies && typeof data.policies === "object") {
-      applyStoragePolicyFields(data.policies)
-    }
-    setStorageOutput("storagePoliciesOutput", buildStoragePoliciesText(data), data)
-  })
-
-  byId("btnStoragePoliciesSet").addEventListener("click", async () => {
-    const a = actor()
-    const response = await api("/api/admin/storage/policies", {
-      method: "POST",
-      body: {
-        ...a,
-        policy_patch: readStoragePoliciesPatch(),
-      },
-    })
-    render("admin_storage_set_policies", response)
-    const data = apiData(response)
-    if (data && typeof data === "object" && data.policies && typeof data.policies === "object") {
-      applyStoragePolicyFields(data.policies)
-    }
-    setStorageOutput("storagePoliciesOutput", buildStoragePoliciesText(data), data)
-  })
-
-  byId("btnStorageRunBackup").addEventListener("click", async () => {
-    const a = actor()
-    const response = await api("/api/admin/storage/jobs/run", {
-      method: "POST",
-      body: {
-        ...a,
-        trigger: readTextField("storageJobTrigger", "manual") || "manual",
-        note: readTextField("storageJobNote", ""),
-      },
-    })
-    render("admin_storage_run_job", response)
-    const data = apiData(response)
-    const job = data && typeof data === "object" && data.job && typeof data.job === "object"
-      ? data.job
-      : null
-    if (job) {
-      applyFieldPatches({
-        storageJobId: job.job_id,
-        storageRestoreArtifactRef: job.artifact_id || job.job_id || "",
-      })
-    }
-    setStorageOutput("storageJobsOutput", buildStorageJobDetailText(data), data)
-  })
-
-  byId("btnStorageJobsList").addEventListener("click", async () => {
-    const a = actor()
-    const status = readTextField("storageJobsStatus", "")
-    const limit = readIntegerField("storageJobsLimit", 20, 1)
-    const response = await api(`/api/admin/storage/jobs${queryString({ role: a.role, status, limit })}`)
-    render("admin_storage_list_jobs", response)
-    const data = apiData(response)
-    setStorageOutput("storageJobsOutput", buildStorageJobsText(data), data)
-  })
-
-  byId("btnStorageJobGet").addEventListener("click", async () => {
-    const a = actor()
-    const jobId = readTextField("storageJobId", "")
-    if (!jobId) {
-      setStorageOutput(
-        "storageJobsOutput",
-        i18nMessage("storage.output.job_id_required", "job_id is required."),
-        { error: "job_id_required" },
-      )
-      return
-    }
-    const response = await api(`/api/admin/storage/jobs/${encodeURIComponent(jobId)}${queryString({ role: a.role })}`)
-    render("admin_storage_get_job", response)
-    const data = apiData(response)
-    const job = data && typeof data === "object" && data.job && typeof data.job === "object"
-      ? data.job
-      : null
-    if (job) {
-      applyFieldPatches({
-        storageRestoreArtifactRef: job.artifact_id || job.job_id || "",
-      })
-    }
-    setStorageOutput("storageJobsOutput", buildStorageJobDetailText(data), data)
-  })
-
-  byId("btnStorageRestorePrepare").addEventListener("click", async () => {
-    const a = actor()
-    const artifactRef = readTextField("storageRestoreArtifactRef", "")
-    if (!artifactRef) {
-      setStorageOutput(
-        "storageRestoreOutput",
-        i18nMessage("storage.output.artifact_ref_required", "artifact_ref is required."),
-        { error: "artifact_ref_required" },
-      )
-      return
-    }
-    const response = await api("/api/admin/storage/restore/prepare", {
-      method: "POST",
-      body: {
-        ...a,
-        artifact_ref: artifactRef,
-        note: readTextField("storageRestoreNote", ""),
-      },
-    })
-    render("admin_storage_restore_prepare", response)
-    const data = apiData(response)
-    const restore = data && typeof data === "object" && data.restore && typeof data.restore === "object"
-      ? data.restore
-      : null
-    if (restore) {
-      applyFieldPatches({
-        storageRestoreId: restore.restore_id,
-        storageRestoreJobId: restore.restore_id,
-      })
-    }
-    setStorageOutput("storageRestoreOutput", buildStorageRestoreText(data), data)
-  })
-
-  byId("btnStorageRestoreCommit").addEventListener("click", async () => {
-    const a = actor()
-    const restoreId = readTextField("storageRestoreId", "")
-    if (!restoreId) {
-      setStorageOutput(
-        "storageRestoreOutput",
-        i18nMessage("storage.output.restore_id_required", "restore_id is required."),
-        { error: "restore_id_required" },
-      )
-      return
-    }
-    const response = await api("/api/admin/storage/restore/commit", {
-      method: "POST",
-      body: {
-        ...a,
-        restore_id: restoreId,
-      },
-    })
-    render("admin_storage_restore_commit", response)
-    const data = apiData(response)
-    setStorageOutput("storageRestoreOutput", buildStorageRestoreText(data), data)
-  })
-
-  byId("btnStorageRestoreCancel").addEventListener("click", async () => {
-    const a = actor()
-    const restoreId = readTextField("storageRestoreId", "")
-    if (!restoreId) {
-      setStorageOutput(
-        "storageRestoreOutput",
-        i18nMessage("storage.output.restore_id_required", "restore_id is required."),
-        { error: "restore_id_required" },
-      )
-      return
-    }
-    const response = await api("/api/admin/storage/restore/cancel", {
-      method: "POST",
-      body: {
-        ...a,
-        restore_id: restoreId,
-      },
-    })
-    render("admin_storage_restore_cancel", response)
-    const data = apiData(response)
-    setStorageOutput("storageRestoreOutput", buildStorageRestoreText(data), data)
-  })
-
-  byId("btnStorageRestoreJobsList").addEventListener("click", async () => {
-    const a = actor()
-    const stateFilter = readTextField("storageRestoreJobsState", "")
-    const limit = readIntegerField("storageRestoreJobsLimit", 20, 1)
-    const response = await api(`/api/admin/storage/restore/jobs${queryString({ role: a.role, state: stateFilter, limit })}`)
-    render("admin_storage_list_restore_jobs", response)
-    const data = apiData(response)
-    setStorageOutput("storageRestoreJobsOutput", buildStorageRestoreJobsText(data), data)
-  })
-
-  byId("btnStorageRestoreJobGet").addEventListener("click", async () => {
-    const a = actor()
-    const restoreId = readTextField("storageRestoreJobId", "")
-    if (!restoreId) {
-      setStorageOutput(
-        "storageRestoreJobsOutput",
-        i18nMessage("storage.output.restore_id_required", "restore_id is required."),
-        { error: "restore_id_required" },
-      )
-      return
-    }
-    const response = await api(`/api/admin/storage/restore/jobs/${encodeURIComponent(restoreId)}${queryString({ role: a.role })}`)
-    render("admin_storage_get_restore_job", response)
-    const data = apiData(response)
-    const restore = data && typeof data === "object" && data.restore && typeof data.restore === "object"
-      ? data.restore
-      : null
-    if (restore) {
-      applyFieldPatches({ storageRestoreId: restore.restore_id })
-    }
-    setStorageOutput("storageRestoreJobsOutput", buildStorageRestoreText(data), data)
+function bindAdminOperationsControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindAdminOperationsControls !== "function") return
+  registry.bindAdminOperationsControls({
+    bindClick,
+    actor,
+    render,
+    api,
+    queryString,
+    byId,
+    readIntegerField,
+    readCheckboxField,
+    readTextField,
+    apiData,
+    setAuditOutput,
+    buildAuditSummaryText,
+    buildAuditEventsText,
+    setStorageOutput,
+    buildStorageLocalSummaryText,
+    listContinuityEntries,
+    getContinuityDetail,
+    applyStoragePolicyFields,
+    buildStoragePoliciesText,
+    readStoragePoliciesPatch,
+    buildStorageJobDetailText,
+    applyFieldPatches,
+    buildStorageJobsText,
+    i18nMessage,
+    buildStorageRestoreText,
+    buildStorageRestoreJobsText,
   })
 }
 
-async function bootstrap() {
-  state.pageMode = pageModeFromLocation()
-  bindUiEventBusSync()
-  bindStorageSync()
-  bindButtons()
+function bindMemberImportControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindMemberImportControls !== "function") return
+  registry.bindMemberImportControls({
+    byId,
+    importMemberLocalAstrbotConfig,
+    promptMemberProfilePackImport,
+    openMemberProfilePackUploadModalById,
+    importMemberProfilePackFromSelection,
+    loadMemberInstallations,
+    closeMemberProfilePackUploadModal,
+    submitSelectedMemberImportDraft,
+    deleteMemberImportDraft,
+    bindUploadDropZone,
+  })
+}
+
+function bindReviewerLifecycleControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindReviewerLifecycleControls !== "function") return
+  registry.bindReviewerLifecycleControls({
+    byId,
+    createReviewerInvite,
+    listReviewerInvites,
+    listReviewerAccounts,
+    listReviewerDevices,
+    resetReviewerDevices,
+    listReviewerSessions,
+    revokeReviewerSessions,
+    setReviewerLifecycleSelectedReviewer,
+  })
+}
+
+function bindingSliceRegistry() {
+  const registry = globalThis.SharelifeAppBindingSlices
+  if (!registry || typeof registry !== "object") return null
+  return registry
+}
+
+function bindPreferenceControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindPreferenceControls !== "function") return
+  registry.bindPreferenceControls({
+    bindClick,
+    actor,
+    render,
+    api,
+    queryString,
+    byId,
+  })
+}
+
+function bindMemberMarketControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindMemberMarketControls !== "function") return
+  registry.bindMemberMarketControls({
+    byId,
+    listTemplates,
+    memberSpotlightProfilePackQuery,
+    state,
+    renderMemberInstallations,
+    renderMemberImportDrafts,
+    setActiveMarketChip,
+    syncMemberSpotlightMarketJump,
+    revealInlineMemberMarket,
+    openMemberSpotlightMarketQuery,
+    marketChipButtons,
+  })
+}
+
+function bindTemplateDrawerAndWizardControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindTemplateDrawerAndWizardControls !== "function") return
+  registry.bindTemplateDrawerAndWizardControls({
+    bindClick,
+    closeTemplateDrawer,
+    state,
+    byId,
+    triggerControl,
+    openSubmitWizard,
+    closeSubmitWizard,
+    setWizardStep,
+    submitTemplateFromWizard,
+  })
+}
+
+function bindTemplateExecutionControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindTemplateExecutionControls !== "function") return
+  registry.bindTemplateExecutionControls({
+    bindClick,
+    actor,
+    selectedPackagePayload,
+    uploadTooLargeResponse,
+    render,
+    api,
+    byId,
+    readUploadOptionsFromForm,
+    workspaceRequestFailed,
+    loadTrialStatus,
+    readInstallOptionsFromForm,
+    loadTemplateDetail,
+    downloadPackage,
+  })
+}
+
+function bindProfilePackControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindProfilePackControls !== "function") return
+  registry.bindProfilePackControls({
+    bindClick,
+    bindInput,
+    prepareDryrunPlan,
+    applyPlan,
+    rollbackPlan,
+    exportProfilePack,
+    downloadProfilePackExport,
+    listProfilePackExports,
+    importProfilePack,
+    importProfilePackFromExport,
+    importAndDryrunProfilePack,
+    listProfilePackImports,
+    dryrunProfilePack,
+    applyProfilePackPlan,
+    rollbackProfilePackPlan,
+    loadProfilePackPluginInstallPlan,
+    confirmProfilePackPluginInstall,
+    executeProfilePackPluginInstall,
+    setProfilePackRecordPackFilter,
+    readProfilePackRecordPackFilter,
+    renderProfilePackRecords,
+    submitProfilePackToCommunity,
+    listProfilePackMarketSubmissions,
+    decideProfilePackSubmission,
+    listProfilePackCatalog,
+    loadProfilePackCatalogDetail,
+    compareProfilePackCatalog,
+    setProfilePackFeatured,
+  })
+}
+
+function bindSubmissionReviewControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindSubmissionReviewControls !== "function") return
+  registry.bindSubmissionReviewControls({
+    bindClick,
+    listSubmissions,
+    saveSubmissionReview,
+    decideSubmission,
+    loadSubmissionDetail,
+    loadSubmissionCompare,
+    downloadSubmissionPackage,
+  })
+}
+
+function bindSidebarNavigationControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindSidebarNavigationControls !== "function") return
+  registry.bindSidebarNavigationControls({ document })
+}
+
+function bindAuthPanelControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindAuthPanelControls !== "function") return
+  registry.bindAuthPanelControls({
+    bindClick,
+    bindChange,
+    login,
+    syncReviewerAuthFields,
+    byId,
+    state,
+    updateAuthUi,
+  })
+}
+
+function bindLocaleAndDeveloperControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindLocaleAndDeveloperControls !== "function") return
+  registry.bindLocaleAndDeveloperControls({
+    bindChange,
+    applyConsoleScope,
+    refreshCapabilities,
+    applyUiLocale,
+    byId,
+    localeQuickButtons,
+    setDeveloperMode,
+    state,
+  })
+}
+
+function bindWorkspaceRouteControls() {
+  const registry = bindingSliceRegistry()
+  if (!registry || typeof registry.bindWorkspaceRouteControls !== "function") return
+  registry.bindWorkspaceRouteControls({
+    bindClick,
+    syncWorkspaceFromHash,
+    clearWorkspaceRoute,
+  })
+}
+
+function bindButtons() {
+  bindSidebarNavigationControls()
+  bindAuthPanelControls()
+  bindLocaleAndDeveloperControls()
+  bindWorkspaceRouteControls()
+  bindReviewerLifecycleControls()
+  bindPreferenceControls()
+  bindMemberMarketControls()
+  bindMemberImportControls()
+  bindTemplateDrawerAndWizardControls()
+  bindTemplateExecutionControls()
+  bindProfilePackControls()
+  bindSubmissionReviewControls()
+  bindAdminOperationsControls()
+}
+
+function initializeBootstrapUiState() {
   applyConsoleScope()
   initializeUiLocale()
   initializeDeveloperMode()
   renderRiskGlossary()
   updateTrialStatusPanel()
   updateApplyWorkflowPanel()
-  syncTemplateScopedFields(byId("trialTemplateId").value, byId("submitVersion").value)
+  const trialTemplateNode = byId("trialTemplateId")
+  const submitVersionNode = byId("submitVersion")
+  syncTemplateScopedFields(
+    trialTemplateNode && trialTemplateNode.value ? trialTemplateNode.value : "",
+    submitVersionNode && submitVersionNode.value ? submitVersionNode.value : "",
+  )
   renderCollectionState("templates")
   renderCollectionState("submissions")
   renderCollectionState("profilePackSubmissions")
@@ -9923,20 +9594,23 @@ async function bootstrap() {
   updateProfilePackMarketPanel()
   renderTemplateCards([])
   renderTemplateDrawer("")
-  setActiveMarketChip(String(byId("templateCategoryFilter").value || "").trim())
+  const templateCategoryFilterNode = byId("templateCategoryFilter")
+  setActiveMarketChip(
+    String(templateCategoryFilterNode && templateCategoryFilterNode.value ? templateCategoryFilterNode.value : "").trim(),
+  )
   closeSubmitWizard()
   setWizardStep(1)
   updateProfilePackSubmissionTable([])
   updateProfilePackCatalogTable([])
+  const profilePackIdNode = byId("profilePackId")
   applyFieldPatches({
-    profilePackPlanId: profilePackDefaultPlanId(byId("profilePackId").value),
+    profilePackPlanId: profilePackDefaultPlanId(profilePackIdNode && profilePackIdNode.value ? profilePackIdNode.value : ""),
     profilePackSubmissionArtifactId: state.profilePack.exportArtifactId,
   })
   updateWorkspaceContext({ scope: "", id: "" })
-  window.addEventListener("hashchange", () => {
-    void syncWorkspaceFromHash()
-  })
-  await initAuth()
+}
+
+async function loadPostAuthMemberData() {
   await refreshHealth()
   if (byId("memberInstallationsList")) {
     await loadMemberInstallations()
@@ -9951,17 +9625,31 @@ async function bootstrap() {
     if (hasCapability("templates.list")) {
       await listTemplates()
     }
-    if (byId("btnListSubmissions")) {
+    if (byId("btnListSubmissions") && byId("submissionsTable")) {
       if (hasCapability("member.submissions.read") || hasCapability("admin.submissions.read")) {
         await listSubmissions()
       }
     }
-    if (byId("btnProfilePackListPackSubmissions")) {
+    if (byId("btnProfilePackListPackSubmissions") && byId("profilePackSubmissionTable")) {
       if (hasCapability("member.profile_pack.submissions.read") || hasCapability("admin.profile_pack.market.review")) {
         await listProfilePackMarketSubmissions()
       }
     }
   }
+}
+
+async function bootstrap() {
+  state.pageMode = pageModeFromLocation()
+  bindUiEventBusSync()
+  bindStorageSync()
+  bindButtons()
+  initializeBootstrapUiState()
+  window.addEventListener("hashchange", () => {
+    void syncWorkspaceFromHash()
+  })
+  await initAuth()
+  pruneMemberPrivilegedDom()
+  await loadPostAuthMemberData()
   await syncWorkspaceFromHash()
 }
 

@@ -30,6 +30,13 @@
 6. 同一幂等键跨模板/版本范围复用会触发确定性冲突拒绝（`idempotency_key_conflict`），避免错误重放污染。
 7. `profile-pack` 提交也已接入同样的幂等模型（`submit_options.idempotency_key` + header 透传），并补齐重放/冲突审计事件。
 
+### 1.4 增量进展（`2026-04-10`）
+
+1. Member 页已落地硬边界交付：`/member` 优先返回 `member.safe.html`，member 源模板不再携带 admin/reviewer 控件。
+2. 运行时仍保留鉴权后的特权 DOM 防御裁剪，形成“模板边界 + 运行时边界”双重保护。
+3. WebUI 绑定逻辑进一步拆分到 `app_binding_slices.js` 注册表，`bindButtons()` 收敛为编排壳层。
+4. 新增切片表面与路由表面 meta 测试，覆盖脚本装载顺序、member 安全面与边界回归风险。
+
 ## 2. 两大方案交叉决策
 
 ### 2.1 统一状态词汇
@@ -69,7 +76,7 @@
 ### Phase C - 前端接入
 
 1. 引入 Stitch 布局，但保持运行时 ID 锚点不变。  
-2. 固化顶部主动作：搜索 + 语言 + `刷新本地已有配置`。  
+2. 固化顶部主动作：搜索 + 语言 + `导入本机 AstrBot 配置`。  
 3. `/member` 与 `/market` 共用上传/安装选项面板行为。  
 4. 用新接口回填任务队列与安装态。  
 

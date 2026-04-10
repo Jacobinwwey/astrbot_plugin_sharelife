@@ -1798,7 +1798,9 @@ class SharelifeWebUIServer:
         @self.app.get("/user")
         @self.app.get("/user/")
         async def member_console_page():
-            member_path = self.web_root / "member.html"
+            member_path = self.web_root / "member.safe.html"
+            if not member_path.exists():
+                member_path = self.web_root / "member.html"
             if not member_path.exists():
                 member_path = self.web_root / "index.html"
             if not member_path.exists():
