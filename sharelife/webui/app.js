@@ -346,6 +346,10 @@ function capabilityGuardHelpers() {
   return globalThis.SharelifeCapabilityGuardRuntime || null
 }
 
+function capabilityGuardDomHelpers() {
+  return globalThis.SharelifeCapabilityGuardDomRuntime || null
+}
+
 function marketCardHelpers() {
   return globalThis.SharelifeMarketCards || null
 }
@@ -1406,6 +1410,15 @@ function applyCapabilityGuardToControl(controlId) {
   if (!node) return
 
   const allowed = hasCapability(requiredCapability)
+  const domHelper = capabilityGuardDomHelpers()
+  if (domHelper && domHelper.applyCapabilityGuardToNode) {
+    domHelper.applyCapabilityGuardToNode(node, {
+      allowed,
+      requiredCapability,
+      lockedHint: capabilityLockedHint(requiredCapability),
+    })
+    return
+  }
   node.classList.toggle("capability-blocked", !allowed)
   node.setAttribute("aria-disabled", allowed ? "false" : "true")
 
