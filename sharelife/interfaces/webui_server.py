@@ -1713,6 +1713,7 @@ class SharelifeWebUIServer:
             and requested_user_id != member_subject
             and not allow_legacy_anonymous_alias
         ):
+            self._record_auth_event(event="owner_scope_denied", role="member")
             return None, self._error_response(
                 code="permission_denied",
                 message="permission denied",

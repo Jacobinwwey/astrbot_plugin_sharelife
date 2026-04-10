@@ -128,9 +128,13 @@ Member routes:
 | `GET /api/profile-pack/catalog/compare` | `public` | N/A |
 | `GET /api/profile-pack/catalog/insights` | `public` | N/A |
 | `POST /api/trial` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
+| `GET /api/trial/status` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `POST /api/templates/install` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/templates/package/download` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/notifications` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
+| `GET /api/preferences` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
+| `POST /api/preferences/mode` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
+| `POST /api/preferences/observe` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/tasks` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `POST /api/member/tasks/refresh` | `member` or anonymous allowlist | `401 unauthorized` or `403 permission_denied` |
 | `GET /api/member/transfers` | `member` | `401 unauthorized` or `403 permission_denied` |

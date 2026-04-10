@@ -128,9 +128,13 @@
 | `GET /api/profile-pack/catalog/compare` | `public` | N/A |
 | `GET /api/profile-pack/catalog/insights` | `public` | N/A |
 | `POST /api/trial` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/trial/status` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `POST /api/templates/install` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/templates/package/download` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/notifications` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `GET /api/preferences` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/preferences/mode` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
+| `POST /api/preferences/observe` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/tasks` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `POST /api/member/tasks/refresh` | `member` 或匿名白名单 | `401 unauthorized` 或 `403 permission_denied` |
 | `GET /api/member/transfers` | `member` | `401 unauthorized` 或 `403 permission_denied` |

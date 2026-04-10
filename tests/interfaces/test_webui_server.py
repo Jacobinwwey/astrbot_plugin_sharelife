@@ -4318,6 +4318,47 @@ def test_webui_metrics_scrape_stays_stable_under_internal_error_storm(tmp_path):
     assert error_lines[0].endswith(" 25")
 
 
+def test_webui_metrics_records_owner_scope_denied_auth_event(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                }
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    member_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u1"},
+    )
+    assert member_login.status_code == 200
+    member_headers = {"Authorization": f"Bearer {member_login.json()['token']}"}
+
+    denied = client.get(
+        "/api/member/installations",
+        params={"user_id": "owner-u2"},
+        headers=member_headers,
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "permission_denied"
+
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert admin_login.status_code == 200
+    metrics_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+
+    metrics = client.get("/api/metrics", headers=metrics_headers)
+    assert metrics.status_code == 200
+    assert 'event="owner_scope_denied"' in metrics.text
+
+
 def test_webui_submit_package_shows_labels_and_downloads_uploaded_artifact(tmp_path):
     server = build_server(
         tmp_path,
