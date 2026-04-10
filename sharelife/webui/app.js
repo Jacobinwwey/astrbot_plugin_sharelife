@@ -330,6 +330,10 @@ function marketCardHelpers() {
   return globalThis.SharelifeMarketCards || null
 }
 
+function memberImportHelpers() {
+  return globalThis.SharelifeMemberImportLabels || null
+}
+
 function uiEventBusHelpers() {
   return globalThis.SharelifeUiEventBus || null
 }
@@ -550,25 +554,35 @@ function localizedProfilePackIssueLabels(values) {
     .filter((item, index, all) => all.indexOf(item) === index)
 }
 
-function isRawAstrBotImportItem(item) {
-  const issues = Array.isArray(item && item.compatibility_issues) ? item.compatibility_issues : []
-  return issues.some((entry) => String(entry || "").trim().toLowerCase() === "astrbot_raw_import_converted")
-}
-
 function memberImportIssueSummary(values, limit = 2) {
+  const helper = memberImportHelpers()
+  if (helper && helper.buildIssueSummary) {
+    return helper.buildIssueSummary(values, {
+      limit,
+      formatIssueLabels: localizedProfilePackIssueLabels,
+    })
+  }
   const labels = localizedProfilePackIssueLabels(values)
   if (!labels.length) return ""
-  const preview = labels.slice(0, Math.max(1, Number(limit) || 1)).join(" · ")
-  if (labels.length <= limit) return preview
-  return `${preview} +${labels.length - limit}`
+  const normalizedLimit = Math.max(1, Number(limit) || 1)
+  const preview = labels.slice(0, normalizedLimit).join(" · ")
+  if (labels.length <= normalizedLimit) return preview
+  return `${preview} +${labels.length - normalizedLimit}`
 }
 
 function memberImportSourceLabel(item) {
-  if (isRawAstrBotImportItem(item)) {
-    return i18nMessage(
-      "member.upload_detail.import_source_astrbot_raw",
-      "Raw AstrBot export (converted)",
-    )
+  const helper = memberImportHelpers()
+  if (helper && helper.importSourceLabel) {
+    return helper.importSourceLabel(item, {
+      rawLabel: i18nMessage(
+        "member.upload_detail.import_source_astrbot_raw",
+        "Raw AstrBot export (converted)",
+      ),
+      standardLabel: i18nMessage(
+        "member.upload_detail.import_source_standard",
+        "Sharelife standard import",
+      ),
+    })
   }
   return i18nMessage(
     "member.upload_detail.import_source_standard",
@@ -577,49 +591,31 @@ function memberImportSourceLabel(item) {
 }
 
 function memberImportSummaryText(item) {
+  const helper = memberImportHelpers()
+  if (helper && helper.buildImportSummaryText) {
+    return helper.buildImportSummaryText(item, {
+      formatMessage: (key, fallback = "", tokens = {}) => i18nFormat(key, fallback, tokens),
+    })
+  }
   const summary = item && typeof item.import_summary === "object" && item.import_summary
     ? item.import_summary
     : {}
-  const parts = []
   const defaultPersonality = String(summary.default_personality || "").trim()
   const personaCount = Number(summary.persona_count || 0)
   const subagentCount = Number(summary.subagent_count || 0)
   const platformCount = Number(summary.platform_count || 0)
+  const parts = []
   if (defaultPersonality) {
-    parts.push(
-      i18nFormat(
-        "member.imports.summary_default_personality",
-        "Persona: {value}",
-        { value: defaultPersonality },
-      ),
-    )
+    parts.push(i18nFormat("member.imports.summary_default_personality", "Persona: {value}", { value: defaultPersonality }))
   }
   if (personaCount > 0) {
-    parts.push(
-      i18nFormat(
-        "member.imports.summary_persona_count",
-        "Personas: {count}",
-        { count: personaCount },
-      ),
-    )
+    parts.push(i18nFormat("member.imports.summary_persona_count", "Personas: {count}", { count: personaCount }))
   }
   if (subagentCount > 0) {
-    parts.push(
-      i18nFormat(
-        "member.imports.summary_subagent_count",
-        "Subagents: {count}",
-        { count: subagentCount },
-      ),
-    )
+    parts.push(i18nFormat("member.imports.summary_subagent_count", "Subagents: {count}", { count: subagentCount }))
   }
   if (platformCount > 0) {
-    parts.push(
-      i18nFormat(
-        "member.imports.summary_platform_count",
-        "Platforms: {count}",
-        { count: platformCount },
-      ),
-    )
+    parts.push(i18nFormat("member.imports.summary_platform_count", "Platforms: {count}", { count: platformCount }))
   }
   return parts.join(" · ")
 }
