@@ -1659,40 +1659,114 @@ class SharelifeApiV1:
 
     @classmethod
     def _detect_local_astrbot_config_path(cls) -> Path:
-        configured_path = str(os.getenv("SHARELIFE_ASTRBOT_CONFIG_PATH", "") or "").strip()
+        configured_hint = str(os.getenv("SHARELIFE_ASTRBOT_CONFIG_PATH", "") or "").strip()
         repo_root = Path(__file__).resolve().parents[2]
         workspace_root = Path(__file__).resolve().parents[3]
+        cwd_root = Path.cwd()
         home_root = Path.home()
-        search_roots = [
-            repo_root,
-            repo_root.parent,
-            workspace_root,
-            home_root,
-            home_root / "astrbot",
-        ]
-        candidate_paths: list[Path] = []
-        if configured_path:
-            candidate_paths.append(Path(configured_path).expanduser())
-        for root in search_roots:
-            candidate_paths.extend(
-                [
-                    root / "data" / "cmd_config.json",
-                    root / "astrbot" / "data" / "cmd_config.json",
-                    root / "cmd_config.json",
-                    root / "config" / "cmd_config.json",
-                ]
-            )
+        user_profile_text = str(os.getenv("USERPROFILE", "") or "").strip()
+        user_profile_root = Path(user_profile_text).expanduser() if user_profile_text else home_root
 
-        seen: set[str] = set()
+        candidate_paths: list[Path] = []
+        candidate_paths.extend(cls._astrbot_candidates_from_env_hint(configured_hint))
+
+        search_roots: list[Path] = []
+        search_roots.extend(cls._astrbot_env_paths(os.getenv("SHARELIFE_ASTRBOT_HOME", "")))
+        search_roots.extend(cls._astrbot_env_paths(os.getenv("SHARELIFE_ASTRBOT_SEARCH_ROOTS", "")))
+        search_roots.extend(
+            [
+                cwd_root,
+                cwd_root.parent,
+                repo_root,
+                repo_root.parent,
+                workspace_root,
+                home_root,
+                home_root / "astrbot",
+                home_root / ".astrbot",
+                home_root / ".config" / "astrbot",
+                home_root / ".local" / "share" / "astrbot",
+                home_root / "Library" / "Application Support" / "AstrBot",
+                home_root / "Library" / "Application Support" / "astrbot",
+                user_profile_root / "AppData" / "Roaming" / "AstrBot",
+                user_profile_root / "AppData" / "Local" / "AstrBot",
+                Path("/opt/astrbot"),
+                Path("/var/lib/astrbot"),
+            ]
+        )
+
+        xdg_config_home = str(os.getenv("XDG_CONFIG_HOME", "") or "").strip()
+        xdg_data_home = str(os.getenv("XDG_DATA_HOME", "") or "").strip()
+        if xdg_config_home:
+            search_roots.append(Path(xdg_config_home).expanduser() / "astrbot")
+        if xdg_data_home:
+            search_roots.append(Path(xdg_data_home).expanduser() / "astrbot")
+
+        seen_roots: set[str] = set()
+        for root in search_roots:
+            normalized_root = str(root.expanduser())
+            if not normalized_root or normalized_root in seen_roots:
+                continue
+            seen_roots.add(normalized_root)
+            candidate_paths.extend(cls._astrbot_candidates_from_root(root))
+
+        seen_candidates: set[str] = set()
         for candidate in candidate_paths:
             resolved = candidate.expanduser()
             normalized = str(resolved)
-            if normalized in seen:
+            if not normalized or normalized in seen_candidates:
                 continue
-            seen.add(normalized)
+            seen_candidates.add(normalized)
             if resolved.is_file():
                 return resolved.resolve()
         raise FileNotFoundError("local AstrBot cmd_config.json not found")
+
+    @staticmethod
+    def _astrbot_env_paths(raw_text: str | None) -> list[Path]:
+        text = str(raw_text or "").strip()
+        if not text:
+            return []
+        paths: list[Path] = []
+        for part in text.split(os.pathsep):
+            candidate = str(part or "").strip()
+            if not candidate:
+                continue
+            paths.append(Path(candidate).expanduser())
+        return paths
+
+    @classmethod
+    def _astrbot_candidates_from_env_hint(cls, raw_text: str) -> list[Path]:
+        paths = cls._astrbot_env_paths(raw_text)
+        if not paths:
+            return []
+        out: list[Path] = []
+        for hint_path in paths:
+            if hint_path.suffix.lower() == ".json":
+                out.append(hint_path)
+                continue
+            out.extend(cls._astrbot_candidates_from_root(hint_path))
+        return out
+
+    @classmethod
+    def _astrbot_candidates_from_root(cls, root: Path) -> list[Path]:
+        normalized_root = root.expanduser()
+        suffixes = (
+            ("cmd_config.json",),
+            ("data", "cmd_config.json"),
+            ("config", "cmd_config.json"),
+            ("astrbot", "data", "cmd_config.json"),
+            ("astrbot", "config", "cmd_config.json"),
+            ("AstrBot", "data", "cmd_config.json"),
+            ("AstrBot", "config", "cmd_config.json"),
+            (".astrbot", "data", "cmd_config.json"),
+            (".config", "astrbot", "cmd_config.json"),
+            (".local", "share", "astrbot", "cmd_config.json"),
+            ("AppData", "Roaming", "AstrBot", "data", "cmd_config.json"),
+            ("AppData", "Local", "AstrBot", "data", "cmd_config.json"),
+        )
+        out: list[Path] = []
+        for segments in suffixes:
+            out.append(normalized_root.joinpath(*segments))
+        return out
 
     def admin_import_profile_pack_and_dryrun(
         self,

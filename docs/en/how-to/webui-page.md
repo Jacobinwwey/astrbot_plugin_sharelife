@@ -75,6 +75,11 @@ Privileged moderation and operator workflows are intentionally documented in pri
    - CLI: `python3 scripts/run_sharelife_webui_standalone.py --enable-local-astrbot-import`
    - Env: `SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`
    - Optional anonymous local import: `--allow-anonymous-local-astrbot-import` / `SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT=1`
+11. Local AstrBot auto-detection accepts optional host hints:
+   - `SHARELIFE_ASTRBOT_CONFIG_PATH=/absolute/path/to/cmd_config.json`
+   - `SHARELIFE_ASTRBOT_CONFIG_PATH=/path/a:/path/b` (Windows uses `;`)
+   - `SHARELIFE_ASTRBOT_SEARCH_ROOTS=/path/root-a:/path/root-b` (Windows uses `;`)
+   - `SHARELIFE_ASTRBOT_HOME=/path/to/astrbot`
 
 ## Start and routes
 

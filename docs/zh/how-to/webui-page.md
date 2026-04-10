@@ -75,6 +75,11 @@ Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。
    - CLI：`python3 scripts/run_sharelife_webui_standalone.py --enable-local-astrbot-import`
    - 环境变量：`SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`
    - 如需允许匿名主体触发本机导入：`--allow-anonymous-local-astrbot-import` / `SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT=1`
+11. 本机 AstrBot 自动探测支持可选路径提示：
+   - `SHARELIFE_ASTRBOT_CONFIG_PATH=/绝对路径/cmd_config.json`
+   - `SHARELIFE_ASTRBOT_CONFIG_PATH=/path/a:/path/b`（Windows 使用 `;`）
+   - `SHARELIFE_ASTRBOT_SEARCH_ROOTS=/path/root-a:/path/root-b`（Windows 使用 `;`）
+   - `SHARELIFE_ASTRBOT_HOME=/path/to/astrbot`
 
 ## 启动与路由
 

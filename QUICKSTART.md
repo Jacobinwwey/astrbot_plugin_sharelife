@@ -76,3 +76,6 @@ Notes:
 3. Standalone local AstrBot import is disabled by default. Enable explicitly when needed:
    - `python3 scripts/run_sharelife_webui_standalone.py --enable-local-astrbot-import`
    - or `SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`
+4. If host auto-detection cannot find your local `cmd_config.json`, set one of:
+   - `SHARELIFE_ASTRBOT_CONFIG_PATH=/absolute/path/to/cmd_config.json`
+   - `SHARELIFE_ASTRBOT_SEARCH_ROOTS=/path/root-a:/path/root-b` (Windows uses `;`)

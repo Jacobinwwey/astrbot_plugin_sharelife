@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import zipfile
@@ -1368,6 +1369,56 @@ def test_api_member_profile_pack_import_detects_local_astrbot_config(tmp_path, m
     assert web_imported.ok is True
     assert web_imported.data["compatibility"] == "degraded"
     assert "astrbot_raw_import_converted" in web_imported.data["compatibility_issues"]
+
+
+def test_api_detect_local_astrbot_config_path_accepts_directory_hint(tmp_path, monkeypatch):
+    local_root = tmp_path / "astrbot-home"
+    local_config = local_root / "data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_root))
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_SEARCH_ROOTS", raising=False)
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_HOME", raising=False)
+
+    detected = SharelifeApiV1._detect_local_astrbot_config_path()
+    assert detected == local_config.resolve()
+
+
+def test_api_detect_local_astrbot_config_path_supports_path_list_hint(tmp_path, monkeypatch):
+    local_root = tmp_path / "astrbot-home"
+    local_config = local_root / "config" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text("{}", encoding="utf-8")
+
+    missing_file = tmp_path / "missing" / "cmd_config.json"
+    monkeypatch.setenv(
+        "SHARELIFE_ASTRBOT_CONFIG_PATH",
+        f"{missing_file}{os.pathsep}{local_root}",
+    )
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_SEARCH_ROOTS", raising=False)
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_HOME", raising=False)
+
+    detected = SharelifeApiV1._detect_local_astrbot_config_path()
+    assert detected == local_config.resolve()
+
+
+def test_api_detect_local_astrbot_config_path_honors_search_roots_env(tmp_path, monkeypatch):
+    missing_root = tmp_path / "root-a"
+    found_root = tmp_path / "root-b"
+    local_config = found_root / "data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text("{}", encoding="utf-8")
+
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_CONFIG_PATH", raising=False)
+    monkeypatch.setenv(
+        "SHARELIFE_ASTRBOT_SEARCH_ROOTS",
+        f"{missing_root}{os.pathsep}{found_root}",
+    )
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_HOME", raising=False)
+
+    detected = SharelifeApiV1._detect_local_astrbot_config_path()
+    assert detected == local_config.resolve()
 
 
 def test_api_member_local_astrbot_import_refreshes_existing_draft_and_supports_delete(tmp_path, monkeypatch):

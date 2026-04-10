@@ -131,6 +131,11 @@ Standalone local AstrBot import defaults:
 - Optional anonymous local import (only when your deployment policy allows it):
   - CLI: `--allow-anonymous-local-astrbot-import`
   - Env: `SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT=1`
+- Optional local config path hints for host auto-detection:
+  - `SHARELIFE_ASTRBOT_CONFIG_PATH=/path/to/cmd_config.json`
+  - `SHARELIFE_ASTRBOT_CONFIG_PATH=/path/a:/path/b` (Windows uses `;`)
+  - `SHARELIFE_ASTRBOT_SEARCH_ROOTS=/path/root-a:/path/root-b` (Windows uses `;`)
+  - `SHARELIFE_ASTRBOT_HOME=/path/to/astrbot`
 
 Reference sample pack (for users/developers):
 - Exploded sample pack: `examples/profile-packs/official-starter/`
