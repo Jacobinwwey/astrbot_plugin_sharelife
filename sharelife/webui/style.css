@@ -2209,6 +2209,10 @@ body.modal-scroll-locked {
   margin-top: 0.2rem;
 }
 
+.member-local-import-hint {
+  margin: 0.25rem 0 0;
+}
+
 .member-upload-tree-row {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);

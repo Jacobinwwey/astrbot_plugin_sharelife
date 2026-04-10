@@ -1811,6 +1811,8 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert 'id="memberSpotlightShell"' in member_page.text
     assert 'data-i18n-key="member.search.spotlight_hint"' in member_page.text
     assert 'id="btnImportAstrbotConfig"' in member_page.text
+    assert 'id="memberLocalImportFeatureHint"' in member_page.text
+    assert 'data-i18n-key="member.imports.local_feature_disabled"' in member_page.text
     assert 'id="btnRefreshMemberInstallationsInline"' in member_page.text
     assert 'id="btnOpenMemberImportReview"' in member_page.text
     assert 'id="memberUploadDropzone"' in member_page.text

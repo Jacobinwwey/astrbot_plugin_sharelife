@@ -260,6 +260,14 @@ test("getMessage returns locale-specific translation with fallback", () => {
     "ローカル AstrBot 設定を取り込む",
   )
   assert.equal(
+    getMessage("en-US", "member.imports.local_feature_disabled", ""),
+    "Local AstrBot import is disabled by deployment policy.",
+  )
+  assert.equal(
+    getMessage("zh-CN", "member.imports.local_feature_disabled", ""),
+    "当前部署策略未启用“导入本机 AstrBot 配置”。",
+  )
+  assert.equal(
     getMessage("zh-CN", "button.review_imported_configs", ""),
     "审阅已导入配置包",
   )

@@ -1178,6 +1178,7 @@ function setCapabilities(payload, options = {}) {
     availableRoles: availableRoles.length ? availableRoles : ["member", "reviewer", "admin"],
   }
   applyCapabilityGuards()
+  syncMemberLocalImportEntrySurface()
   renderModerationWorkspace()
   if (options.updateScope !== false) {
     applyConsoleScope()
@@ -7163,6 +7164,33 @@ function syncMemberImportReviewTrigger() {
         { count },
       )
     : i18nMessage("button.review_imported_configs", "Review Imported Config Packs")
+}
+
+function syncMemberLocalImportEntrySurface() {
+  const importButton = byId("btnImportAstrbotConfig")
+  const hintNode = byId("memberLocalImportFeatureHint")
+  if (!importButton) return
+  const supported = state.runtimeFeatures.supportsLocalAstrbotImport !== false
+  importButton.classList.toggle("hidden", !supported)
+  if (!supported) {
+    importButton.disabled = true
+    importButton.setAttribute("aria-disabled", "true")
+    if (hintNode) {
+      hintNode.hidden = false
+      hintNode.classList.remove("hidden")
+      hintNode.textContent = i18nMessage(
+        "member.imports.local_feature_disabled",
+        "Local AstrBot import is disabled by deployment policy.",
+      )
+    }
+    return
+  }
+  importButton.disabled = false
+  importButton.removeAttribute("aria-disabled")
+  if (hintNode) {
+    hintNode.hidden = true
+    hintNode.classList.add("hidden")
+  }
 }
 
 function selectedMemberImportDraft() {
