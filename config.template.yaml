@@ -103,6 +103,10 @@ sharelife:
       security_alert_window_seconds: 300
       security_alert_threshold: 3
       security_alert_cooldown_seconds: 300
+      # Member owner-scope denial alerting (cross-user access attempts)
+      owner_scope_alert_window_seconds: 300
+      owner_scope_alert_threshold: 5
+      owner_scope_alert_cooldown_seconds: 300
     public_market:
       # Optional automation: when reviewer/admin approves a profile-pack submission,
       # publish sanitized artifact to docs/public/market automatically.

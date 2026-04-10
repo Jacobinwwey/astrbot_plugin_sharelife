@@ -29,6 +29,9 @@ def test_conf_schema_exposes_state_store_backend_and_sqlite_file():
     assert "security_alert_window_seconds" in observability_items
     assert "security_alert_threshold" in observability_items
     assert "security_alert_cooldown_seconds" in observability_items
+    assert "owner_scope_alert_window_seconds" in observability_items
+    assert "owner_scope_alert_threshold" in observability_items
+    assert "owner_scope_alert_cooldown_seconds" in observability_items
 
     auth = webui_items.get("auth", {})
     assert isinstance(auth, dict)
@@ -51,6 +54,9 @@ def test_config_template_documents_state_store_and_api_rate_limit():
     assert "security_alert_window_seconds" in text
     assert "security_alert_threshold" in text
     assert "security_alert_cooldown_seconds" in text
+    assert "owner_scope_alert_window_seconds" in text
+    assert "owner_scope_alert_threshold" in text
+    assert "owner_scope_alert_cooldown_seconds" in text
     assert "allow_anonymous_member" in text
     assert "anonymous_member_user_id" in text
     assert "anonymous_member_allowlist" in text

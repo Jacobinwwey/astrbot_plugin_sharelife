@@ -264,6 +264,21 @@
             "description": "重复发送同类敏感路由异常通知前的冷却时间（秒）。",
             "type": "int",
             "default": 300
+          },
+          "owner_scope_alert_window_seconds": {
+            "description": "member owner scope 越权拒绝告警的聚合观测时间窗（秒）。",
+            "type": "int",
+            "default": 300
+          },
+          "owner_scope_alert_threshold": {
+            "description": "member owner scope 越权拒绝触发管理员通知前的次数阈值。",
+            "type": "int",
+            "default": 5
+          },
+          "owner_scope_alert_cooldown_seconds": {
+            "description": "重复发送 owner scope 越权拒绝告警通知前的冷却时间（秒）。",
+            "type": "int",
+            "default": 300
           }
         }
       },

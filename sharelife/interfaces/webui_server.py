@@ -255,6 +255,9 @@ class SharelifeWebUIServer:
         self._security_alert_window_seconds = 300
         self._security_alert_threshold = 3
         self._security_alert_cooldown_seconds = 300
+        self._owner_scope_alert_window_seconds = 300
+        self._owner_scope_alert_threshold = 5
+        self._owner_scope_alert_cooldown_seconds = 300
         self._security_headers_enabled = True
         self._security_headers: dict[str, str] = dict(self._DEFAULT_SECURITY_HEADERS)
         self._refresh_auth()
@@ -444,6 +447,18 @@ class SharelifeWebUIServer:
         self._security_alert_cooldown_seconds = max(
             30,
             _to_int(observability.get("security_alert_cooldown_seconds"), 300),
+        )
+        self._owner_scope_alert_window_seconds = max(
+            30,
+            _to_int(observability.get("owner_scope_alert_window_seconds"), 300),
+        )
+        self._owner_scope_alert_threshold = max(
+            1,
+            _to_int(observability.get("owner_scope_alert_threshold"), 5),
+        )
+        self._owner_scope_alert_cooldown_seconds = max(
+            30,
+            _to_int(observability.get("owner_scope_alert_cooldown_seconds"), 300),
         )
         overflow_label = str(
             observability.get("metrics_overflow_path_label", "/__other__") or "/__other__"
@@ -937,6 +952,7 @@ class SharelifeWebUIServer:
         role: str,
         path: str,
         threshold: int | None = None,
+        window_seconds: int | None = None,
     ) -> tuple[bool, int]:
         now = time.time()
         normalized_event = str(event or "unknown").strip().lower() or "unknown"
@@ -944,7 +960,15 @@ class SharelifeWebUIServer:
         normalized_path = self._normalize_rate_limit_path(path)
         client_host = self._client_host(request)
         key = "|".join((client_host, normalized_event, normalized_role, normalized_path))
-        window_start = now - float(self._security_alert_window_seconds)
+        window = max(
+            1,
+            int(
+                self._security_alert_window_seconds
+                if window_seconds is None
+                else window_seconds
+            ),
+        )
+        window_start = now - float(window)
         rows = [item for item in self._security_alert_windows.get(key, []) if item >= window_start]
         rows.append(now)
         self._security_alert_windows[key] = rows
@@ -960,11 +984,14 @@ class SharelifeWebUIServer:
         path: str,
         reason: str = "",
         threshold: int | None = None,
+        window_seconds: int | None = None,
+        cooldown_seconds: int | None = None,
+        require_sensitive_path: bool = True,
     ) -> None:
         normalized_event = str(event or "unknown").strip().lower() or "unknown"
         normalized_role = str(role or "public").strip().lower() or "public"
         normalized_path = self._normalize_rate_limit_path(path)
-        if not self._is_sensitive_anomaly_path(normalized_path):
+        if require_sensitive_path and not self._is_sensitive_anomaly_path(normalized_path):
             return
         reached, count = self._security_anomaly_threshold_reached(
             request=request,
@@ -972,6 +999,7 @@ class SharelifeWebUIServer:
             role=normalized_role,
             path=normalized_path,
             threshold=threshold,
+            window_seconds=window_seconds,
         )
         if not reached:
             return
@@ -979,7 +1007,15 @@ class SharelifeWebUIServer:
         cooldown_key = "|".join((client_host, normalized_event, normalized_role, normalized_path))
         now = time.time()
         last_sent = float(self._security_alert_last_sent_at.get(cooldown_key, 0.0) or 0.0)
-        if now - last_sent < float(self._security_alert_cooldown_seconds):
+        cooldown = max(
+            0,
+            int(
+                self._security_alert_cooldown_seconds
+                if cooldown_seconds is None
+                else cooldown_seconds
+            ),
+        )
+        if now - last_sent < float(cooldown):
             return
         self._security_alert_last_sent_at[cooldown_key] = now
         self._emit_security_alert(
@@ -989,6 +1025,25 @@ class SharelifeWebUIServer:
             client_host=client_host,
             count=count,
             reason=reason,
+        )
+
+    def _maybe_emit_owner_scope_alert(
+        self,
+        *,
+        request: Request,
+        path: str,
+        reason: str = "",
+    ) -> None:
+        self._maybe_emit_security_alert(
+            request=request,
+            event="owner_scope_denied",
+            role="member",
+            path=path,
+            reason=reason,
+            threshold=self._owner_scope_alert_threshold,
+            window_seconds=self._owner_scope_alert_window_seconds,
+            cooldown_seconds=self._owner_scope_alert_cooldown_seconds,
+            require_sensitive_path=False,
         )
 
     def _prometheus_metrics_text(self) -> str:
@@ -1714,6 +1769,11 @@ class SharelifeWebUIServer:
             and not allow_legacy_anonymous_alias
         ):
             self._record_auth_event(event="owner_scope_denied", role="member")
+            self._maybe_emit_owner_scope_alert(
+                request=request,
+                path=self._normalize_api_path(request.url.path),
+                reason="member_owner_binding_denied",
+            )
             return None, self._error_response(
                 code="permission_denied",
                 message="permission denied",

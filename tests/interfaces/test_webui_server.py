@@ -4359,6 +4359,77 @@ def test_webui_metrics_records_owner_scope_denied_auth_event(tmp_path):
     assert 'event="owner_scope_denied"' in metrics.text
 
 
+def test_webui_owner_scope_denied_alert_notifies_admin_with_threshold_and_cooldown(tmp_path):
+    server = build_server(
+        tmp_path,
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                },
+                "observability": {
+                    "owner_scope_alert_threshold": 2,
+                    "owner_scope_alert_cooldown_seconds": 600,
+                    "owner_scope_alert_window_seconds": 300,
+                },
+            }
+        },
+    )
+    client = TestClient(server.app)
+
+    member_login = client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "owner-u1"},
+    )
+    assert member_login.status_code == 200
+    member_headers = {"Authorization": f"Bearer {member_login.json()['token']}"}
+
+    first_denied = client.get(
+        "/api/member/installations",
+        params={"user_id": "owner-u2"},
+        headers=member_headers,
+    )
+    second_denied = client.get(
+        "/api/member/installations",
+        params={"user_id": "owner-u2"},
+        headers=member_headers,
+    )
+    third_denied = client.get(
+        "/api/member/installations",
+        params={"user_id": "owner-u2"},
+        headers=member_headers,
+    )
+    assert first_denied.status_code == 403
+    assert second_denied.status_code == 403
+    assert third_denied.status_code == 403
+    assert first_denied.json()["error"]["code"] == "permission_denied"
+    assert second_denied.json()["error"]["code"] == "permission_denied"
+    assert third_denied.json()["error"]["code"] == "permission_denied"
+
+    notifications = list(server.api.notifier.events)
+    owner_scope_events = [
+        item
+        for item in notifications
+        if item.channel == "admin_dm" and "event=owner_scope_denied" in item.message
+    ]
+    assert len(owner_scope_events) == 1
+    assert "path=/api/member/installations" in owner_scope_events[0].message
+    assert "count=2" in owner_scope_events[0].message
+    assert "reason=member_owner_binding_denied" in owner_scope_events[0].message
+
+    admin_login = client.post(
+        "/api/login",
+        json={"role": "admin", "password": "admin-secret"},
+    )
+    assert admin_login.status_code == 200
+    metrics_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+    metrics = client.get("/api/metrics", headers=metrics_headers)
+    assert metrics.status_code == 200
+    assert 'event="owner_scope_denied"' in metrics.text
+    assert 'path="/api/member/installations"' in metrics.text
+
+
 def test_webui_submit_package_shows_labels_and_downloads_uploaded_artifact(tmp_path):
     server = build_server(
         tmp_path,
