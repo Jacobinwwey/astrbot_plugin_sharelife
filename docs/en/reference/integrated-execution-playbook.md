@@ -44,6 +44,11 @@
 3. Audit chain adds explicit `profile_pack.public_market.snapshot_rebuilt` and `profile_pack.public_market.backup_handoff` events for operator-facing lifecycle visibility.
 4. Public-market backup manifest now includes snapshot-level pipeline summary fields (`pipeline_trace_count`, latest trace and stage events).
 
+### 1.6 Incremental progress (`2026-04-10`, readability gate pass)
+
+1. A deterministic meta-level contrast guard was added for core WebUI theme tokens (member + market critical text/background pairs).
+2. Contrast regressions on key semantic tokens now fail CI before merge.
+
 ## 2. Cross-Plan Decisions
 
 ### 2.1 Unified state vocabulary

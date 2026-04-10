@@ -44,6 +44,11 @@
 3. 監査イベントに `profile_pack.public_market.snapshot_rebuilt` と `profile_pack.public_market.backup_handoff` を追加し、運用側のライフサイクル可視性を強化しました。
 4. public-market backup manifest に snapshot 起点のトレース集計（`pipeline_trace_count`、latest trace / events）を追加しました。
 
+### 1.6 増分進捗（`2026-04-10`、可読性ガード）
+
+1. member/market の主要な文字色と背景色トークンに対するコントラスト検証を meta テストとして追加しました。
+2. 重要トークンのコントラスト劣化は CI で fail するようになりました。
+
 ## 2. 交差分析での決定
 
 ### 2.1 状態語彙の統一

@@ -44,6 +44,11 @@
 3. 审计链新增 `profile_pack.public_market.snapshot_rebuilt` 与 `profile_pack.public_market.backup_handoff` 事件，便于 operator 追踪全流程状态。
 4. 公共市场备份 manifest 新增快照级追踪摘要字段（`pipeline_trace_count`、latest trace 与阶段事件）。
 
+### 1.6 增量进展（`2026-04-10`，可读性守门）
+
+1. 新增 WebUI 关键主题色 token 的对比度守门测试（覆盖 member/market 核心文本与背景配色对）。
+2. 关键语义配色的对比度回归现在会直接在 CI 阶段阻断合并。
+
 ## 2. 两大方案交叉决策
 
 ### 2.1 统一状态词汇
