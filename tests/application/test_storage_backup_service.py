@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 import subprocess
 
 from sharelife.application.services_storage_backup import StorageBackupService
@@ -101,6 +102,58 @@ def test_storage_service_restore_prepare_commit_cancel(tmp_path):
 
     cancelled_after_commit = service.restore_cancel(restore_id=restore_id, actor_id="admin-1")
     assert cancelled_after_commit["error"] == "restore_state_invalid"
+
+
+def test_storage_service_restore_prepare_rehydrates_from_remote_when_local_artifact_missing(tmp_path, monkeypatch):
+    transferred: list[list[str]] = []
+    source_bytes = {"value": b""}
+
+    def _fake_run(command, **kwargs):
+        transferred.append(list(command))
+        if len(transferred) == 1:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="backup sync ok", stderr="")
+        if len(transferred) == 2:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="retention ok", stderr="")
+        target_path = command[3]
+        with open(target_path, "wb") as handle:
+            handle.write(source_bytes["value"])
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="restore sync ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    service = StorageBackupService(
+        state_store=InMemoryStateStore(),
+        data_root=tmp_path,
+        clock=FrozenClock(datetime(2026, 4, 4, 12, 0, tzinfo=UTC)),
+    )
+    service.set_policies(
+        {
+            "sync_remote_enabled": True,
+            "remote_required": True,
+            "encryption_required": False,
+            "rclone_binary": "rclone",
+            "rclone_remote_path": "gdrive:/sharelife-backup",
+        },
+        actor_id="admin-1",
+    )
+
+    started = service.run_backup_job(actor_id="admin-1")
+    assert "job" in started
+    artifact_path = started["job"]["artifact_path"]
+    with open(artifact_path, "rb") as handle:
+        source_bytes["value"] = handle.read()
+    assert source_bytes["value"]
+    Path(artifact_path).unlink()
+
+    prepared = service.restore_prepare(
+        artifact_ref=started["job"]["artifact_id"],
+        actor_id="admin-1",
+        note="remote restore fallback",
+    )
+    assert "error" not in prepared
+    assert prepared["restore"]["rehydrated_from_remote"] is True
+    assert prepared["restore"]["remote_restore"]["status"] == "succeeded"
+    assert Path(prepared["restore"]["artifact_path"]).exists()
+    assert any(cmd[0:2] == ["rclone", "copyto"] for cmd in transferred)
 
 
 def test_storage_service_remote_sync_reports_missing_rclone_binary(tmp_path):

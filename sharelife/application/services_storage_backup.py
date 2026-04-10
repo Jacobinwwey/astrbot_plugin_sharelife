@@ -169,6 +169,11 @@ class StorageBackupService:
         return text[-limit:]
 
     @staticmethod
+    def _safe_filename(value: Any, default: str = "backup.tar.gz") -> str:
+        text = str(value or "").strip().replace("\\", "_").replace("/", "_")
+        return text or default
+
+    @staticmethod
     def _created_day(value: Any) -> str:
         text = str(value or "").strip()
         if "T" in text:
@@ -468,18 +473,26 @@ class StorageBackupService:
             out.append(updated)
         return out
 
-    def _find_backup_artifact(self, artifact_ref: str) -> dict[str, Any] | None:
+    def _find_backup_artifact_row(
+        self,
+        artifact_ref: str,
+    ) -> tuple[list[dict[str, Any]], int, dict[str, Any] | None]:
+        rows = self._load_backup_jobs()
         normalized = str(artifact_ref or "").strip()
         if not normalized:
-            return None
-        for row in self._load_backup_jobs():
+            return rows, -1, None
+        for idx, row in enumerate(rows):
             if str(row.get("artifact_id", "")).strip() == normalized:
-                return row
+                return rows, idx, row
             if str(row.get("job_id", "")).strip() == normalized:
-                return row
+                return rows, idx, row
             if Path(str(row.get("artifact_path", "") or "")).name == normalized:
-                return row
-        return None
+                return rows, idx, row
+        return rows, -1, None
+
+    def _find_backup_artifact(self, artifact_ref: str) -> dict[str, Any] | None:
+        _, _, row = self._find_backup_artifact_row(artifact_ref)
+        return row
 
     def _validate_artifact(self, row: dict[str, Any]) -> dict[str, Any]:
         artifact_path = Path(str(row.get("artifact_path", "") or ""))
@@ -504,6 +517,88 @@ class StorageBackupService:
             "artifact_path": str(artifact_path),
             "artifact_size_bytes": int(artifact_path.stat().st_size),
             "artifact_sha256": digest,
+        }
+
+    def _restore_archive_remote(
+        self,
+        *,
+        row: dict[str, Any],
+        policies: dict[str, Any],
+    ) -> dict[str, Any]:
+        remote_sync = row.get("remote_sync", {})
+        if not isinstance(remote_sync, dict):
+            return {"status": "failed", "error": "artifact_not_found", "reason": "remote_sync_missing"}
+        if str(remote_sync.get("status", "")).strip().lower() != "succeeded":
+            return {"status": "failed", "error": "artifact_not_found", "reason": "remote_sync_unavailable"}
+
+        remote_object = str(remote_sync.get("remote_object", "") or "").strip()
+        if not remote_object:
+            return {"status": "failed", "error": "artifact_not_found", "reason": "remote_object_missing"}
+
+        artifact_path_text = str(row.get("artifact_path", "") or "").strip()
+        if artifact_path_text:
+            target_path = Path(artifact_path_text)
+        else:
+            fallback_name = self._safe_filename(row.get("artifact_name"), default="backup.tar.gz")
+            target_path = self._backup_root() / f"restore-{fallback_name}"
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        command = [
+            str(policies.get("rclone_binary", "rclone") or "rclone").strip() or "rclone",
+            "copyto",
+            remote_object,
+            str(target_path),
+        ]
+        if bool(policies.get("upload_bandwidth_limit_enabled", True)):
+            bwlimit = str(policies.get("rclone_bwlimit", "") or "").strip()
+            if not bwlimit:
+                mbps = max(1, self._safe_int(policies.get("upload_bandwidth_limit_mbps"), 10))
+                bwlimit = f"{mbps}M"
+            command.extend(["--bwlimit", bwlimit])
+
+        timeout_seconds = max(30, self._safe_int(policies.get("command_timeout_seconds"), 900))
+        started_at = time.time()
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except FileNotFoundError:
+            return {"status": "failed", "error": "remote_sync_command_not_found", "remote_object": remote_object}
+        except subprocess.TimeoutExpired:
+            return {"status": "failed", "error": "remote_sync_timeout", "remote_object": remote_object}
+        except Exception as exc:  # pragma: no cover - defensive execution guard
+            return {
+                "status": "failed",
+                "error": "remote_sync_failed",
+                "remote_object": remote_object,
+                "reason": f"{type(exc).__name__}:{exc}",
+            }
+
+        duration = round(max(0.0, time.time() - started_at), 3)
+        stdout_tail = self._tail_text(completed.stdout, self._COMMAND_OUTPUT_TAIL)
+        stderr_tail = self._tail_text(completed.stderr, self._COMMAND_OUTPUT_TAIL)
+        if int(completed.returncode) != 0:
+            return {
+                "status": "failed",
+                "error": "remote_sync_failed",
+                "remote_object": remote_object,
+                "exit_code": int(completed.returncode),
+                "duration_seconds": duration,
+                "stdout_tail": stdout_tail,
+                "stderr_tail": stderr_tail,
+            }
+        return {
+            "status": "succeeded",
+            "remote_object": remote_object,
+            "artifact_path": str(target_path),
+            "exit_code": int(completed.returncode),
+            "duration_seconds": duration,
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
         }
 
     def get_local_summary(self) -> dict[str, Any]:
@@ -754,10 +849,32 @@ class StorageBackupService:
         normalized_artifact_ref = str(artifact_ref or "").strip()
         if not normalized_artifact_ref:
             return {"error": "artifact_ref_required"}
-        artifact_job = self._find_backup_artifact(normalized_artifact_ref)
+        backup_rows, artifact_idx, artifact_job = self._find_backup_artifact_row(normalized_artifact_ref)
         if artifact_job is None:
             return {"error": "artifact_not_found", "artifact_ref": normalized_artifact_ref}
+
+        rehydrated_from_remote = False
+        remote_restore: dict[str, Any] = {}
         validated = self._validate_artifact(artifact_job)
+        if validated.get("error") == "artifact_not_found":
+            remote_restore = self._restore_archive_remote(
+                row=artifact_job,
+                policies=self._load_policies(),
+            )
+            if str(remote_restore.get("status", "")).strip().lower() != "succeeded":
+                return {
+                    "error": str(remote_restore.get("error", "artifact_not_found") or "artifact_not_found"),
+                    "artifact_ref": normalized_artifact_ref,
+                    "remote_restore": remote_restore,
+                }
+            rehydrated_from_remote = True
+            artifact_job = dict(artifact_job)
+            artifact_job["artifact_path"] = str(remote_restore.get("artifact_path", "") or artifact_job.get("artifact_path", ""))
+            artifact_job["remote_restore"] = dict(remote_restore)
+            if 0 <= artifact_idx < len(backup_rows):
+                backup_rows[artifact_idx] = artifact_job
+                self._save_backup_jobs(backup_rows)
+            validated = self._validate_artifact(artifact_job)
         if validated.get("error"):
             return validated
 
@@ -783,7 +900,10 @@ class StorageBackupService:
             "artifact_size_bytes": validated.get("artifact_size_bytes"),
             "artifact_sha256": validated.get("artifact_sha256"),
             "source_job_id": str(artifact_job.get("job_id", "") or ""),
+            "rehydrated_from_remote": rehydrated_from_remote,
         }
+        if rehydrated_from_remote:
+            job["remote_restore"] = dict(remote_restore)
         rows = self._load_restore_jobs()
         rows.append(job)
         self._save_restore_jobs(rows)
