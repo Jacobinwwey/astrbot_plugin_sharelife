@@ -71,6 +71,10 @@ Sharelife WebUI は AstrBot Dashboard に埋め込まなくても独立して動
 7. 既定レスポンスには `security_headers` が付き、`Content-Security-Policy` も含まれます。
 8. `allow_anonymous_member=true` を使う場合でも、匿名で使えるのは allowlist に載った API だけで、要求は `anonymous_member_user_id` に固定されます。
 9. 特権認証、secret 材料、backup/restore runbook は非公開 docs に残します。
+10. standalone での「ローカル AstrBot 設定取り込み」は既定で無効です（安全優先）。必要時のみ明示的に有効化してください。
+   - CLI: `python3 scripts/run_sharelife_webui_standalone.py --enable-local-astrbot-import`
+   - 環境変数: `SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`
+   - 匿名主体によるローカル取り込みを許可する場合: `--allow-anonymous-local-astrbot-import` / `SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT=1`
 
 ## 起動とルート
 

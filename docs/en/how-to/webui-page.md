@@ -71,6 +71,10 @@ Privileged moderation and operator workflows are intentionally documented in pri
 7. Default responses include `security_headers`, including `Content-Security-Policy`.
 8. If `allow_anonymous_member=true`, only the configured anonymous allowlist can run without login, and requests stay pinned to `anonymous_member_user_id`.
 9. Privileged auth procedures, secret material, and backup/restore runbooks stay in private docs.
+10. Standalone local AstrBot import is disabled by default for safer host deployments. Enable only when required:
+   - CLI: `python3 scripts/run_sharelife_webui_standalone.py --enable-local-astrbot-import`
+   - Env: `SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`
+   - Optional anonymous local import: `--allow-anonymous-local-astrbot-import` / `SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT=1`
 
 ## Start and routes
 

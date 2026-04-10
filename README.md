@@ -123,6 +123,15 @@ WebUI capability highlights:
 - Built-in profile-pack reference sample: `profile/official-starter` (`bot_profile_pack`, featured).
 - Public downloadable market packs are published under `docs/public/market/` and served on GitHub Pages after push to `main`.
 
+Standalone local AstrBot import defaults:
+- Host-local AstrBot config import is disabled by default in standalone mode.
+- Enable explicitly when needed:
+  - CLI: `--enable-local-astrbot-import`
+  - Env: `SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`
+- Optional anonymous local import (only when your deployment policy allows it):
+  - CLI: `--allow-anonymous-local-astrbot-import`
+  - Env: `SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT=1`
+
 Reference sample pack (for users/developers):
 - Exploded sample pack: `examples/profile-packs/official-starter/`
 - Manifest file: `examples/profile-packs/official-starter/manifest.json`

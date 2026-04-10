@@ -73,3 +73,6 @@ Notes:
 
 1. Plugin-install execution is disabled by default; enable it in `profile_pack.plugin_install.enabled`.
 2. Use `config.template.yaml` as the self-documented baseline for all config fields.
+3. Standalone local AstrBot import is disabled by default. Enable explicitly when needed:
+   - `python3 scripts/run_sharelife_webui_standalone.py --enable-local-astrbot-import`
+   - or `SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`

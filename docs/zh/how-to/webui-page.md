@@ -71,6 +71,10 @@ Sharelife WebUI 可以独立运行，不依赖 AstrBot Dashboard 内嵌。
 7. 默认响应会带上 `security_headers`，包括 `Content-Security-Policy`。
 8. 若设置 `allow_anonymous_member=true`，只有匿名 allowlist 中的接口可以免登录调用，且请求仍固定绑定到 `anonymous_member_user_id`。
 9. 特权鉴权、secret 材料与备份恢复手册都保留在私有文档中。
+10. standalone 模式下“导入本机 AstrBot 配置”默认关闭（更安全）。如需启用请显式打开：
+   - CLI：`python3 scripts/run_sharelife_webui_standalone.py --enable-local-astrbot-import`
+   - 环境变量：`SHARELIFE_ENABLE_LOCAL_ASTRBOT_IMPORT=1`
+   - 如需允许匿名主体触发本机导入：`--allow-anonymous-local-astrbot-import` / `SHARELIFE_ALLOW_ANONYMOUS_LOCAL_ASTRBOT_IMPORT=1`
 
 ## 启动与路由
 
