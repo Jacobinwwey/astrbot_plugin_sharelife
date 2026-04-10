@@ -1202,6 +1202,13 @@ class SharelifeWebApiV1:
             default_message="local AstrBot config imported",
         )
 
+    def member_probe_local_astrbot_config(self, user_id: str) -> WebApiResult:
+        response = self.api.member_probe_local_astrbot_config(user_id=user_id)
+        return self._from_api_error_or_ok(
+            response,
+            default_message="local AstrBot config probe completed",
+        )
+
     def member_delete_profile_pack_import(self, user_id: str, import_id: str) -> WebApiResult:
         if not import_id:
             return self._error(

@@ -79,6 +79,8 @@ const state = {
     selectedImportDraftId: "",
     uploadSelectionTree: [],
     uploadSelectedNodePath: "",
+    localAstrbotProbe: null,
+    localAstrbotProbeLoading: false,
   },
   reviewerLifecycle: {
     invites: [],
@@ -1289,9 +1291,11 @@ async function refreshCapabilities(options = {}) {
       },
       { updateScope: options.updateScope !== false },
     )
+    void refreshMemberLocalAstrbotProbe()
     return response
   }
   setCapabilities(response.data, { updateScope: options.updateScope !== false })
+  void refreshMemberLocalAstrbotProbe()
   return response
 }
 
@@ -7183,6 +7187,9 @@ function syncMemberLocalImportEntrySurface() {
         "Local AstrBot import is disabled by deployment policy.",
       )
     }
+    state.memberPanel.localAstrbotProbe = null
+    state.memberPanel.localAstrbotProbeLoading = false
+    syncMemberLocalImportProbeSurface()
     return
   }
   importButton.disabled = false
@@ -7191,6 +7198,99 @@ function syncMemberLocalImportEntrySurface() {
     hintNode.hidden = true
     hintNode.classList.add("hidden")
   }
+  syncMemberLocalImportProbeSurface()
+}
+
+function memberLocalImportProbeSourceLabel(source) {
+  const normalized = String(source || "").trim().toLowerCase()
+  if (!normalized) {
+    return i18nMessage("member.imports.local_probe_source.unknown", "unknown source")
+  }
+  return i18nMessage(
+    `member.imports.local_probe_source.${normalized}`,
+    normalized,
+  )
+}
+
+function syncMemberLocalImportProbeSurface() {
+  const hintNode = byId("memberLocalImportProbeHint")
+  if (!hintNode) return
+  const supported = state.runtimeFeatures.supportsLocalAstrbotImport !== false
+  const allowed = hasCapability("member.profile_pack.imports.local_astrbot")
+  if (!supported || !allowed) {
+    hintNode.hidden = true
+    hintNode.classList.add("hidden")
+    hintNode.textContent = ""
+    return
+  }
+  if (state.memberPanel.localAstrbotProbeLoading) {
+    hintNode.hidden = false
+    hintNode.classList.remove("hidden")
+    hintNode.textContent = i18nMessage(
+      "member.imports.local_probe_loading",
+      "Scanning local AstrBot config paths on this host...",
+    )
+    return
+  }
+  const probe = state.memberPanel.localAstrbotProbe
+  if (!probe || typeof probe !== "object") {
+    hintNode.hidden = true
+    hintNode.classList.add("hidden")
+    hintNode.textContent = ""
+    return
+  }
+  const detected = probe.detected === true
+  const checkedCount = Number(probe.checked_candidate_count || 0)
+  if (detected) {
+    hintNode.hidden = false
+    hintNode.classList.remove("hidden")
+    hintNode.textContent = i18nFormat(
+      "member.imports.local_probe_detected",
+      "Detected a local AstrBot config via {source}. Candidates scanned: {count}.",
+      {
+        source: memberLocalImportProbeSourceLabel(probe.matched_source),
+        count: Number.isFinite(checkedCount) ? String(Math.max(0, Math.floor(checkedCount))) : "0",
+      },
+    )
+    return
+  }
+  hintNode.hidden = false
+  hintNode.classList.remove("hidden")
+  hintNode.textContent = i18nFormat(
+    "member.imports.local_probe_missing",
+    "No local AstrBot config detected yet (scanned {count} candidates). Set {config_env} or {roots_env} if needed.",
+    {
+      count: Number.isFinite(checkedCount) ? String(Math.max(0, Math.floor(checkedCount))) : "0",
+      config_env: "SHARELIFE_ASTRBOT_CONFIG_PATH",
+      roots_env: "SHARELIFE_ASTRBOT_SEARCH_ROOTS",
+    },
+  )
+}
+
+async function refreshMemberLocalAstrbotProbe() {
+  const supported = state.runtimeFeatures.supportsLocalAstrbotImport !== false
+  const allowed = hasCapability("member.profile_pack.imports.local_astrbot")
+  if (!supported || !allowed) {
+    state.memberPanel.localAstrbotProbe = null
+    state.memberPanel.localAstrbotProbeLoading = false
+    syncMemberLocalImportProbeSurface()
+    return null
+  }
+  state.memberPanel.localAstrbotProbeLoading = true
+  syncMemberLocalImportProbeSurface()
+  const a = actor()
+  const response = await api(
+    `/api/member/profile-pack/imports/local-astrbot/probe${queryString({ user_id: a.user_id })}`,
+  )
+  render("member_profile_pack_import_local_astrbot_probe", response)
+  state.memberPanel.localAstrbotProbeLoading = false
+  if (!workspaceRequestFailed(response)) {
+    state.memberPanel.localAstrbotProbe = apiData(response)
+  } else {
+    state.memberPanel.localAstrbotProbe = null
+  }
+  syncMemberLocalImportProbeSurface()
+  return response
 }
 
 function selectedMemberImportDraft() {
@@ -7991,6 +8091,9 @@ async function importMemberLocalAstrbotConfig() {
     if (!workspaceRequestFailed(response)) {
       const data = apiData(response)
       const importId = String(data.import_id || "").trim()
+      if (data && data.probe && typeof data.probe === "object") {
+        state.memberPanel.localAstrbotProbe = data.probe
+      }
       await loadMemberProfilePackImports({ selectedImportId: importId })
       if (importId) {
         openMemberProfilePackUploadModalById(importId)
@@ -8005,6 +8108,11 @@ async function importMemberLocalAstrbotConfig() {
     } else {
       const errorCode = responseErrorCode(response)
       const errorMessage = errorMessageForCollection("profilePackSubmissions", response)
+      const errorData = apiData(response)
+      if (errorData && errorData.probe && typeof errorData.probe === "object") {
+        state.memberPanel.localAstrbotProbe = errorData.probe
+        syncMemberLocalImportProbeSurface()
+      }
       setMemberImportDraftState(
         "error",
         errorCode === "astrbot_local_config_not_found"
@@ -8025,6 +8133,7 @@ async function importMemberLocalAstrbotConfig() {
       trigger.setAttribute("aria-busy", "false")
     }
   }
+  void refreshMemberLocalAstrbotProbe()
   return response
 }
 

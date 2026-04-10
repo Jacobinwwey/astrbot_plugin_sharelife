@@ -983,6 +983,96 @@ def test_webui_ui_capabilities_route_surfaces_anonymous_local_astrbot_import_fea
     assert "member.profile_pack.imports.delete" not in disabled_operations
 
 
+def test_webui_anonymous_local_astrbot_probe_route_respects_feature_and_auth_settings(tmp_path, monkeypatch):
+    enabled_server = build_server(
+        tmp_path / "enabled",
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": True,
+                    "allow_anonymous_local_astrbot_import": True,
+                },
+            }
+        },
+    )
+    local_config = tmp_path / "enabled" / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+    enabled_client = TestClient(enabled_server.app)
+
+    enabled_probe = enabled_client.get(
+        "/api/member/profile-pack/imports/local-astrbot/probe",
+        params={"user_id": "webui-user"},
+    )
+    assert enabled_probe.status_code == 200
+    assert enabled_probe.json()["ok"] is True
+    assert enabled_probe.json()["data"]["detected"] is True
+    assert enabled_probe.json()["data"]["matched_source"] == "config_path_file"
+
+    disabled_feature_server = build_server(
+        tmp_path / "disabled-feature",
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": False,
+                    "allow_anonymous_local_astrbot_import": True,
+                },
+            }
+        },
+    )
+    disabled_feature_client = TestClient(disabled_feature_server.app)
+    disabled_feature_login = disabled_feature_client.post(
+        "/api/login",
+        json={"role": "member", "password": "member-secret", "user_id": "member-a"},
+    )
+    assert disabled_feature_login.status_code == 200
+    disabled_feature_headers = {
+        "Authorization": f"Bearer {disabled_feature_login.json()['token']}",
+    }
+    disabled_feature_probe = disabled_feature_client.get(
+        "/api/member/profile-pack/imports/local-astrbot/probe",
+        params={"user_id": "member-a"},
+        headers=disabled_feature_headers,
+    )
+    assert disabled_feature_probe.status_code == 404
+    assert disabled_feature_probe.json()["error"]["code"] == "feature_disabled"
+
+    disabled_anonymous_server = build_server(
+        tmp_path / "disabled-anonymous",
+        config={
+            "webui": {
+                "auth": {
+                    "member_password": "member-secret",
+                    "admin_password": "admin-secret",
+                    "allow_anonymous_member": True,
+                },
+                "features": {
+                    "local_astrbot_import": True,
+                    "allow_anonymous_local_astrbot_import": False,
+                },
+            }
+        },
+    )
+    disabled_anonymous_client = TestClient(disabled_anonymous_server.app)
+    disabled_anonymous_probe = disabled_anonymous_client.get(
+        "/api/member/profile-pack/imports/local-astrbot/probe",
+        params={"user_id": "webui-user"},
+    )
+    assert disabled_anonymous_probe.status_code == 401
+    assert disabled_anonymous_probe.json()["error"]["code"] == "unauthorized"
+
+
 def test_webui_anonymous_local_astrbot_import_isolated_by_cookie_subject(tmp_path, monkeypatch):
     server = build_server(
         tmp_path,

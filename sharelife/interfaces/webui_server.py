@@ -1504,6 +1504,11 @@ class SharelifeWebUIServer:
         normalized_method = str(method or "GET").strip().upper() or "GET"
         if self._runtime_feature_payload()["allow_anonymous_local_astrbot_import"]:
             if (
+                normalized_method == "GET"
+                and normalized_path == "/api/member/profile-pack/imports/local-astrbot/probe"
+            ):
+                return True
+            if (
                 normalized_method == "POST"
                 and normalized_path == "/api/member/profile-pack/imports/local-astrbot"
             ):
@@ -2773,6 +2778,27 @@ class SharelifeWebUIServer:
                 return denied
             return self._response(
                 self.api.member_import_local_astrbot_config(user_id=user_id)
+            )
+
+        @self.app.get("/api/member/profile-pack/imports/local-astrbot/probe")
+        async def member_profile_pack_imports_local_astrbot_probe(
+            request: Request,
+            user_id: str = "",
+        ):
+            if not self._local_astrbot_import_enabled():
+                return self._error_response(
+                    code="feature_disabled",
+                    message="local AstrBot import is disabled",
+                    status_code=404,
+                )
+            normalized_user_id, denied = self._request_member_user_id(
+                request,
+                query_user_id=user_id,
+            )
+            if denied is not None or normalized_user_id is None:
+                return denied
+            return self._response(
+                self.api.member_probe_local_astrbot_config(user_id=normalized_user_id)
             )
 
         @self.app.get("/api/member/profile-pack/imports")

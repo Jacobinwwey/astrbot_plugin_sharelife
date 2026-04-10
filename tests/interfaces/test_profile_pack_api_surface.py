@@ -1369,6 +1369,66 @@ def test_api_member_profile_pack_import_detects_local_astrbot_config(tmp_path, m
     assert web_imported.ok is True
     assert web_imported.data["compatibility"] == "degraded"
     assert "astrbot_raw_import_converted" in web_imported.data["compatibility_issues"]
+    assert web_imported.data["probe"]["detected"] is True
+    assert web_imported.data["probe"]["matched_source"] == "config_path_file"
+
+
+def test_api_member_local_astrbot_probe_returns_safe_detection_metadata(tmp_path, monkeypatch):
+    api, web_api = build_interfaces(tmp_path)
+    local_config = tmp_path / "astrbot-data" / "cmd_config.json"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_SEARCH_ROOTS", raising=False)
+    monkeypatch.delenv("SHARELIFE_ASTRBOT_HOME", raising=False)
+
+    probe = api.member_probe_local_astrbot_config(user_id="member-1")
+    assert probe["detected"] is True
+    assert probe["filename"] == "cmd_config.json"
+    assert probe["matched_source"] == "config_path_file"
+    assert probe["checked_candidate_count"] >= 1
+    assert probe["path_list_separator"] == os.pathsep
+    assert "SHARELIFE_ASTRBOT_CONFIG_PATH" in probe["hint_env_keys"]
+    assert str(local_config) not in json.dumps(probe, ensure_ascii=False)
+
+    web_probe = web_api.member_probe_local_astrbot_config(user_id="member-1")
+    assert web_probe.ok is True
+    assert web_probe.data["detected"] is True
+    assert web_probe.data["matched_source"] == "config_path_file"
+
+
+def test_api_member_local_astrbot_import_not_found_returns_probe_payload(tmp_path, monkeypatch):
+    api, web_api = build_interfaces(tmp_path)
+    probe_payload = {
+        "detected": False,
+        "filename": "",
+        "matched_source": "",
+        "checked_candidate_count": 7,
+        "hint_env_keys": [
+            "SHARELIFE_ASTRBOT_CONFIG_PATH",
+            "SHARELIFE_ASTRBOT_SEARCH_ROOTS",
+            "SHARELIFE_ASTRBOT_HOME",
+        ],
+        "path_list_separator": os.pathsep,
+        "default_root_count": 16,
+    }
+    monkeypatch.setattr(
+        SharelifeApiV1,
+        "_probe_local_astrbot_config_path",
+        classmethod(lambda cls: (None, dict(probe_payload))),
+    )
+
+    imported = api.member_import_local_astrbot_config(user_id="member-1")
+    assert imported["error"] == "astrbot_local_config_not_found"
+    assert imported["probe"]["detected"] is False
+    assert imported["probe"]["filename"] == ""
+    assert imported["probe"]["checked_candidate_count"] == 7
+    assert imported["probe"]["path_list_separator"] == os.pathsep
+
+    web_imported = web_api.member_import_local_astrbot_config(user_id="member-1")
+    assert web_imported.ok is False
+    assert web_imported.error_code == "astrbot_local_config_not_found"
+    assert web_imported.data["probe"]["detected"] is False
 
 
 def test_api_detect_local_astrbot_config_path_accepts_directory_hint(tmp_path, monkeypatch):

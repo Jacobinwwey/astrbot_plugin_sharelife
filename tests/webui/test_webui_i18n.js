@@ -268,6 +268,18 @@ test("getMessage returns locale-specific translation with fallback", () => {
     "当前部署策略未启用“导入本机 AstrBot 配置”。",
   )
   assert.equal(
+    getMessage("en-US", "member.imports.local_probe_loading", ""),
+    "Scanning local AstrBot config paths on this host...",
+  )
+  assert.equal(
+    getMessage("zh-CN", "member.imports.local_probe_source.config_path_file", ""),
+    "显式配置文件路径",
+  )
+  assert.equal(
+    getMessage("ja-JP", "member.imports.local_probe_source.default_roots", ""),
+    "ホスト既定ルート",
+  )
+  assert.equal(
     getMessage("zh-CN", "button.review_imported_configs", ""),
     "审阅已导入配置包",
   )
