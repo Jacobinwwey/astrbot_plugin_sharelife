@@ -334,6 +334,10 @@ function consoleScopeDomHelpers() {
   return globalThis.SharelifeConsoleScopeDomRuntime || null
 }
 
+function memberSurfacePruneHelpers() {
+  return globalThis.SharelifeMemberSurfacePrune || null
+}
+
 function marketCardHelpers() {
   return globalThis.SharelifeMarketCards || null
 }
@@ -978,6 +982,7 @@ function pruneMemberPrivilegedDom() {
     node.parentNode.removeChild(node)
   })
 
+  const pruneHelper = memberSurfacePruneHelpers()
   const optionalNoiseIds = [
     "section-preferences",
     "section-risk-glossary",
@@ -985,34 +990,47 @@ function pruneMemberPrivilegedDom() {
     "section-storage-backup",
     "section-retry-queue",
   ]
-  optionalNoiseIds.forEach((id) => {
-    const node = byId(id)
-    if (!node || !node.parentNode) return
-    node.parentNode.removeChild(node)
-  })
+  if (pruneHelper && pruneHelper.removeNodesByIds) {
+    const sections = pruneHelper.sectionIds ? pruneHelper.sectionIds() : optionalNoiseIds
+    pruneHelper.removeNodesByIds(byId, sections)
+  } else {
+    optionalNoiseIds.forEach((id) => {
+      const node = byId(id)
+      if (!node || !node.parentNode) return
+      node.parentNode.removeChild(node)
+    })
+  }
 
   const authRole = byId("authRole")
   if (authRole) {
-    Array.from(authRole.options || []).forEach((option) => {
-      const value = String(option && option.value || "").trim().toLowerCase()
-      if (value !== "member") {
-        option.remove()
-      }
-    })
-    authRole.value = "member"
-    authRole.disabled = true
+    if (pruneHelper && pruneHelper.enforceMemberOnlySelect) {
+      pruneHelper.enforceMemberOnlySelect(authRole)
+    } else {
+      Array.from(authRole.options || []).forEach((option) => {
+        const value = String(option && option.value || "").trim().toLowerCase()
+        if (value !== "member") {
+          option.remove()
+        }
+      })
+      authRole.value = "member"
+      authRole.disabled = true
+    }
   }
 
   const roleNode = byId("role")
   if (roleNode) {
-    Array.from(roleNode.options || []).forEach((option) => {
-      const value = String(option && option.value || "").trim().toLowerCase()
-      if (value !== "member") {
-        option.remove()
-      }
-    })
-    roleNode.value = "member"
-    roleNode.disabled = true
+    if (pruneHelper && pruneHelper.enforceMemberOnlySelect) {
+      pruneHelper.enforceMemberOnlySelect(roleNode)
+    } else {
+      Array.from(roleNode.options || []).forEach((option) => {
+        const value = String(option && option.value || "").trim().toLowerCase()
+        if (value !== "member") {
+          option.remove()
+        }
+      })
+      roleNode.value = "member"
+      roleNode.disabled = true
+    }
   }
 
   const reviewerAuthFields = byId("reviewerAuthFields")
@@ -1020,11 +1038,18 @@ function pruneMemberPrivilegedDom() {
     reviewerAuthFields.parentNode.removeChild(reviewerAuthFields)
   }
 
-  ;["reviewerConsoleLink", "adminConsoleLink", "fullConsoleLink"].forEach((id) => {
-    const node = byId(id)
-    if (!node || !node.parentNode) return
-    node.parentNode.removeChild(node)
-  })
+  const linkIdsToRemove = pruneHelper && pruneHelper.consoleLinkIds
+    ? pruneHelper.consoleLinkIds()
+    : ["reviewerConsoleLink", "adminConsoleLink", "fullConsoleLink"]
+  if (pruneHelper && pruneHelper.removeNodesByIds) {
+    pruneHelper.removeNodesByIds(byId, linkIdsToRemove)
+  } else {
+    linkIdsToRemove.forEach((id) => {
+      const node = byId(id)
+      if (!node || !node.parentNode) return
+      node.parentNode.removeChild(node)
+    })
+  }
 
   if (document && document.body) {
     document.body.setAttribute("data-member-surface", "minimal")
