@@ -411,6 +411,9 @@ def test_profile_pack_service_extracts_persona_and_subagent_sections_from_astrbo
                         "runtime": {
                             "limits": {
                                 "token_budget": 2048,
+                                "completion": {
+                                    "max_tokens": 1024,
+                                },
                             },
                         },
                     },
@@ -475,6 +478,9 @@ def test_profile_pack_service_exposes_selection_tree_for_astrbot_import(tmp_path
                         "runtime": {
                             "limits": {
                                 "token_budget": 2048,
+                                "completion": {
+                                    "max_tokens": 1024,
+                                },
                             },
                         },
                     },
@@ -527,6 +533,9 @@ def test_profile_pack_service_exposes_selection_tree_for_astrbot_import(tmp_path
     persona_pool_paths = {child["path"] for child in persona_pool_node["children"]}
     assert "personas.runtime.persona_pool[0]" in persona_pool_paths
     assert "personas.runtime.persona_pool[1]" in persona_pool_paths
+    persona_pool_labels = {child["label"] for child in persona_pool_node["children"]}
+    assert "analyst" in persona_pool_labels
+    assert "helper" in persona_pool_labels
 
     entries_node = next(item for item in personas_section["items"] if item["path"] == "personas.entries")
     entry_paths = {child["path"] for child in entries_node["children"]}
@@ -578,6 +587,14 @@ def test_profile_pack_service_exposes_selection_tree_for_astrbot_import(tmp_path
     )
     limits_paths = {child["path"] for child in limits_node["children"]}
     assert "environment_manifest.subagent_orchestrator.agents[0].runtime.limits.token_budget" in limits_paths
+    assert "environment_manifest.subagent_orchestrator.agents[0].runtime.limits.completion" in limits_paths
+    completion_node = next(
+        item
+        for item in limits_node["children"]
+        if item["path"] == "environment_manifest.subagent_orchestrator.agents[0].runtime.limits.completion"
+    )
+    completion_paths = {child["path"] for child in completion_node["children"]}
+    assert "environment_manifest.subagent_orchestrator.agents[0].runtime.limits.completion.max_tokens" in completion_paths
 
     platform_node = next(item for item in env_section["items"] if item["path"] == "environment_manifest.platform")
     platform_paths = {child["path"] for child in platform_node["children"]}
@@ -604,6 +621,11 @@ def test_profile_pack_service_exposes_selection_tree_for_astrbot_import(tmp_path
     )
     tavily_paths = {child["path"] for child in tavily_node["children"]}
     assert "astrbot_core.provider_settings.websearch_tavily_key[0]" in tavily_paths
+
+    plugins_section = next(item for item in selection_tree if item["name"] == "plugins")
+    plugin_labels = {node["label"] for node in plugins_section["items"]}
+    assert "sharelife" in plugin_labels
+    assert "community_tools" in plugin_labels
 
 
 def test_profile_pack_service_refreshes_local_astrbot_import_without_duplicate_drafts(tmp_path):

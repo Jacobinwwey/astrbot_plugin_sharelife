@@ -1970,6 +1970,10 @@ tr:last-child td {
   padding: 1.5rem 1rem 1rem;
 }
 
+.modal-shell-contained {
+  overflow: hidden;
+}
+
 body.modal-scroll-locked {
   overflow: hidden;
   overscroll-behavior: none;
@@ -2279,6 +2283,13 @@ body.modal-scroll-locked {
 .member-upload-tree-select:focus-visible .profile-pack-section-title {
   color: #1d4ed8;
   outline: none;
+}
+
+.member-upload-tree-select .profile-pack-section-title,
+.member-upload-tree-select .profile-pack-section-description {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .member-upload-tree-node {

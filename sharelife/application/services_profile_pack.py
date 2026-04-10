@@ -45,7 +45,7 @@ PROFILE_PACK_SUBMISSION_APPROVED = "approved"
 PROFILE_PACK_SUBMISSION_REJECTED = "rejected"
 PROFILE_PACK_SUBMISSION_REPLACED = "replaced"
 PROFILE_PACK_SUBMISSION_WITHDRAWN = "withdrawn"
-SELECTION_TREE_MAX_DEPTH = 3
+SELECTION_TREE_MAX_DEPTH = 4
 
 
 @dataclass(slots=True)
@@ -1463,10 +1463,16 @@ class ProfilePackService:
     @staticmethod
     def _list_item_label(item: Any, index: int, *, fallback_prefix: str) -> str:
         if isinstance(item, dict):
-            for key in ("name", "id", "type"):
+            for key in ("name", "id", "type", "plugin_id", "slug", "role"):
                 text = str(item.get(key, "") or "").strip()
                 if text:
                     return text
+        if isinstance(item, str):
+            text = str(item or "").strip()
+            if text:
+                return text if len(text) <= 48 else f"{text[:45]}..."
+        if isinstance(item, (bool, int, float)):
+            return str(item)
         return f"{fallback_prefix} #{index + 1}"
 
     def profile_pack_plugin_install_plan(self, import_id: str) -> dict[str, Any]:

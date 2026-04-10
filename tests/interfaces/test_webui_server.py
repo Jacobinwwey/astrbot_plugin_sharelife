@@ -1820,6 +1820,7 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert 'for="memberImportAstrbotConfigFile"' in member_page.text
     assert 'id="memberImportDraftList"' in member_page.text
     assert 'id="memberProfilePackUploadModal"' in member_page.text
+    assert 'id="memberProfilePackUploadModal" class="modal-shell modal-shell-contained hidden"' in member_page.text
     assert 'id="memberUploadDetailSectionList"' in member_page.text
     assert 'id="btnMemberProfilePackUploadDelete"' in member_page.text
     assert 'id="reviewerConsoleLink"' not in member_page.text
