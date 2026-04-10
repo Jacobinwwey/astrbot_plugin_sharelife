@@ -21,8 +21,14 @@ def test_member_upload_detail_modal_uses_master_detail_layout() -> None:
     assert ".member-upload-inspector-pane" in css
     assert ".member-upload-inspector-preview" in css
     assert ".modal-shell" in css
+    assert ".modal-panel-glass" in css
     assert "overflow: auto;" in css
     assert "overscroll-behavior: contain;" in css
+    assert "grid-template-rows: auto minmax(0, 1fr) auto;" in css
+    assert ".member-upload-review-shell" in css
+    assert "height: 100%;" in css
+    assert "overflow: hidden;" in css
+    assert "grid-template-rows: auto auto minmax(0, 1fr);" in css
     assert "body.modal-scroll-locked" in css
     assert ".profile-pack-section-title" in css
     assert ".profile-pack-section-description" in css
