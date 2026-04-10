@@ -4837,6 +4837,19 @@ function formatAuditActionCounts(rows, limit = 3) {
   return items.slice(0, limit).map((item) => `${storageValueText(item.action)} x${Number(item.count || 0)}`).join(", ")
 }
 
+function normalizeAuditFilters(data) {
+  const filters = data && typeof data === "object" && data.filters && typeof data.filters === "object"
+    ? data.filters
+    : {}
+  return {
+    lifecycleOnly: Boolean(filters.lifecycle_only),
+    reviewerId: storageValueText(filters.reviewer_id, "-"),
+    deviceId: storageValueText(filters.device_id, "-"),
+    actionPrefix: storageValueText(filters.action_prefix, "-"),
+    inspectLimit: Number(filters.inspect_limit || 0) > 0 ? Number(filters.inspect_limit || 0) : 0,
+  }
+}
+
 function buildAuditSummaryText(data) {
   const summary = data && typeof data === "object" && data.summary && typeof data.summary === "object"
     ? data.summary
@@ -4853,6 +4866,20 @@ function buildAuditSummaryText(data) {
       last: storageValueText(summary.last_event_at),
     }),
   ]
+  const filters = normalizeAuditFilters(data)
+  lines.push(
+    i18nFormat(
+      "audit.output.summary.filters",
+      "Filters: lifecycle_only={lifecycle_only} | reviewer={reviewer} | device={device} | action_prefix={action_prefix} | inspect_limit={inspect_limit}",
+      {
+        lifecycle_only: filters.lifecycleOnly ? "true" : "false",
+        reviewer: filters.reviewerId,
+        device: filters.deviceId,
+        action_prefix: filters.actionPrefix,
+        inspect_limit: filters.inspectLimit > 0 ? String(filters.inspectLimit) : "-",
+      },
+    ),
+  )
 
   const groups = [
     ["audit.output.summary.actions", "Top Actions", Array.isArray(summary.actions) ? summary.actions : [], (item) => `${storageValueText(item.action)} | count=${Number(item.count || 0)} | last=${storageValueText(item.last_event_at)}`],
@@ -9629,9 +9656,17 @@ function bindButtons() {
 
   byId("btnAudit").addEventListener("click", async () => {
     const a = actor()
-    const response = await api(`/api/admin/audit${queryString({
+    const auditParams = {
       role: a.role,
-      limit: Number(byId("auditLimit").value || 20)
+      limit: readIntegerField("auditLimit", 20, 1),
+      lifecycle_only: readCheckboxField("auditLifecycleOnly", false),
+      reviewer_id: readTextField("auditReviewerId", ""),
+      device_id: readTextField("auditDeviceId", ""),
+      action_prefix: readTextField("auditActionPrefix", ""),
+      inspect_limit: readIntegerField("auditInspectLimit", 1000, 1),
+    }
+    const response = await api(`/api/admin/audit${queryString({
+      ...auditParams,
     })}`)
     render("admin_audit", response)
     const data = apiData(response)

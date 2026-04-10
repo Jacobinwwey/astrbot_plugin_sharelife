@@ -1869,6 +1869,11 @@ def test_webui_static_page_exposes_compare_and_filter_controls(tmp_path):
     assert 'id="profilePackSubmissionTable"' in page_text
     assert 'id="section-storage-backup"' in page_text
     assert 'id="btnStorageSummary"' in page_text
+    assert 'id="auditLifecycleOnly"' in page_text
+    assert 'id="auditReviewerId"' in page_text
+    assert 'id="auditDeviceId"' in page_text
+    assert 'id="auditActionPrefix"' in page_text
+    assert 'id="auditInspectLimit"' in page_text
     assert 'id="btnStoragePoliciesGet"' in page_text
     assert 'id="btnStoragePoliciesSet"' in page_text
     assert 'id="btnStorageRunBackup"' in page_text
