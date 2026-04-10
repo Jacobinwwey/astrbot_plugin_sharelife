@@ -2314,6 +2314,54 @@ def test_webui_template_submit_supports_idempotency_header_replay(tmp_path):
     assert len(listed.json()["data"]["submissions"]) == 1
 
 
+def test_webui_template_submit_supports_x_idempotency_header_replay(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    first = client.post(
+        "/api/templates/submit",
+        headers={"X-Idempotency-Key": "member-upload-retry-x-1"},
+        json={
+            "user_id": "u1",
+            "template_id": "community/basic",
+            "version": "1.0.0",
+        },
+    )
+    assert first.status_code == 200
+    assert first.json()["data"]["upload_options"]["idempotency_key"] == "member-upload-retry-x-1"
+
+    second = client.post(
+        "/api/templates/submit",
+        headers={"X-Idempotency-Key": "member-upload-retry-x-1"},
+        json={
+            "user_id": "u1",
+            "template_id": "community/basic",
+            "version": "1.0.0",
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["data"]["submission_id"] == first.json()["data"]["submission_id"]
+    assert second.json()["data"]["idempotent_replay"] is True
+
+
+def test_webui_template_submit_preserves_payload_idempotency_key_when_header_present(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    submitted = client.post(
+        "/api/templates/submit",
+        headers={"Idempotency-Key": "member-upload-header-key"},
+        json={
+            "user_id": "u1",
+            "template_id": "community/basic",
+            "version": "1.0.0",
+            "upload_options": {"idempotency_key": "member-upload-payload-key"},
+        },
+    )
+    assert submitted.status_code == 200
+    assert submitted.json()["data"]["upload_options"]["idempotency_key"] == "member-upload-payload-key"
+
+
 def test_webui_template_submit_rejects_payload_over_limit(tmp_path):
     server = build_server(tmp_path)
     assert server.api.api.package_service is not None
@@ -3505,6 +3553,69 @@ def test_webui_profile_pack_submit_supports_idempotency_header_replay(tmp_path):
     assert second.status_code == 200
     assert second.json()["data"]["submission_id"] == first.json()["data"]["submission_id"]
     assert second.json()["data"]["idempotent_replay"] is True
+
+
+def test_webui_profile_pack_submit_supports_x_idempotency_header_replay(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/community-header-idempotent-x",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    first = client.post(
+        "/api/profile-pack/submit",
+        headers={"X-Idempotency-Key": "profile-pack-header-key-x-1"},
+        json={"user_id": "owner-u1", "artifact_id": artifact_id},
+    )
+    assert first.status_code == 200
+    assert first.json()["data"]["submit_options"]["idempotency_key"] == "profile-pack-header-key-x-1"
+
+    second = client.post(
+        "/api/profile-pack/submit",
+        headers={"X-Idempotency-Key": "profile-pack-header-key-x-1"},
+        json={"user_id": "owner-u1", "artifact_id": artifact_id},
+    )
+    assert second.status_code == 200
+    assert second.json()["data"]["submission_id"] == first.json()["data"]["submission_id"]
+    assert second.json()["data"]["idempotent_replay"] is True
+
+
+def test_webui_profile_pack_submit_preserves_payload_idempotency_key_when_header_present(tmp_path):
+    server = build_server(tmp_path)
+    client = TestClient(server.app)
+
+    exported = client.post(
+        "/api/admin/profile-pack/export",
+        json={
+            "role": "admin",
+            "pack_id": "profile/community-header-idempotent-payload",
+            "version": "1.0.0",
+            "redaction_mode": "exclude_secrets",
+        },
+    )
+    assert exported.status_code == 200
+    artifact_id = exported.json()["data"]["artifact_id"]
+
+    submitted = client.post(
+        "/api/profile-pack/submit",
+        headers={"Idempotency-Key": "profile-pack-header-key-payload"},
+        json={
+            "user_id": "owner-u1",
+            "artifact_id": artifact_id,
+            "submit_options": {"idempotency_key": "profile-pack-payload-key"},
+        },
+    )
+    assert submitted.status_code == 200
+    assert submitted.json()["data"]["submit_options"]["idempotency_key"] == "profile-pack-payload-key"
 
 
 def test_webui_auth_rejects_query_token_by_default(tmp_path):

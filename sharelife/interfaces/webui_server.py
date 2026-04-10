@@ -1373,6 +1373,46 @@ class SharelifeWebUIServer:
         return session_id or "webui-session"
 
     @staticmethod
+    def _request_idempotency_key(request: Request) -> str:
+        return str(
+            request.headers.get("idempotency-key")
+            or request.headers.get("x-idempotency-key")
+            or "",
+        ).strip()
+
+    @staticmethod
+    def _payload_options(payload: dict[str, Any], *, key: str) -> dict[str, Any] | None:
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+        return None
+
+    @staticmethod
+    def _options_with_idempotency_key(
+        options: dict[str, Any] | None,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return options
+        merged = dict(options or {})
+        merged.setdefault("idempotency_key", key)
+        return merged
+
+    def _request_payload_options_with_idempotency(
+        self,
+        request: Request,
+        *,
+        payload: dict[str, Any],
+        key: str,
+    ) -> dict[str, Any] | None:
+        return self._options_with_idempotency_key(
+            self._payload_options(payload, key=key),
+            idempotency_key=self._request_idempotency_key(request),
+        )
+
+    @staticmethod
     def _admin_id(payload: dict[str, Any]) -> str:
         admin_id = str(payload.get("admin_id", "webui-admin") or "webui-admin").strip()
         return admin_id or "webui-admin"
@@ -2389,19 +2429,11 @@ class SharelifeWebUIServer:
                 )
             package_name = str(payload.get("package_name", "") or "").strip()
             package_base64 = str(payload.get("package_base64", "") or "").strip()
-            upload_options = (
-                payload.get("upload_options")
-                if isinstance(payload.get("upload_options"), dict)
-                else None
+            upload_options = self._request_payload_options_with_idempotency(
+                request,
+                payload=payload,
+                key="upload_options",
             )
-            header_idempotency_key = str(
-                request.headers.get("idempotency-key")
-                or request.headers.get("x-idempotency-key")
-                or "",
-            ).strip()
-            if header_idempotency_key:
-                upload_options = dict(upload_options or {})
-                upload_options.setdefault("idempotency_key", header_idempotency_key)
             user_id, denied = self._request_member_user_id(request, payload=payload)
             if denied is not None or user_id is None:
                 return denied
@@ -2644,15 +2676,10 @@ class SharelifeWebUIServer:
             )
             if denied is not None or normalized_user_id is None:
                 return denied
-            idempotency_key = str(
-                request.headers.get("idempotency-key")
-                or request.headers.get("x-idempotency-key")
-                or "",
-            ).strip()
             result = self.api.member_get_submission_package(
                 user_id=normalized_user_id,
                 submission_id=submission_id,
-                idempotency_key=idempotency_key,
+                idempotency_key=self._request_idempotency_key(request),
             )
             if not result.ok:
                 return self._response(result)
@@ -2725,19 +2752,11 @@ class SharelifeWebUIServer:
 
         @self.app.post("/api/profile-pack/submit")
         async def submit_profile_pack(request: Request, payload: dict[str, Any]):
-            submit_options = (
-                payload.get("submit_options")
-                if isinstance(payload.get("submit_options"), dict)
-                else None
+            submit_options = self._request_payload_options_with_idempotency(
+                request,
+                payload=payload,
+                key="submit_options",
             )
-            header_idempotency_key = str(
-                request.headers.get("idempotency-key")
-                or request.headers.get("x-idempotency-key")
-                or "",
-            ).strip()
-            if header_idempotency_key:
-                submit_options = dict(submit_options or {})
-                submit_options.setdefault("idempotency_key", header_idempotency_key)
             user_id, denied = self._request_member_user_id(request, payload=payload)
             if denied is not None or user_id is None:
                 return denied
