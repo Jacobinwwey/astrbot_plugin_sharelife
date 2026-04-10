@@ -27,6 +27,11 @@ from ..application.services_reviewer_auth import ReviewerAuthService
 from ..application.services_storage_backup import StorageBackupService
 from ..application.services_transfer_jobs import TransferJob, TransferJobService
 from ..application.services_trial_request import TrialRequestService
+from ..domain.option_contracts import (
+    normalize_install_options as normalize_install_option_contract,
+    normalize_profile_pack_submit_options as normalize_profile_pack_submit_option_contract,
+    normalize_upload_options as normalize_upload_option_contract,
+)
 
 
 class SharelifeApiV1:
@@ -3376,100 +3381,23 @@ class SharelifeApiV1:
             detail=detail or {},
         )
 
-    @staticmethod
-    def _as_bool(value: object, default: bool = False) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"1", "true", "yes", "on"}:
-                return True
-            if normalized in {"0", "false", "no", "off"}:
-                return False
-        return default
-
-    @staticmethod
-    def _normalize_string_list(value: object, *, max_items: int = 256) -> list[str]:
-        raw_items: list[object]
-        if isinstance(value, str):
-            raw_items = [item for item in value.split(",")]
-        elif isinstance(value, (list, tuple, set)):
-            raw_items = list(value)
-        else:
-            raw_items = []
-        out: list[str] = []
-        seen: set[str] = set()
-        for item in raw_items:
-            normalized = str(item or "").strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            out.append(normalized)
-            if len(out) >= max_items:
-                break
-        return out
-
     @classmethod
     def _normalize_install_options(cls, install_options: dict | None) -> dict:
-        payload = install_options if isinstance(install_options, dict) else {}
-        source_preference = str(payload.get("source_preference", "auto") or "auto").strip().lower()
-        if source_preference not in {"auto", "uploaded_submission", "generated"}:
-            source_preference = "auto"
-        return {
-            "preflight": cls._as_bool(payload.get("preflight"), default=False),
-            "force_reinstall": cls._as_bool(payload.get("force_reinstall"), default=False),
-            "source_preference": source_preference,
-            "selected_sections": cls._normalize_string_list(payload.get("selected_sections")),
-        }
+        return normalize_install_option_contract(install_options)
 
     @classmethod
     def _normalize_upload_options(cls, upload_options: dict | None) -> dict:
-        payload = upload_options if isinstance(upload_options, dict) else {}
-        scan_mode = str(payload.get("scan_mode", "balanced") or "balanced").strip().lower()
-        if scan_mode not in {"strict", "balanced"}:
-            scan_mode = "balanced"
-        visibility = str(payload.get("visibility", "community") or "community").strip().lower()
-        if visibility not in {"community", "private"}:
-            visibility = "community"
-        normalized = {
-            "scan_mode": scan_mode,
-            "visibility": visibility,
-            "replace_existing": cls._as_bool(payload.get("replace_existing"), default=False),
-        }
-        idempotency_key = cls._normalize_idempotency_key(payload.get("idempotency_key"))
-        if idempotency_key:
-            normalized["idempotency_key"] = idempotency_key
-        return normalized
+        return normalize_upload_option_contract(
+            upload_options,
+            normalize_idempotency_key=cls._normalize_idempotency_key,
+        )
 
     @classmethod
     def _normalize_profile_pack_submit_options(cls, submit_options: dict | None) -> dict:
-        payload = submit_options if isinstance(submit_options, dict) else {}
-        pack_type = str(payload.get("pack_type", "bot_profile_pack") or "bot_profile_pack").strip().lower()
-        if pack_type not in {"bot_profile_pack", "extension_pack"}:
-            pack_type = "bot_profile_pack"
-        redaction_mode = str(payload.get("redaction_mode", "exclude_secrets") or "exclude_secrets").strip().lower()
-        if redaction_mode not in {
-            "exclude_secrets",
-            "exclude_provider",
-            "include_provider_no_key",
-            "include_encrypted_secrets",
-        }:
-            redaction_mode = "exclude_secrets"
-        selected_sections = cls._normalize_string_list(payload.get("selected_sections"))
-        selected_item_paths = cls._normalize_string_list(payload.get("selected_item_paths"))
-        normalized = {
-            "pack_type": pack_type,
-            "selected_sections": selected_sections,
-            "selected_item_paths": selected_item_paths,
-            "redaction_mode": redaction_mode,
-            "replace_existing": cls._as_bool(payload.get("replace_existing"), default=False),
-        }
-        idempotency_key = cls._normalize_idempotency_key(payload.get("idempotency_key"))
-        if idempotency_key:
-            normalized["idempotency_key"] = idempotency_key
-        return normalized
+        return normalize_profile_pack_submit_option_contract(
+            submit_options,
+            normalize_idempotency_key=cls._normalize_idempotency_key,
+        )
 
     def _member_installations_payload(self, user_id: str, limit: int) -> list[dict]:
         normalized_user_id = str(user_id or "").strip() or "webui-user"
