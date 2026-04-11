@@ -67,6 +67,7 @@
     const personaCount = Number(summary.persona_count || 0)
     const subagentCount = Number(summary.subagent_count || 0)
     const platformCount = Number(summary.platform_count || 0)
+    const fieldDiagnosticCount = Number(summary.field_diagnostic_count || 0)
     if (defaultPersonality) {
       parts.push(
         formatMessage(
@@ -100,6 +101,15 @@
           "member.imports.summary_platform_count",
           "Platforms: {count}",
           { count: platformCount },
+        ),
+      )
+    }
+    if (fieldDiagnosticCount > 0) {
+      parts.push(
+        formatMessage(
+          "member.imports.summary_field_diagnostic_count",
+          "Field diagnostics: {count}",
+          { count: fieldDiagnosticCount },
         ),
       )
     }

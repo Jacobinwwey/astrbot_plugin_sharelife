@@ -60,6 +60,7 @@ test("buildImportSummaryText formats summary blocks with i18n formatter", () => 
         persona_count: 3,
         subagent_count: 2,
         platform_count: 1,
+        field_diagnostic_count: 4,
       },
     },
     {
@@ -68,10 +69,11 @@ test("buildImportSummaryText formats summary blocks with i18n formatter", () => 
         if (key === "member.imports.summary_persona_count") return `N:${tokens.count}`
         if (key === "member.imports.summary_subagent_count") return `S:${tokens.count}`
         if (key === "member.imports.summary_platform_count") return `L:${tokens.count}`
+        if (key === "member.imports.summary_field_diagnostic_count") return `D:${tokens.count}`
         return fallback
       },
     },
   )
 
-  assert.equal(formatted, "P:helper · N:3 · S:2 · L:1")
+  assert.equal(formatted, "P:helper · N:3 · S:2 · L:1 · D:4")
 })
