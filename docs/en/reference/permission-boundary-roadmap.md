@@ -1,7 +1,7 @@
 # Permission Boundary & Role-Decoupling Roadmap (User / Reviewer / Admin / Developer)
 
 > Baseline: `v1.0`  
-> Last consolidated: `2026-04-06`  
+> Last consolidated: `2026-04-11`  
 > Scope: Sharelife WebUI, API surface, command surface, and public VitePress information architecture
 
 ## 1. Objective and Principles
@@ -36,6 +36,9 @@ Notes:
 - Aggregated audit summary exists for reviewer/device/action visibility.
 - Public docs and private docs have been separated: detailed operator/auth runbooks are no longer part of the public site.
 - Upload pipelines now have idempotent replay + conflict guard (`idempotency_key_conflict`) for both template submit and profile-pack submit, reducing duplicate-write risk during retries.
+- Public promotion gate now blocks unsafe tracked changes such as gitlink/submodule mode entries and non-projectable path additions before public sync.
+- Market capability runtime now reuses shared guard helpers, reducing authz drift risk between member and market surfaces.
+- CI now enforces decomposition line budgets on major monolithic files to prevent silent coupling growth.
 
 ### 3.2 Remaining gaps
 - Owner-aware policy has been enforced for upload and uploaded-resource management surfaces.

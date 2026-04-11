@@ -4,13 +4,14 @@
   "version": "0.3.13",
   "type": "module",
   "scripts": {
+    "docs:clean": "python3 ../scripts/clean_vitepress_cache.py",
     "docs:prepare:market": "python3 ../scripts/build_market_snapshot.py",
     "docs:prepare:private": "python3 ../scripts/sync_local_private_docs.py",
     "docs:prepare": "npm run docs:prepare:market",
     "docs:prepare:with-private": "npm run docs:prepare:market && npm run docs:prepare:private",
     "docs:dev": "python3 ../scripts/run_docs_portal.py dev",
-    "docs:build": "npm run docs:prepare:market && vitepress build .",
-    "docs:build:with-private": "npm run docs:prepare:with-private && vitepress build .",
+    "docs:build": "npm run docs:clean && npm run docs:prepare:market && vitepress build .",
+    "docs:build:with-private": "npm run docs:clean && npm run docs:prepare:with-private && vitepress build .",
     "docs:preview": "python3 ../scripts/run_docs_portal.py preview"
   },
   "devDependencies": {

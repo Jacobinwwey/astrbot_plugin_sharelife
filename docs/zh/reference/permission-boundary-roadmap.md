@@ -1,7 +1,7 @@
 # 权限边界与职责解耦路线图（用户 / 审核员 / 管理员 / 开发者）
 
 > 版本基线：`v1.0`  
-> 最近固化：`2026-04-06`  
+> 最近固化：`2026-04-11`  
 > 适用范围：Sharelife WebUI、API、命令面与公开 VitePress 文档体系
 
 ## 1. 目标与原则
@@ -36,6 +36,9 @@
 - reviewer/device/action 聚合审计摘要。
 - 公开文档与私有文档已拆分，operator/auth 级 runbook 不再纳入公开站点。
 - 模板与 profile-pack 提交流程已具备幂等重放与冲突拒绝（`idempotency_key_conflict`），降低网络重试导致重复写入的风险。
+- 公开同步门禁已扩展：会阻断 gitlink/submodule 模式变更，以及不在 projection allowlist 内的新增路径。
+- 市场页能力门控已复用共享 runtime helper，降低 member 与 market 面之间的权限漂移风险。
+- CI 已新增单体文件行数预算门禁，避免分解过程中主文件继续无约束膨胀。
 
 ### 3.2 仍待收敛
 - owner-aware 已在“上传 + 已上传资源管理”路径落地。

@@ -1,7 +1,7 @@
 # 権限制御境界とロール分離ロードマップ（User / Reviewer / Admin / Developer）
 
 > 基準バージョン：`v1.0`  
-> 最終固定日：`2026-04-06`  
+> 最終固定日：`2026-04-11`  
 > 対象：Sharelife WebUI、API、コマンド面、および公開 VitePress ドキュメント
 
 ## 1. 目的と原則
@@ -36,6 +36,9 @@
 - reviewer/device/action 集計監査。
 - 公開 docs と私有 docs の分離。operator/auth レベルの runbook は公開サイトから外した。
 - template submit / profile-pack submit の双方に、冪等リプレイと競合拒否（`idempotency_key_conflict`）を実装し、再送時の重複書き込みリスクを低減。
+- 公開同期ゲートを強化し、gitlink/submodule モード変更と projection allowlist 外の新規パスをブロックするようにした。
+- market ページの capability gate は共有 runtime helper を再利用する構成に寄せ、member と market 間の権限ドリフトを抑制した。
+- 分解中の結合肥大を抑えるため、主要モノリスファイルに対する行数予算を CI で強制するようにした。
 
 ### 3.2 残るギャップ
 - owner-aware は「アップロード + アップロード済みリソース管理」経路で適用済みです。
