@@ -1757,7 +1757,9 @@ class ProfilePackService:
             if origin != "local_astrbot_detected" or not source_fingerprint:
                 continue
             dedupe_key = (origin, source_fingerprint)
-            latest_by_key[dedupe_key] = item
+            existing = latest_by_key.get(dedupe_key)
+            if existing is None or ProfilePackService._import_sort_key(item) >= ProfilePackService._import_sort_key(existing):
+                latest_by_key[dedupe_key] = item
         for item in candidates:
             origin = str(item.import_origin or "").strip()
             source_fingerprint = str(item.source_fingerprint or "").strip()
@@ -1767,6 +1769,13 @@ class ProfilePackService:
                     continue
             out.append(item)
         return out
+
+    @staticmethod
+    def _import_sort_key(imported: ImportedProfilePack) -> tuple[str, str]:
+        return (
+            str(imported.imported_at or "").strip(),
+            str(imported.import_id or "").strip(),
+        )
 
     def list_exports(self, limit: int = 50) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit or 50), 200))

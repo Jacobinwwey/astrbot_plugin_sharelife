@@ -12,10 +12,11 @@
 1. upload detail モーダルと market detail UX の整合。
 2. ローカル AstrBot import 後の section 深層内容選択の可視化（より深いネストノード対応）。
 3. draft 単位の upload detail レビュー状態記憶（modal 再オープン + 同一セッション再読込で復元）。
+4. ローカル AstrBot 再走査時の重複折りたたみを「最新 draft 優先」の決定的ルールへ変更し、import ストレージの反復順が揺れても古い draft が前面化しないようにした。
 
 継続:
 
-1. 再 import を重複追加ではなく refresh セマンティクスに統一。
+1. import / submit / revoke の長時間ループに対する E2E 安定化を継続。
 
 公開受け入れ条件:
 

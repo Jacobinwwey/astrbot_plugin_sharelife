@@ -12,10 +12,11 @@ Completed:
 1. Guided upload-detail modal parity with market detail UX.
 2. Deep section introspection for imported AstrBot configuration slices (up to nested runtime nodes).
 3. Per-draft upload-detail review state memory across modal reopen and same-session refresh.
+4. Local AstrBot rescan now uses deterministic latest-draft collapse semantics even when import storage iteration order drifts.
 
 Remaining:
 
-1. Ensure rescan refresh behavior is idempotent (no duplicate imported cards).
+1. Continue e2e hardening around long-running member upload/revoke loops.
 
 Public acceptance criteria:
 

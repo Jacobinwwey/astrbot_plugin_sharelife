@@ -658,6 +658,8 @@ def test_profile_pack_service_refreshes_local_astrbot_import_without_duplicate_d
         source_fingerprint="local-config-1",
         refresh_existing=True,
     )
+    if hasattr(service.clock, "shift"):
+        service.clock.shift(seconds=1)
     first_artifact_path = service.get_export_artifact(first.source_artifact_id).path
     assert first_artifact_path.exists()
 
@@ -716,6 +718,8 @@ def test_profile_pack_service_list_imports_hides_stale_local_draft_after_submiss
         artifact_id=first.source_artifact_id,
     )
     assert first_submission.import_id
+    if hasattr(service.clock, "shift"):
+        service.clock.shift(seconds=1)
 
     refresh_result: dict[str, object] = {}
     second = service.import_member_profile_pack(
@@ -737,7 +741,83 @@ def test_profile_pack_service_list_imports_hides_stale_local_draft_after_submiss
     assert [item["import_id"] for item in rows] == [second.import_id]
     assert rows[0]["import_summary"]["default_personality"] == "beta"
 
+def test_profile_pack_service_collapse_local_import_prefers_latest_timestamp_under_order_drift(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    payload = json.dumps(
+        astrbot_cmd_config_fixture(plugin_set=["sharelife"]),
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+    first = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=payload,
+        import_origin="local_astrbot_detected",
+        source_fingerprint="local-config-order-drift",
+        refresh_existing=False,
+    )
+    if hasattr(service.clock, "shift"):
+        service.clock.shift(seconds=1)
+    second = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=payload,
+        import_origin="local_astrbot_detected",
+        source_fingerprint="local-config-order-drift",
+        refresh_existing=False,
+    )
+    # Simulate storage reload order drift where older imports may appear later in dictionary iteration.
+    service._imports = {
+        second.import_id: service._imports[second.import_id],
+        first.import_id: service._imports[first.import_id],
+    }
+    rows = service.list_imports(limit=10, user_id="member-1")
+    assert [item["import_id"] for item in rows] == [second.import_id]
 
+
+def test_profile_pack_service_exposes_unit_index_for_astrbot_import(tmp_path):
+    service, _, _ = build_service(tmp_path)
+    raw_bytes = json.dumps(
+        {
+            **astrbot_cmd_config_fixture(plugin_set=["sharelife"]),
+            "provider_settings": {
+                "default_personality": "analyst",
+            },
+            "persona": [
+                {"name": "analyst", "description": "Main analyst persona", "model": "gpt-4.1"},
+            ],
+            "subagent_orchestrator": {
+                "agents": [
+                    {"name": "planner_prometheus", "enabled": True, "runtime": {"limits": {"token_budget": 4096}}},
+                ],
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    imported = service.import_member_profile_pack(
+        user_id="member-1",
+        filename="cmd_config.json",
+        content=raw_bytes,
+    )
+
+    rows = service.list_imports(limit=10, user_id="member-1")
+    assert rows and rows[0]["import_id"] == imported.import_id
+    units = rows[0]["unit_index"]
+    assert isinstance(units, list) and units
+    unit_ids = {item["unit_id"] for item in units}
+    assert any(item.startswith("agent:analyst") for item in unit_ids)
+    assert any(item.startswith("subagent:planner_prometheus#") for item in unit_ids)
+
+    agent = next(item for item in units if item["unit_id"].startswith("agent:analyst"))
+    assert agent["unit_type"] == "agent"
+    assert "personas.entries.analyst" in agent["paths"]
+
+    subagent = next(item for item in units if item["unit_id"].startswith("subagent:planner_prometheus#"))
+    assert subagent["unit_type"] == "subagent"
+    assert subagent["paths"] == ["environment_manifest.subagent_orchestrator.agents[0]"]
+    assert subagent["settings_preview"]["enabled"] is True
 def test_profile_pack_service_deletes_unsubmitted_member_import_draft(tmp_path):
     service, _, _ = build_service(tmp_path)
     imported = service.import_member_profile_pack(

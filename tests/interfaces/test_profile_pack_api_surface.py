@@ -1573,6 +1573,8 @@ def test_api_member_local_astrbot_import_refreshes_existing_draft_and_supports_d
     assert listed_first["imports"][0]["import_origin"] == "local_astrbot_detected"
     assert listed_first["imports"][0]["delete_allowed"] is True
     assert listed_first["imports"][0]["import_summary"]["default_personality"] == "alpha"
+    if api.profile_pack_service is not None and hasattr(api.profile_pack_service.clock, "shift"):
+        api.profile_pack_service.clock.shift(seconds=1)
 
     local_config.write_text(
         json.dumps(
