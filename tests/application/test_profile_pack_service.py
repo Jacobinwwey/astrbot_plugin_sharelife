@@ -347,6 +347,18 @@ def test_profile_pack_service_converts_raw_astrbot_backup_zip_into_standard_memb
         and "astrbot_core.dashboard" in item["related_paths"]
         for item in imported_details
     )
+    operator_issue = next(item for item in imported_details if item["code"] == "astrbot_operator_fields_omitted")
+    assert operator_issue["evidence_refs"]
+    assert operator_issue["evidence_refs"][0]["file"] == "sections/sharelife_meta.json"
+    assert operator_issue["evidence_refs"][0]["path"] in {"astrbot_core.dashboard", "astrbot_core.admins_id"}
+    summary = imported.sections["sharelife_meta"]["astrbot_import"]["summary"]
+    assert summary["field_diagnostic_count"] >= 4
+    assert isinstance(summary["field_diagnostics"], list)
+    assert any(
+        item.get("issue_code") == "astrbot_plugin_wildcard_unresolved"
+        and item.get("source_path") == "plugin_set"
+        for item in summary["field_diagnostics"]
+    )
     assert imported.sections["sharelife_meta"]["astrbot_import"]["source_type"] == "astrbot_backup_zip"
     assert "dashboard" not in imported.sections["astrbot_core"]
     assert "admins_id" not in imported.sections["astrbot_core"]
@@ -446,6 +458,36 @@ def test_profile_pack_service_compatibility_issue_details_attach_related_paths_a
     unknown_issue = next(item for item in details if item["code"] == "unknown_future_issue")
     assert unknown_issue["group"] == "unknown"
     assert unknown_issue["evidence_refs"] == []
+
+
+def test_profile_pack_service_compatibility_issue_details_use_conversion_fallback_evidence():
+    details = ProfilePackService.compatibility_issue_details(
+        ["astrbot_plugin_wildcard_unresolved"],
+        sections={
+            "sharelife_meta": {
+                "astrbot_import": {
+                    "summary": {
+                        "field_diagnostics": [
+                            {
+                                "source_path": "plugin_set",
+                                "target_path": "plugins",
+                                "outcome": "requires_manual_resolution",
+                                "issue_code": "astrbot_plugin_wildcard_unresolved",
+                                "note": "plugin wildcard cannot be resolved",
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        scan_summary={},
+    )
+    issue = details[0]
+    assert issue["code"] == "astrbot_plugin_wildcard_unresolved"
+    assert issue["evidence_refs"]
+    assert issue["evidence_refs"][0]["file"] == "sections/sharelife_meta.json"
+    assert issue["evidence_refs"][0]["path"] == "plugins"
+    assert issue["evidence_refs"][0]["rule"] == "conversion_requires_manual_resolution"
 
 
 def test_profile_pack_service_converts_raw_astrbot_cmd_config_json(tmp_path):

@@ -701,6 +701,25 @@ class ProfilePackService:
     ) -> tuple[dict[str, Any], list[str]]:
         issues: list[str] = []
         sections: dict[str, Any] = {}
+        field_diagnostics: list[dict[str, Any]] = [
+            self._astrbot_field_diagnostic(
+                source_path=f"astrbot:{source_type}",
+                target_path="sharelife_meta.astrbot_import.source_type",
+                outcome="mapped",
+                issue_code="astrbot_raw_import_converted",
+                note="raw astrbot payload converted into standard profile-pack sections",
+            )
+        ]
+        if source_type == "astrbot_backup_zip":
+            field_diagnostics.append(
+                self._astrbot_field_diagnostic(
+                    source_path="manifest.json",
+                    target_path="sharelife_meta.astrbot_import.backup_manifest",
+                    outcome="omitted_runtime_payload",
+                    issue_code="astrbot_backup_runtime_payload_omitted",
+                    note="backup runtime payload omitted; backup manifest retained for traceability",
+                )
+            )
         personas_payload, personas_summary = self._build_astrbot_conversion_personas(raw_config)
         if personas_payload:
             sections["personas"] = personas_payload
@@ -711,8 +730,19 @@ class ProfilePackService:
 
         core_payload: dict[str, Any] = {}
         operator_keys = {"dashboard", "admins_id"}
-        if any(key in raw_config for key in operator_keys):
+        operator_omitted = [key for key in sorted(operator_keys) if key in raw_config]
+        if operator_omitted:
             issues.append("astrbot_operator_fields_omitted")
+            for key in operator_omitted:
+                field_diagnostics.append(
+                    self._astrbot_field_diagnostic(
+                        source_path=key,
+                        target_path=f"astrbot_core.{key}",
+                        outcome="omitted",
+                        issue_code="astrbot_operator_fields_omitted",
+                        note="operator-managed field omitted from member-importable profile-pack payload",
+                    )
+                )
         extracted_keys = {
             "provider",
             "plugin_set",
@@ -734,12 +764,14 @@ class ProfilePackService:
         if core_payload:
             sections["astrbot_core"] = core_payload
 
-        providers_payload = self._build_astrbot_conversion_providers(raw_config)
+        providers_payload, provider_diagnostics = self._build_astrbot_conversion_providers(raw_config)
+        field_diagnostics.extend(provider_diagnostics)
         if providers_payload:
             sections["providers"] = providers_payload
 
-        plugins_payload, plugin_issues = self._build_astrbot_conversion_plugins(raw_config)
+        plugins_payload, plugin_issues, plugin_diagnostics = self._build_astrbot_conversion_plugins(raw_config)
         issues.extend(plugin_issues)
+        field_diagnostics.extend(plugin_diagnostics)
         if plugins_payload is not None:
             sections["plugins"] = plugins_payload
 
@@ -748,6 +780,7 @@ class ProfilePackService:
             personas_summary=personas_summary,
             environment_summary=environment_summary,
             plugins_payload=plugins_payload,
+            field_diagnostics=field_diagnostics,
         )
 
         sections["sharelife_meta"] = {
@@ -763,35 +796,83 @@ class ProfilePackService:
         }
         return sections, self._dedupe_issue_codes(issues)
 
-    def _build_astrbot_conversion_providers(self, raw_config: dict[str, Any]) -> dict[str, Any]:
+    def _build_astrbot_conversion_providers(self, raw_config: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         providers = raw_config.get("provider", [])
         if not isinstance(providers, list):
-            return {}
+            return {}, []
         out: dict[str, Any] = {}
+        diagnostics: list[dict[str, Any]] = []
         for index, item in enumerate(providers):
             if not isinstance(item, dict):
                 continue
             provider_id = str(item.get("id", "") or "").strip() or f"provider-{index + 1}"
+            source_provider_path = f"provider[{index}]"
             normalized = deepcopy(item)
             if "key" in normalized and "api_key" not in normalized:
                 normalized["api_key"] = normalized.pop("key")
+                diagnostics.append(
+                    self._astrbot_field_diagnostic(
+                        source_path=f"{source_provider_path}.key",
+                        target_path=f"providers.{provider_id}.api_key",
+                        outcome="mapped_redacted",
+                        issue_code="astrbot_raw_import_converted",
+                        note="provider key renamed to api_key and redacted",
+                    )
+                )
+            elif "api_key" in normalized:
+                diagnostics.append(
+                    self._astrbot_field_diagnostic(
+                        source_path=f"{source_provider_path}.api_key",
+                        target_path=f"providers.{provider_id}.api_key",
+                        outcome="mapped_redacted",
+                        issue_code="astrbot_raw_import_converted",
+                        note="provider api_key retained and redacted",
+                    )
+                )
             normalized = self._sanitize_astrbot_conversion_value(
                 normalized,
                 path=f"providers.{provider_id}",
             )
             out[provider_id] = normalized
-        return out
+        return out, self._dedupe_astrbot_field_diagnostics(diagnostics)
 
-    def _build_astrbot_conversion_plugins(self, raw_config: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    def _build_astrbot_conversion_plugins(
+        self,
+        raw_config: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, list[str], list[dict[str, Any]]]:
         plugin_set = raw_config.get("plugin_set")
         if plugin_set is None:
-            return None, []
+            return None, [], []
         if not isinstance(plugin_set, list):
-            return {}, []
+            return {}, [], []
         normalized = [str(item or "").strip() for item in plugin_set if str(item or "").strip()]
         if "*" in normalized:
-            return None, ["astrbot_plugin_wildcard_unresolved"]
-        return {plugin_id: {"enabled": True} for plugin_id in normalized}, []
+            return (
+                None,
+                ["astrbot_plugin_wildcard_unresolved"],
+                [
+                    self._astrbot_field_diagnostic(
+                        source_path="plugin_set",
+                        target_path="plugins",
+                        outcome="requires_manual_resolution",
+                        issue_code="astrbot_plugin_wildcard_unresolved",
+                        note="plugin wildcard cannot be resolved into deterministic plugin ids",
+                    )
+                ],
+            )
+        return (
+            {plugin_id: {"enabled": True} for plugin_id in normalized},
+            [],
+            [
+                self._astrbot_field_diagnostic(
+                    source_path="plugin_set",
+                    target_path="plugins",
+                    outcome="mapped",
+                    issue_code="astrbot_raw_import_converted",
+                    note="plugin_set converted into plugins section",
+                )
+            ] if normalized else [],
+        )
 
     def _build_astrbot_conversion_personas(self, raw_config: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         payload: dict[str, Any] = {}
@@ -895,6 +976,7 @@ class ProfilePackService:
         personas_summary: dict[str, Any],
         environment_summary: dict[str, Any],
         plugins_payload: dict[str, Any] | None,
+        field_diagnostics: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         summary: dict[str, Any] = {}
         summary.update(personas_summary)
@@ -904,7 +986,62 @@ class ProfilePackService:
         provider_count = raw_config.get("provider")
         if isinstance(provider_count, list):
             summary["provider_count"] = len(provider_count)
+        normalized_diagnostics = self._dedupe_astrbot_field_diagnostics(field_diagnostics or [])
+        if normalized_diagnostics:
+            summary["field_diagnostics"] = normalized_diagnostics
+            summary["field_diagnostic_count"] = len(normalized_diagnostics)
+            outcome_counts: dict[str, int] = {}
+            for item in normalized_diagnostics:
+                outcome = str(item.get("outcome", "") or "").strip() or "unknown"
+                outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+            summary["field_diagnostic_outcomes"] = outcome_counts
         return summary
+
+    @staticmethod
+    def _astrbot_field_diagnostic(
+        *,
+        source_path: str,
+        target_path: str = "",
+        outcome: str,
+        issue_code: str = "",
+        note: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "source_path": str(source_path or "").strip(),
+            "target_path": str(target_path or "").strip(),
+            "outcome": str(outcome or "").strip(),
+            "issue_code": str(issue_code or "").strip(),
+            "note": str(note or "").strip(),
+        }
+
+    @staticmethod
+    def _dedupe_astrbot_field_diagnostics(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            source_path = str(item.get("source_path", "") or "").strip()
+            target_path = str(item.get("target_path", "") or "").strip()
+            outcome = str(item.get("outcome", "") or "").strip()
+            issue_code = str(item.get("issue_code", "") or "").strip()
+            note = str(item.get("note", "") or "").strip()
+            if not source_path and not target_path:
+                continue
+            key = (source_path, target_path, outcome, issue_code, note)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "source_path": source_path,
+                    "target_path": target_path,
+                    "outcome": outcome,
+                    "issue_code": issue_code,
+                    "note": note,
+                }
+            )
+        return out
 
     def _sanitize_astrbot_conversion_value(self, value: Any, *, path: str) -> Any:
         if isinstance(value, dict):
@@ -2934,6 +3071,8 @@ class ProfilePackService:
                     "sections": related_sections,
                     "related_paths": related_paths,
                     "evidence_refs": cls._compatibility_issue_evidence_refs(
+                        issue_code=issue_code,
+                        sections=normalized_sections,
                         scan_summary=scan_summary,
                         related_sections=related_sections,
                         related_paths=related_paths,
@@ -3134,13 +3273,13 @@ class ProfilePackService:
     def _compatibility_issue_evidence_refs(
         cls,
         *,
+        issue_code: str,
+        sections: dict[str, Any] | None,
         scan_summary: dict[str, Any] | None,
         related_sections: list[str],
         related_paths: list[str],
     ) -> list[dict[str, Any]]:
         rows = list((scan_summary or {}).get("risk_evidence", []) or [])
-        if not rows:
-            return []
         section_files = {f"sections/{section}.json" for section in related_sections if section}
         normalized_paths = [str(path or "").strip() for path in related_paths if str(path or "").strip()]
         out: list[dict[str, Any]] = []
@@ -3173,6 +3312,82 @@ class ProfilePackService:
                 "line": int(line) if isinstance(line, int) else 0,
                 "column": int(column) if isinstance(column, int) else 0,
                 "rule": str(item.get("rule", "") or "").strip(),
+            }
+            key = (
+                record["file"],
+                record["path"],
+                str(record["line"]),
+                str(record["column"]),
+                record["rule"],
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(record)
+        if out:
+            return out
+        return cls._compatibility_issue_conversion_evidence_refs(
+            issue_code=issue_code,
+            sections=sections,
+            related_paths=normalized_paths,
+        )
+
+    @classmethod
+    def _compatibility_issue_conversion_evidence_refs(
+        cls,
+        *,
+        issue_code: str,
+        sections: dict[str, Any] | None,
+        related_paths: list[str],
+    ) -> list[dict[str, Any]]:
+        if cls._compatibility_issue_bucket(issue_code) != "conversion":
+            return []
+        meta = (sections or {}).get("sharelife_meta")
+        if not isinstance(meta, dict):
+            return []
+        astrbot_import = meta.get("astrbot_import")
+        if not isinstance(astrbot_import, dict):
+            return []
+        summary = astrbot_import.get("summary")
+        if not isinstance(summary, dict):
+            return []
+        diagnostics = summary.get("field_diagnostics")
+        if not isinstance(diagnostics, list):
+            return []
+        normalized_issue_code = str(issue_code or "").strip()
+        out: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+        for item in diagnostics:
+            if len(out) >= 8:
+                break
+            if not isinstance(item, dict):
+                continue
+            row_issue_code = str(item.get("issue_code", "") or "").strip()
+            if row_issue_code and row_issue_code != normalized_issue_code:
+                continue
+            target_path = str(item.get("target_path", "") or "").strip()
+            source_path = str(item.get("source_path", "") or "").strip()
+            diagnostic_path = target_path or source_path
+            if not diagnostic_path:
+                continue
+            if related_paths:
+                matched = False
+                for path_ref in related_paths:
+                    ref = str(path_ref or "").strip()
+                    if not ref or ref.startswith("manifest."):
+                        continue
+                    if diagnostic_path == ref or diagnostic_path.startswith(f"{ref}.") or diagnostic_path.startswith(f"{ref}["):
+                        matched = True
+                        break
+                if not matched:
+                    continue
+            outcome = str(item.get("outcome", "") or "").strip() or "conversion"
+            record = {
+                "file": "sections/sharelife_meta.json",
+                "path": diagnostic_path,
+                "line": 0,
+                "column": 0,
+                "rule": f"conversion_{outcome}",
             }
             key = (
                 record["file"],

@@ -1367,6 +1367,11 @@ def test_api_member_profile_pack_import_converts_astrbot_backup_zip(tmp_path):
     )
     assert imported["compatibility"] == "degraded"
     assert "astrbot_raw_import_converted" in imported["compatibility_issues"]
+    assert any(
+        item.get("issue_code") == "astrbot_plugin_wildcard_unresolved"
+        and item.get("source_path") == "plugin_set"
+        for item in imported["import_summary"].get("field_diagnostics", [])
+    )
     assert imported["source_artifact_id"]
 
     submission = api.submit_profile_pack(
@@ -1381,6 +1386,12 @@ def test_api_member_profile_pack_import_converts_astrbot_backup_zip(tmp_path):
     )
     assert any(
         item["code"] == "astrbot_raw_import_converted"
+        for item in submission["review_evidence"]["compatibility_issue_details"]
+    )
+    assert any(
+        item["code"] == "astrbot_plugin_wildcard_unresolved"
+        and item.get("evidence_refs")
+        and item["evidence_refs"][0]["file"] == "sections/sharelife_meta.json"
         for item in submission["review_evidence"]["compatibility_issue_details"]
     )
 
