@@ -33,6 +33,7 @@
 2. import 診断に issue 単位の詳細（`sections` / `related_paths` / `evidence_refs`）を追加し、payload を手作業で掘らなくても path レベルで分診できるようにした。
 3. member 互換性ガイダンスが `compatibility_issue_details` を取り込むようになり、issue 単位の section/path/evidence メタデータを UI アクション側へ保持できるようにした。
 4. raw AstrBot 変換はフィールド単位診断（`summary.field_diagnostics`）を出力するようになり、scan-level evidence が無い場合でも conversion issue の `evidence_refs` を診断情報から解決できるようにした。
+5. member import summary には field diagnostic 総数と manual-review 件数を表示するようになり、detail dialog を開く前に対処優先度を把握できるようにした。
 
 継続:
 

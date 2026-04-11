@@ -33,6 +33,7 @@ Completed:
 2. Compatibility diagnostics now expose per-issue details (`sections`, `related_paths`, `evidence_refs`) to support field-level triage without manual payload archaeology.
 3. Member compatibility guidance now consumes `compatibility_issue_details` and keeps issue-level section/path/evidence metadata available to UI actions.
 4. Raw AstrBot conversion now emits field-level diagnostics (`summary.field_diagnostics`) and conversion issue evidence can be resolved from those diagnostics when scan-level evidence is absent.
+5. Member import summary now includes field diagnostic counts and manual-review counts, giving an at-a-glance signal before opening detail dialogs.
 
 Remaining:
 

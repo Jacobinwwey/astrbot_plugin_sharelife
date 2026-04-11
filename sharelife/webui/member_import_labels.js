@@ -68,6 +68,10 @@
     const subagentCount = Number(summary.subagent_count || 0)
     const platformCount = Number(summary.platform_count || 0)
     const fieldDiagnosticCount = Number(summary.field_diagnostic_count || 0)
+    const outcomeCounts = summary.field_diagnostic_outcomes && typeof summary.field_diagnostic_outcomes === "object"
+      ? summary.field_diagnostic_outcomes
+      : {}
+    const manualReviewCount = Number(outcomeCounts.requires_manual_resolution || 0)
     if (defaultPersonality) {
       parts.push(
         formatMessage(
@@ -110,6 +114,15 @@
           "member.imports.summary_field_diagnostic_count",
           "Field diagnostics: {count}",
           { count: fieldDiagnosticCount },
+        ),
+      )
+    }
+    if (manualReviewCount > 0) {
+      parts.push(
+        formatMessage(
+          "member.imports.summary_manual_review_count",
+          "Manual review: {count}",
+          { count: manualReviewCount },
         ),
       )
     }

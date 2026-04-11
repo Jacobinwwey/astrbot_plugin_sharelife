@@ -61,6 +61,11 @@ test("buildImportSummaryText formats summary blocks with i18n formatter", () => 
         subagent_count: 2,
         platform_count: 1,
         field_diagnostic_count: 4,
+        field_diagnostic_outcomes: {
+          mapped: 2,
+          requires_manual_resolution: 1,
+          omitted: 1,
+        },
       },
     },
     {
@@ -70,10 +75,11 @@ test("buildImportSummaryText formats summary blocks with i18n formatter", () => 
         if (key === "member.imports.summary_subagent_count") return `S:${tokens.count}`
         if (key === "member.imports.summary_platform_count") return `L:${tokens.count}`
         if (key === "member.imports.summary_field_diagnostic_count") return `D:${tokens.count}`
+        if (key === "member.imports.summary_manual_review_count") return `M:${tokens.count}`
         return fallback
       },
     },
   )
 
-  assert.equal(formatted, "P:helper · N:3 · S:2 · L:1 · D:4")
+  assert.equal(formatted, "P:helper · N:3 · S:2 · L:1 · D:4 · M:1")
 })

@@ -33,6 +33,7 @@
 2. 导入诊断已输出字段级 issue 详情（`sections`、`related_paths`、`evidence_refs`），支持无需手工翻 payload 的路径级分诊。
 3. 用户侧兼容性指导已接入 `compatibility_issue_details`，前端动作可保留 issue 级 section/path/evidence 元数据。
 4. 原始 AstrBot 转换已输出字段级转换诊断（`summary.field_diagnostics`），当扫描证据缺失时可用这些诊断回填 conversion issue 的 `evidence_refs`。
+5. 用户导入摘要现已展示字段诊断总数与“需人工复核”计数，用户在不打开细则弹窗前即可快速判断处理优先级。
 
 待推进：
 
