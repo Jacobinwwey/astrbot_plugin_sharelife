@@ -2648,7 +2648,7 @@ function renderProfilePackCompatibilityPanel(data = null) {
 
   const view = guidance.buildCompatibilityIssueView({
     compatibility: data.compatibility || "unknown",
-    compatibility_issues: rawIssues, compatibility_issue_details: Array.isArray(data.compatibility_issue_details) ? data.compatibility_issue_details : [],
+    compatibility_issues: rawIssues, compatibility_issue_details: Array.isArray(data.compatibility_issue_details) ? data.compatibility_issue_details : Array.isArray(data.compatibility_matrix && data.compatibility_matrix.runtime_issue_details) ? data.compatibility_matrix.runtime_issue_details : Array.isArray(data.review_evidence && data.review_evidence.compatibility_issue_details) ? data.review_evidence.compatibility_issue_details : [],
   })
   clearProfilePackCompatibilityActionStatus()
 

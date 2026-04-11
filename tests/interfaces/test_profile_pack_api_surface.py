@@ -1375,6 +1375,14 @@ def test_api_member_profile_pack_import_converts_astrbot_backup_zip(tmp_path):
     )
     assert submission["status"] == "pending"
     assert submission["compatibility"] == "degraded"
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in submission["compatibility_matrix"]["runtime_issue_details"]
+    )
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in submission["review_evidence"]["compatibility_issue_details"]
+    )
 
     web_imported = web_api.member_import_profile_pack(
         user_id="member-1",
