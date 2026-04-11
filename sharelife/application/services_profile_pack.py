@@ -1706,6 +1706,8 @@ class ProfilePackService:
             for item in candidates
             if str(item.import_origin or "").strip() != "submission_materialized"
         ]
+        if normalized_user_id:
+            candidates = self._collapse_member_local_import_duplicates(candidates)
         rows = sorted(
             candidates,
             key=lambda item: item.imported_at,
@@ -1733,6 +1735,27 @@ class ProfilePackService:
                     "selection_tree": self.build_import_selection_tree(item),
                 }
             )
+        return out
+
+    @staticmethod
+    def _collapse_member_local_import_duplicates(candidates: list[ImportedProfilePack]) -> list[ImportedProfilePack]:
+        out: list[ImportedProfilePack] = []
+        latest_by_key: dict[tuple[str, str], ImportedProfilePack] = {}
+        for item in candidates:
+            origin = str(item.import_origin or "").strip()
+            source_fingerprint = str(item.source_fingerprint or "").strip()
+            if origin != "local_astrbot_detected" or not source_fingerprint:
+                continue
+            dedupe_key = (origin, source_fingerprint)
+            latest_by_key[dedupe_key] = item
+        for item in candidates:
+            origin = str(item.import_origin or "").strip()
+            source_fingerprint = str(item.source_fingerprint or "").strip()
+            if origin == "local_astrbot_detected" and source_fingerprint:
+                dedupe_key = (origin, source_fingerprint)
+                if latest_by_key.get(dedupe_key) is not item:
+                    continue
+            out.append(item)
         return out
 
     def list_exports(self, limit: int = 50) -> list[dict[str, Any]]:
