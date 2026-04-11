@@ -68,6 +68,43 @@ test("buildCompatibilityIssueView upgrades unknown blocked issues to danger", ()
   assert.equal(view.issues[0].severity, "danger")
 })
 
+test("buildCompatibilityIssueView carries detail rows from compatibility_issue_details", () => {
+  const view = buildCompatibilityIssueView({
+    compatibility: "degraded",
+    compatibility_issues: ["custom_unknown_issue"],
+    compatibility_issue_details: [
+      {
+        code: "custom_unknown_issue",
+        group: "environment",
+        blocking: true,
+        issue_key: "profile_pack.issue.custom_unknown_issue",
+        sections: ["environment_manifest"],
+        related_paths: ["environment_manifest.plugin_binaries[0].id"],
+        evidence_refs: [
+          {
+            file: "sections/environment_manifest.json",
+            path: "environment_manifest.plugin_binaries[0].id",
+            line: 8,
+            column: 2,
+            rule: "plugin_binary_untrusted",
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.equal(view.blocked, false)
+  assert.equal(view.issues.length, 1)
+  assert.equal(view.issues[0].severity, "danger")
+  assert.equal(view.issues[0].issueKey, "profile_pack.issue.custom_unknown_issue")
+  assert.equal(view.issues[0].group, "environment")
+  assert.equal(view.issues[0].blocking, true)
+  assert.deepEqual(view.issues[0].sections, ["environment_manifest"])
+  assert.deepEqual(view.issues[0].relatedPaths, ["environment_manifest.plugin_binaries[0].id"])
+  assert.equal(view.issues[0].evidenceRefs[0].file, "sections/environment_manifest.json")
+  assert.equal(view.issues[0].evidenceRefs[0].rule, "plugin_binary_untrusted")
+})
+
 test("resolveActionTarget returns navigation metadata for known actions", () => {
   const plugin = resolveActionTarget("reconfigure_plugin_binary")
   assert.equal(plugin.targetId, "profilePackPluginInstallAdvanced")

@@ -223,6 +223,45 @@
     return out
   }
 
+  function normalizeIssueEvidenceList(values) {
+    const rows = Array.isArray(values) ? values : []
+    const out = []
+    const seen = new Set()
+    rows.forEach((item) => {
+      if (!item || typeof item !== "object") return
+      const file = textValue(item.file)
+      const path = textValue(item.path)
+      const line = Number.isInteger(item.line) ? item.line : 0
+      const column = Number.isInteger(item.column) ? item.column : 0
+      const rule = textValue(item.rule)
+      const dedupeKey = `${file}|${path}|${line}|${column}|${rule}`
+      if (!file || seen.has(dedupeKey)) return
+      seen.add(dedupeKey)
+      out.push({ file, path, line, column, rule })
+    })
+    return out
+  }
+
+  function normalizeIssueDetailMap(values) {
+    const rows = Array.isArray(values) ? values : []
+    const out = Object.create(null)
+    rows.forEach((item) => {
+      if (!item || typeof item !== "object") return
+      const code = textValue(item.code)
+      if (!code || out[code]) return
+      out[code] = {
+        code,
+        group: textValue(item.group),
+        blocking: Boolean(item.blocking),
+        issueKey: textValue(item.issue_key),
+        sections: normalizeNameList(item.sections),
+        relatedPaths: normalizeNameList(item.related_paths),
+        evidenceRefs: normalizeIssueEvidenceList(item.evidence_refs),
+      }
+    })
+    return out
+  }
+
   function buildI18n(options = {}) {
     const t = typeof options.t === "function"
       ? options.t
@@ -322,18 +361,31 @@
     const data = payload && typeof payload === "object" ? payload : {}
     const compatibility = textValue(data.compatibility, "unknown")
     const issues = normalizeIssueList(data.compatibility_issues)
+    const detailsByCode = normalizeIssueDetailMap(data.compatibility_issue_details)
     const actionCodes = []
     const issueRows = issues.map((code) => {
       const baseCode = issueBaseCode(code)
       const meta = ISSUE_META[baseCode] || null
-      const severity = meta ? meta.severity : compatibility === "blocked" ? "danger" : "warning"
+      const detail = detailsByCode[code] || null
+      const severity = detail && detail.blocking
+        ? "danger"
+        : meta
+          ? meta.severity
+          : compatibility === "blocked"
+            ? "danger"
+            : "warning"
       if (meta && meta.actionCode && !actionCodes.includes(meta.actionCode)) {
         actionCodes.push(meta.actionCode)
       }
       return {
         code,
         baseCode,
-        issueKey: meta ? meta.issueKey : "profile_pack.issue.unknown",
+        issueKey: detail && detail.issueKey ? detail.issueKey : meta ? meta.issueKey : "profile_pack.issue.unknown",
+        group: detail ? detail.group : "",
+        blocking: detail ? detail.blocking : severity === "danger",
+        sections: detail ? detail.sections : [],
+        relatedPaths: detail ? detail.relatedPaths : [],
+        evidenceRefs: detail ? detail.evidenceRefs : [],
         severity,
       }
     })

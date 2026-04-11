@@ -31,6 +31,7 @@
 
 1. import 診断に決定的な issue-group bucket（`integrity` / `security` / `version` / `conversion` / `environment` / `unknown`）を追加し、import payload と review evidence の双方で一貫して参照できるようにした。
 2. import 診断に issue 単位の詳細（`sections` / `related_paths` / `evidence_refs`）を追加し、payload を手作業で掘らなくても path レベルで分診できるようにした。
+3. member 互換性ガイダンスが `compatibility_issue_details` を取り込むようになり、issue 単位の section/path/evidence メタデータを UI アクション側へ保持できるようにした。
 
 継続:
 
