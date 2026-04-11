@@ -8398,19 +8398,23 @@ async function importMemberLocalAstrbotConfig() {
     if (!workspaceRequestFailed(response)) {
       const data = apiData(response)
       const importId = String(data.import_id || "").trim()
-      if (data && data.probe && typeof data.probe === "object") {
-        state.memberPanel.localAstrbotProbe = data.probe
-      }
+      const refreshReplacedCount = Math.max(0, Math.floor(Number(data.refresh_replaced_count || 0)))
+      if (data && data.probe && typeof data.probe === "object") state.memberPanel.localAstrbotProbe = data.probe
       await loadMemberProfilePackImports({ selectedImportId: importId })
-      if (importId) {
-        openMemberProfilePackUploadModalById(importId)
-      }
+      if (importId) openMemberProfilePackUploadModalById(importId)
+      const successMessage = refreshReplacedCount > 0
+        ? i18nFormat(
+            "member.imports.local_import_ready_refreshed",
+            "Local AstrBot config imported and replaced {count} stale local draft(s). Review upload details before submission.",
+            { count: String(refreshReplacedCount) },
+          )
+        : i18nMessage(
+            "member.imports.local_import_ready",
+            "Local AstrBot config imported. Review upload details before submission.",
+          )
       setMemberImportDraftState(
         "success",
-        i18nMessage(
-          "member.imports.local_import_ready",
-          "Local AstrBot config imported. Review upload details before submission.",
-        ),
+        successMessage,
       )
     } else {
       const errorCode = responseErrorCode(response)
@@ -8443,7 +8447,6 @@ async function importMemberLocalAstrbotConfig() {
   void refreshMemberLocalAstrbotProbe()
   return response
 }
-
 async function importMemberProfilePackFromSelection() {
   const input = byId("memberImportAstrbotConfigFile")
   const trigger = byId("btnImportConfigPackFile")
@@ -8472,7 +8475,6 @@ async function importMemberProfilePackFromSelection() {
     input.value = ""
     return
   }
-
   let response = null
   try {
     const a = actor()
@@ -8525,7 +8527,6 @@ async function importMemberProfilePackFromSelection() {
   }
   return response
 }
-
 function memberProfilePackSubmitOptionsFromModal(item) {
   const selection = readMemberUploadDetailSelection(item)
   const helper = profilePackMarketHelpers()

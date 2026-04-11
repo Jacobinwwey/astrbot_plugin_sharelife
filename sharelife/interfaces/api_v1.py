@@ -1580,6 +1580,7 @@ class SharelifeApiV1:
             content = config_path.read_bytes()
         except OSError:
             return {"error": "astrbot_local_config_read_failed", "probe": probe}
+        refresh_result: dict[str, Any] = {}
         try:
             imported = self.profile_pack_service.import_member_profile_pack(
                 user_id=user_id,
@@ -1588,9 +1589,16 @@ class SharelifeApiV1:
                 import_origin="local_astrbot_detected",
                 source_fingerprint=self._local_astrbot_source_fingerprint(config_path),
                 refresh_existing=True,
+                refresh_result=refresh_result,
             )
         except ValueError as exc:
             return self._profile_pack_error_payload(exc=exc, fallback_id=config_path.name)
+        refresh_replaced_count = max(0, int(refresh_result.get("replaced_count", 0) or 0))
+        refresh_replaced_import_ids = [
+            str(item or "").strip()
+            for item in list(refresh_result.get("replaced_import_ids", []) or [])
+            if str(item or "").strip()
+        ]
         self._audit(
             action="profile_pack.imported",
             actor_id=str(user_id or "").strip() or "member",
@@ -1601,10 +1609,13 @@ class SharelifeApiV1:
                 "filename": imported.filename,
                 "source_artifact_id": imported.source_artifact_id,
                 "source": "local_astrbot_config",
+                "refresh_replaced_count": refresh_replaced_count,
             },
         )
         payload = self._profile_pack_import_payload(imported)
         payload["probe"] = probe
+        payload["refresh_replaced_count"] = refresh_replaced_count
+        payload["refresh_replaced_import_ids"] = refresh_replaced_import_ids
         return payload
 
     def member_probe_local_astrbot_config(self, user_id: str) -> dict:

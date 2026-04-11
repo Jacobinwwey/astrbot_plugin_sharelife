@@ -661,6 +661,7 @@ def test_profile_pack_service_refreshes_local_astrbot_import_without_duplicate_d
     first_artifact_path = service.get_export_artifact(first.source_artifact_id).path
     assert first_artifact_path.exists()
 
+    refresh_result: dict[str, object] = {}
     second = service.import_member_profile_pack(
         user_id="member-1",
         filename="cmd_config.json",
@@ -668,6 +669,7 @@ def test_profile_pack_service_refreshes_local_astrbot_import_without_duplicate_d
         import_origin="local_astrbot_detected",
         source_fingerprint="local-config-1",
         refresh_existing=True,
+        refresh_result=refresh_result,
     )
 
     imports = service.list_imports(limit=10, user_id="member-1")
@@ -675,6 +677,8 @@ def test_profile_pack_service_refreshes_local_astrbot_import_without_duplicate_d
     assert imports[0]["import_origin"] == "local_astrbot_detected"
     assert imports[0]["import_summary"]["default_personality"] == "beta"
     assert imports[0]["import_summary"]["subagent_count"] == 1
+    assert refresh_result["replaced_count"] == 1
+    assert refresh_result["replaced_import_ids"] == [first.import_id]
     assert not first_artifact_path.exists()
     with pytest.raises(ValueError, match="PROFILE_IMPORT_NOT_FOUND"):
         service.get_import_record(first.import_id)
@@ -713,6 +717,7 @@ def test_profile_pack_service_list_imports_hides_stale_local_draft_after_submiss
     )
     assert first_submission.import_id
 
+    refresh_result: dict[str, object] = {}
     second = service.import_member_profile_pack(
         user_id="member-1",
         filename="cmd_config.json",
@@ -720,11 +725,14 @@ def test_profile_pack_service_list_imports_hides_stale_local_draft_after_submiss
         import_origin="local_astrbot_detected",
         source_fingerprint="local-config-2",
         refresh_existing=True,
+        refresh_result=refresh_result,
     )
     assert second.import_id != first.import_id
 
     # Older import draft remains for audit/submission linkage, but user listing should show only latest local draft.
     assert service.get_import_record(first.import_id).import_id == first.import_id
+    assert refresh_result["replaced_count"] == 0
+    assert refresh_result["replaced_import_ids"] == []
     rows = service.list_imports(limit=10, user_id="member-1")
     assert [item["import_id"] for item in rows] == [second.import_id]
     assert rows[0]["import_summary"]["default_personality"] == "beta"

@@ -342,16 +342,21 @@ class ProfilePackService:
         import_origin: str = "",
         source_fingerprint: str = "",
         refresh_existing: bool = False,
+        refresh_result: dict[str, Any] | None = None,
     ) -> ImportedProfilePack:
         normalized_user_id = str(user_id or "").strip() or "member"
         normalized_import_origin = str(import_origin or "").strip()
         normalized_source_fingerprint = str(source_fingerprint or "").strip()
+        replaced_import_ids: list[str] = []
         if refresh_existing and normalized_import_origin and normalized_source_fingerprint:
-            self._refresh_member_imports(
+            replaced_import_ids = self._refresh_member_imports(
                 user_id=normalized_user_id,
                 import_origin=normalized_import_origin,
                 source_fingerprint=normalized_source_fingerprint,
             )
+        if isinstance(refresh_result, dict):
+            refresh_result["replaced_import_ids"] = list(replaced_import_ids)
+            refresh_result["replaced_count"] = len(replaced_import_ids)
         imported, prepared = self._import_profile_pack(
             filename=filename,
             content=content,
@@ -1051,13 +1056,14 @@ class ProfilePackService:
         user_id: str,
         import_origin: str,
         source_fingerprint: str,
-    ) -> None:
+    ) -> list[str]:
         normalized_user_id = str(user_id or "").strip()
         normalized_origin = str(import_origin or "").strip()
         normalized_fingerprint = str(source_fingerprint or "").strip()
         if not normalized_user_id or not normalized_origin or not normalized_fingerprint:
-            return
+            return []
         changed = False
+        replaced_import_ids: list[str] = []
         for imported in list(self._imports.values()):
             if str(imported.user_id or "").strip() != normalized_user_id:
                 continue
@@ -1067,10 +1073,14 @@ class ProfilePackService:
                 continue
             if not self._can_delete_import(imported):
                 continue
+            import_id = str(imported.import_id or "").strip()
+            if import_id:
+                replaced_import_ids.append(import_id)
             self._delete_import_record(imported)
             changed = True
         if changed:
             self._flush_state()
+        return replaced_import_ids
 
     def _can_delete_import(self, imported: ImportedProfilePack) -> bool:
         normalized_import_id = str(imported.import_id or "").strip()

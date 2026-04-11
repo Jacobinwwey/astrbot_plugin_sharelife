@@ -264,6 +264,18 @@ test("getMessage returns locale-specific translation with fallback", () => {
     "Local AstrBot import is disabled by deployment policy.",
   )
   assert.equal(
+    getMessage("en-US", "member.imports.local_import_ready_refreshed", ""),
+    "Local AstrBot config imported and replaced {count} stale local draft(s). Review upload details before submission.",
+  )
+  assert.equal(
+    getMessage("zh-CN", "member.imports.local_import_ready_refreshed", ""),
+    "已导入本机 AstrBot 配置，并替换了 {count} 个旧草稿，请先审阅上传细则后再投稿。",
+  )
+  assert.equal(
+    getMessage("ja-JP", "member.imports.local_import_ready_refreshed", ""),
+    "ローカル AstrBot 設定を取り込み、古いローカル下書きを {count} 件置き換えました。投稿前にアップロード詳細を確認してください。",
+  )
+  assert.equal(
     getMessage("zh-CN", "member.imports.local_feature_disabled", ""),
     "当前部署策略未启用“导入本机 AstrBot 配置”。",
   )

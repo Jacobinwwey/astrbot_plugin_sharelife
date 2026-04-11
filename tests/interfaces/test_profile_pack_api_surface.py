@@ -1418,6 +1418,8 @@ def test_api_member_profile_pack_import_detects_local_astrbot_config(tmp_path, m
     assert imported["compatibility"] == "degraded"
     assert "astrbot_raw_import_converted" in imported["compatibility_issues"]
     assert imported["source_artifact_id"]
+    assert imported["refresh_replaced_count"] == 0
+    assert imported["refresh_replaced_import_ids"] == []
 
     web_imported = web_api.member_import_local_astrbot_config(user_id="member-1")
     assert web_imported.ok is True
@@ -1425,6 +1427,8 @@ def test_api_member_profile_pack_import_detects_local_astrbot_config(tmp_path, m
     assert "astrbot_raw_import_converted" in web_imported.data["compatibility_issues"]
     assert web_imported.data["probe"]["detected"] is True
     assert web_imported.data["probe"]["matched_source"] == "config_path_file"
+    assert web_imported.data["refresh_replaced_count"] == 1
+    assert web_imported.data["refresh_replaced_import_ids"] == [imported["import_id"]]
 
 
 def test_api_member_local_astrbot_probe_returns_safe_detection_metadata(tmp_path, monkeypatch):
@@ -1561,6 +1565,8 @@ def test_api_member_local_astrbot_import_refreshes_existing_draft_and_supports_d
     monkeypatch.setenv("SHARELIFE_ASTRBOT_CONFIG_PATH", str(local_config))
 
     first = api.member_import_local_astrbot_config(user_id="member-1")
+    assert first["refresh_replaced_count"] == 0
+    assert first["refresh_replaced_import_ids"] == []
     listed_first = api.member_list_profile_pack_imports(user_id="member-1", limit=10)
     assert len(listed_first["imports"]) == 1
     assert listed_first["imports"][0]["import_id"] == first["import_id"]
@@ -1592,6 +1598,8 @@ def test_api_member_local_astrbot_import_refreshes_existing_draft_and_supports_d
     )
 
     second = api.member_import_local_astrbot_config(user_id="member-1")
+    assert second["refresh_replaced_count"] == 1
+    assert second["refresh_replaced_import_ids"] == [first["import_id"]]
     listed_second = api.member_list_profile_pack_imports(user_id="member-1", limit=10)
     assert len(listed_second["imports"]) == 1
     assert listed_second["imports"][0]["import_id"] == second["import_id"]
