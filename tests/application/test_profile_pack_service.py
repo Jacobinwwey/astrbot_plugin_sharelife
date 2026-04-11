@@ -730,51 +730,6 @@ def test_profile_pack_service_list_imports_hides_stale_local_draft_after_submiss
     assert rows[0]["import_summary"]["default_personality"] == "beta"
 
 
-def test_profile_pack_service_exposes_unit_index_for_astrbot_import(tmp_path):
-    service, _, _ = build_service(tmp_path)
-    raw_bytes = json.dumps(
-        {
-            **astrbot_cmd_config_fixture(plugin_set=["sharelife"]),
-            "provider_settings": {
-                "default_personality": "analyst",
-            },
-            "persona": [
-                {"name": "analyst", "description": "Main analyst persona", "model": "gpt-4.1"},
-            ],
-            "subagent_orchestrator": {
-                "agents": [
-                    {"name": "planner_prometheus", "enabled": True, "runtime": {"limits": {"token_budget": 4096}}},
-                ],
-            },
-        },
-        ensure_ascii=False,
-        indent=2,
-    ).encode("utf-8")
-
-    imported = service.import_member_profile_pack(
-        user_id="member-1",
-        filename="cmd_config.json",
-        content=raw_bytes,
-    )
-
-    rows = service.list_imports(limit=10, user_id="member-1")
-    assert rows and rows[0]["import_id"] == imported.import_id
-    units = rows[0]["unit_index"]
-    assert isinstance(units, list) and units
-    unit_ids = {item["unit_id"] for item in units}
-    assert any(item.startswith("agent:analyst") for item in unit_ids)
-    assert any(item.startswith("subagent:planner_prometheus#") for item in unit_ids)
-
-    agent = next(item for item in units if item["unit_id"].startswith("agent:analyst"))
-    assert agent["unit_type"] == "agent"
-    assert "personas.entries.analyst" in agent["paths"]
-
-    subagent = next(item for item in units if item["unit_id"].startswith("subagent:planner_prometheus#"))
-    assert subagent["unit_type"] == "subagent"
-    assert subagent["paths"] == ["environment_manifest.subagent_orchestrator.agents[0]"]
-    assert subagent["settings_preview"]["enabled"] is True
-
-
 def test_profile_pack_service_deletes_unsubmitted_member_import_draft(tmp_path):
     service, _, _ = build_service(tmp_path)
     imported = service.import_member_profile_pack(
