@@ -27,8 +27,14 @@
 
 状態: `in progress`
 
+完了:
+
+1. import 診断に決定的な issue-group bucket（`integrity` / `security` / `version` / `conversion` / `environment` / `unknown`）を追加し、import payload と review evidence の双方で一貫して参照できるようにした。
+
+継続:
+
 1. 生 AstrBot export と profile-pack 正規化モデルのマッピングを継続改善。
-2. 非互換/降格フィールドの診断説明を強化。
+2. 非互換/降格フィールドの「フィールド単位」診断説明を強化。
 
 公開受け入れ条件:
 

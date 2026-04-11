@@ -3748,8 +3748,12 @@ class SharelifeApiV1:
         astrbot_import = meta.get("astrbot_import") if isinstance(meta, dict) else None
         import_summary = astrbot_import.get("summary") if isinstance(astrbot_import, dict) else {}
         selection_tree = []
+        compatibility_issue_groups: dict[str, list[str]] = {}
         if self.profile_pack_service is not None:
             selection_tree = self.profile_pack_service.build_import_selection_tree(imported)
+            compatibility_issue_groups = self.profile_pack_service.compatibility_issue_groups(
+                list(imported.compatibility_issues),
+            )
         return {
             "import_id": imported.import_id,
             "imported_at": imported.imported_at,
@@ -3763,6 +3767,7 @@ class SharelifeApiV1:
             "scan_summary": imported.scan_summary,
             "compatibility": imported.compatibility,
             "compatibility_issues": list(imported.compatibility_issues),
+            "compatibility_issue_groups": compatibility_issue_groups,
             "source_artifact_id": imported.source_artifact_id,
             "import_origin": imported.import_origin,
             "source_fingerprint": imported.source_fingerprint,

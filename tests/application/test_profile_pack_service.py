@@ -359,6 +359,37 @@ def test_profile_pack_service_converts_raw_astrbot_backup_zip_into_standard_memb
     assert submission.status == "pending"
     assert submission.compatibility == "degraded"
     assert "astrbot_raw_import_converted" in submission.compatibility_issues
+    assert submission.compatibility_matrix["runtime_issue_groups"]["conversion"]
+    assert "astrbot_raw_import_converted" in submission.compatibility_matrix["runtime_issue_groups"]["conversion"]
+    assert submission.review_evidence["compatibility_issue_groups"]["conversion"]
+
+
+def test_profile_pack_service_compatibility_issue_groups_bucket_known_codes():
+    grouped = ProfilePackService.compatibility_issue_groups(
+        [
+            "section_hash_mismatch:providers",
+            "signature_invalid",
+            "encrypted_secret_payload_invalid",
+            "astrbot_version_mismatch",
+            "plugin_compat_mismatch",
+            "astrbot_raw_import_converted",
+            "environment_plugin_binary_reconfigure_required",
+            "knowledge_base_storage_sync_required",
+            "custom_future_issue",
+        ],
+    )
+    assert grouped["integrity"] == [
+        "section_hash_mismatch:providers",
+        "signature_invalid",
+    ]
+    assert grouped["security"] == ["encrypted_secret_payload_invalid"]
+    assert grouped["version"] == ["astrbot_version_mismatch", "plugin_compat_mismatch"]
+    assert grouped["conversion"] == ["astrbot_raw_import_converted"]
+    assert grouped["environment"] == [
+        "environment_plugin_binary_reconfigure_required",
+        "knowledge_base_storage_sync_required",
+    ]
+    assert grouped["unknown"] == ["custom_future_issue"]
 
 
 def test_profile_pack_service_converts_raw_astrbot_cmd_config_json(tmp_path):

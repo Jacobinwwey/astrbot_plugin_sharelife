@@ -27,8 +27,14 @@ Public acceptance criteria:
 
 Status: `in progress`
 
+Completed:
+
+1. Compatibility diagnostics now expose deterministic issue-group buckets (`integrity`, `security`, `version`, `conversion`, `environment`, `unknown`) for import payloads and review evidence.
+
+Remaining:
+
 1. Improve compatibility mapping for raw AstrBot exports and profile-pack normalized model.
-2. Expand import diagnostics for unsupported or downgraded fields.
+2. Expand per-field import diagnostics for unsupported or downgraded fields.
 
 Public acceptance criteria:
 

@@ -1738,6 +1738,7 @@ class ProfilePackService:
                     "capabilities": list(item.manifest.capabilities),
                     "compatibility": item.compatibility,
                     "compatibility_issues": list(item.compatibility_issues),
+                    "compatibility_issue_groups": self.compatibility_issue_groups(item.compatibility_issues),
                     "source_artifact_id": item.source_artifact_id,
                     "import_origin": item.import_origin,
                     "delete_allowed": self._can_delete_import(item),
@@ -2864,24 +2865,69 @@ class ProfilePackService:
             "high_risk_count": len(high_risk),
         }
 
+    @classmethod
+    def compatibility_issue_groups(cls, compatibility_issues: list[str]) -> dict[str, list[str]]:
+        groups: dict[str, list[str]] = {
+            "integrity": [],
+            "security": [],
+            "version": [],
+            "conversion": [],
+            "environment": [],
+            "unknown": [],
+        }
+        for item in list(compatibility_issues or []):
+            issue_code = str(item or "").strip()
+            if not issue_code:
+                continue
+            bucket = cls._compatibility_issue_bucket(issue_code)
+            target = groups.setdefault(bucket, [])
+            if issue_code not in target:
+                target.append(issue_code)
+        return groups
+
     @staticmethod
+    def _compatibility_issue_bucket(issue_code: str) -> str:
+        normalized = str(issue_code or "").strip().lower()
+        if not normalized:
+            return "unknown"
+        if normalized.startswith("section_hash_mismatch") or normalized.startswith("signature_"):
+            return "integrity"
+        if normalized.startswith("encrypted_secret"):
+            return "security"
+        if normalized in {"astrbot_version_mismatch", "plugin_compat_mismatch"}:
+            return "version"
+        if normalized.startswith("astrbot_"):
+            return "conversion"
+        if normalized.startswith("environment_") or normalized.startswith("knowledge_base_"):
+            return "environment"
+        return "unknown"
+
+    @classmethod
     def _build_compatibility_matrix(
+        cls,
         *,
         manifest: BotProfilePackManifest,
         compatibility: str,
         compatibility_issues: list[str],
     ) -> dict[str, Any]:
+        issue_groups = cls.compatibility_issue_groups(compatibility_issues)
         return {
             "runtime_result": compatibility,
             "runtime_issues": list(compatibility_issues),
+            "runtime_issue_groups": issue_groups,
+            "runtime_issue_group_counts": {
+                key: len(values)
+                for key, values in issue_groups.items()
+            },
             "manifest": {
                 "astrbot_version": manifest.astrbot_version,
                 "plugin_compat": manifest.plugin_compat,
             },
         }
 
-    @staticmethod
+    @classmethod
     def _build_review_evidence(
+        cls,
         *,
         scan_summary: dict[str, Any],
         compatibility: str,
@@ -2889,12 +2935,14 @@ class ProfilePackService:
         redaction_mode: str,
         capability_summary: dict[str, Any],
     ) -> dict[str, Any]:
+        issue_groups = cls.compatibility_issue_groups(compatibility_issues)
         return {
             "risk_level": str(scan_summary.get("risk_level", "low") or "low"),
             "review_labels": list(scan_summary.get("review_labels", []) or []),
             "warning_flags": list(scan_summary.get("warning_flags", []) or []),
             "compatibility": compatibility,
             "compatibility_issues": list(compatibility_issues),
+            "compatibility_issue_groups": issue_groups,
             "redaction_mode": redaction_mode,
             "capability_summary": capability_summary,
         }
