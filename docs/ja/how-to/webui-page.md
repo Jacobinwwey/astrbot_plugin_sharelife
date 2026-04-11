@@ -135,13 +135,15 @@ Compose は既定で `state_store.backend=sqlite` を使用し、DB は `./outpu
 ### 4. Profile-Pack 投稿フロー
 
 1. profile-pack artifact を準備し、`artifact_id` を取得します。
-2. `/member` または `/market` から投稿します。
+2. `/member` では import draft card から直接 Upload Details を開き、レビューしてから投稿できます。
+3. Upload Details は draft 単位でレビュー状態（`selected unit/node`、section 選択、`replace_existing`）を保持し、同一ブラウザセッション中の modal 再オープンやページ再読込でも失われません。
+4. `/member` または `/market` から投稿します。
 3. submit オプション:
    - `pack_type`
    - `selected_sections`
    - `redaction_mode`
    - `replace_existing`
-4. 投稿後は `My Profile-Pack Submissions` で詳細と自分の export を確認します。
+5. 投稿後は `My Profile-Pack Submissions` で詳細と自分の export を確認します。
 
 ### 5. 能力ゲートとエラーモデル
 

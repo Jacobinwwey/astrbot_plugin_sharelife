@@ -7,14 +7,20 @@
 
 Status: `in progress`
 
-1. Finalize guided upload detail modal parity with market detail UX.
-2. Complete deep section introspection for imported AstrBot configuration slices.
-3. Ensure rescan refresh behavior is idempotent (no duplicate imported cards).
+Completed:
+
+1. Guided upload-detail modal parity with market detail UX.
+2. Deep section introspection for imported AstrBot configuration slices (up to nested runtime nodes).
+3. Per-draft upload-detail review state memory across modal reopen and same-session refresh.
+
+Remaining:
+
+1. Ensure rescan refresh behavior is idempotent (no duplicate imported cards).
 
 Public acceptance criteria:
 
 1. Member can import, review, submit, and revoke own submissions with stable UI feedback.
-2. Upload detail supports granular section selection and visible effect preview.
+2. Upload detail supports granular section selection and visible effect preview, with deterministic state restoration for the current browser session.
 
 ## Stream B: AstrBot interoperability hardening
 
@@ -51,4 +57,3 @@ Public acceptance criteria:
 
 1. `ci` pipeline green on main for repeated pushes.
 2. E2E failures are tracked with root-cause labels and mitigation status.
-

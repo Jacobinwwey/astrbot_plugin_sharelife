@@ -135,13 +135,15 @@ Compose 默认使用 `state_store.backend=sqlite`，文件位于 `./output/docke
 ### 4. Profile-Pack 投稿链路
 
 1. 先准备 profile-pack 产物，并复制 `artifact_id`。
-2. 从 `/member` 或 `/market` 发起投稿。
+2. 在 `/member` 的“本地安装管理”中，导入草稿卡片可直接打开“上传细则”进行审阅后投稿。
+3. “上传细则”会按草稿记忆审阅状态（`selected unit/node`、section 勾选、`replace_existing`），同一浏览器会话内关闭重开与页面刷新都不会丢失。
+4. 从 `/member` 或 `/market` 发起投稿。
 3. 提交选项包括：
    - `pack_type`
    - `selected_sections`
    - `redaction_mode`
    - `replace_existing`
-4. 提交后，在 `我的 Profile-Pack 投稿` 查看详情并下载自己的导出物。
+5. 提交后，在 `我的 Profile-Pack 投稿` 查看详情并下载自己的导出物。
 
 ### 5. 能力门控与错误模型
 

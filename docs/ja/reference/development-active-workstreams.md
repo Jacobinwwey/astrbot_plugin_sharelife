@@ -7,14 +7,20 @@
 
 状態: `in progress`
 
-1. upload detail モーダルを market detail UX と整合。
-2. ローカル AstrBot import 後の section 深層内容選択を可視化。
-3. 再 import を重複追加ではなく refresh セマンティクスに統一。
+完了:
+
+1. upload detail モーダルと market detail UX の整合。
+2. ローカル AstrBot import 後の section 深層内容選択の可視化（より深いネストノード対応）。
+3. draft 単位の upload detail レビュー状態記憶（modal 再オープン + 同一セッション再読込で復元）。
+
+継続:
+
+1. 再 import を重複追加ではなく refresh セマンティクスに統一。
 
 公開受け入れ条件:
 
 1. member が import -> review -> submit -> revoke を安定実行できる。
-2. upload detail で細粒度 section 選択と反映確認が可能。
+2. upload detail で細粒度 section 選択と反映確認が可能で、同一ブラウザセッションでの復元が決定的である。
 
 ## ストリーム B: AstrBot 相互運用の堅牢化
 
@@ -51,4 +57,3 @@
 
 1. main の `ci` が連続 push で安定成功。
 2. E2E 失敗に根因ラベルと対策状態が付与される。
-

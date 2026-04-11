@@ -135,13 +135,15 @@ Compose defaults to `state_store.backend=sqlite` with `./output/docker-data/shar
 ### 4. Profile-Pack Community Submission Chain
 
 1. Prepare a profile-pack artifact and copy its `artifact_id`.
-2. Submit it from `/member` or `/market`.
+2. In `/member`, imported draft cards open Upload Details directly for review-first submission.
+3. Upload Details remembers per-draft review state (`selected unit/node`, section checks, and `replace_existing`) across modal reopen and page refresh in the same browser session.
+4. Submit from `/member` or `/market`.
 3. Submit options:
    - `pack_type`
    - `selected_sections`
    - `redaction_mode`
    - `replace_existing`
-4. Open `My Profile-Pack Submissions` to inspect detail and download your own export.
+5. Open `My Profile-Pack Submissions` to inspect detail and download your own export.
 
 ### 5. Capability Gating and Error Model
 
