@@ -1418,6 +1418,10 @@ def test_api_member_profile_pack_import_detects_local_astrbot_config(tmp_path, m
     assert imported["compatibility"] == "degraded"
     assert "astrbot_raw_import_converted" in imported["compatibility_issues"]
     assert "astrbot_raw_import_converted" in imported["compatibility_issue_groups"]["conversion"]
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in imported["compatibility_issue_details"]
+    )
     assert imported["source_artifact_id"]
     assert imported["refresh_replaced_count"] == 0
     assert imported["refresh_replaced_import_ids"] == []
@@ -1427,6 +1431,10 @@ def test_api_member_profile_pack_import_detects_local_astrbot_config(tmp_path, m
     assert web_imported.data["compatibility"] == "degraded"
     assert "astrbot_raw_import_converted" in web_imported.data["compatibility_issues"]
     assert "astrbot_raw_import_converted" in web_imported.data["compatibility_issue_groups"]["conversion"]
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in web_imported.data["compatibility_issue_details"]
+    )
     assert web_imported.data["probe"]["detected"] is True
     assert web_imported.data["probe"]["matched_source"] == "config_path_file"
     assert web_imported.data["refresh_replaced_count"] == 1
@@ -1576,6 +1584,10 @@ def test_api_member_local_astrbot_import_refreshes_existing_draft_and_supports_d
     assert listed_first["imports"][0]["delete_allowed"] is True
     assert listed_first["imports"][0]["import_summary"]["default_personality"] == "alpha"
     assert "astrbot_raw_import_converted" in listed_first["imports"][0]["compatibility_issue_groups"]["conversion"]
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in listed_first["imports"][0]["compatibility_issue_details"]
+    )
     if api.profile_pack_service is not None and hasattr(api.profile_pack_service.clock, "shift"):
         api.profile_pack_service.clock.shift(seconds=1)
 
@@ -1611,6 +1623,10 @@ def test_api_member_local_astrbot_import_refreshes_existing_draft_and_supports_d
     assert listed_second["imports"][0]["import_summary"]["default_personality"] == "beta"
     assert listed_second["imports"][0]["import_summary"]["subagent_count"] == 1
     assert "astrbot_raw_import_converted" in listed_second["imports"][0]["compatibility_issue_groups"]["conversion"]
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in listed_second["imports"][0]["compatibility_issue_details"]
+    )
 
     deleted = api.member_delete_profile_pack_import(
         user_id="member-1",

@@ -30,6 +30,7 @@
 完了:
 
 1. import 診断に決定的な issue-group bucket（`integrity` / `security` / `version` / `conversion` / `environment` / `unknown`）を追加し、import payload と review evidence の双方で一貫して参照できるようにした。
+2. import 診断に issue 単位の詳細（`sections` / `related_paths` / `evidence_refs`）を追加し、payload を手作業で掘らなくても path レベルで分診できるようにした。
 
 継続:
 

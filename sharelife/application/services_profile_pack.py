@@ -1679,6 +1679,8 @@ class ProfilePackService:
             manifest=imported.manifest,
             compatibility=imported.compatibility,
             compatibility_issues=imported.compatibility_issues,
+            sections=imported.sections,
+            scan_summary=imported.scan_summary,
         )
         review_evidence = self._build_review_evidence(
             scan_summary=imported.scan_summary,
@@ -1686,6 +1688,7 @@ class ProfilePackService:
             compatibility_issues=imported.compatibility_issues,
             redaction_mode=imported.manifest.redaction_policy.mode,
             capability_summary=capability_summary,
+            sections=imported.sections,
         )
         return {
             "status": "dryrun_ready",
@@ -1739,6 +1742,11 @@ class ProfilePackService:
                     "compatibility": item.compatibility,
                     "compatibility_issues": list(item.compatibility_issues),
                     "compatibility_issue_groups": self.compatibility_issue_groups(item.compatibility_issues),
+                    "compatibility_issue_details": self.compatibility_issue_details(
+                        item.compatibility_issues,
+                        sections=item.sections,
+                        scan_summary=item.scan_summary,
+                    ),
                     "source_artifact_id": item.source_artifact_id,
                     "import_origin": item.import_origin,
                     "delete_allowed": self._can_delete_import(item),
@@ -1857,6 +1865,8 @@ class ProfilePackService:
             manifest=imported.manifest,
             compatibility=imported.compatibility,
             compatibility_issues=imported.compatibility_issues,
+            sections=imported.sections,
+            scan_summary=scan_summary,
         )
         review_evidence = self._build_review_evidence(
             scan_summary=scan_summary,
@@ -1864,6 +1874,7 @@ class ProfilePackService:
             compatibility_issues=imported.compatibility_issues,
             redaction_mode=imported.manifest.redaction_policy.mode,
             capability_summary=capability_summary,
+            sections=imported.sections,
         )
         submission = ProfilePackSubmission(
             submission_id=str(uuid4()),
@@ -2368,6 +2379,8 @@ class ProfilePackService:
             manifest=manifest,
             compatibility=compatibility,
             compatibility_issues=compatibility_issues,
+            sections=materialized_sections,
+            scan_summary=scan_summary,
         )
         review_evidence = self._build_review_evidence(
             scan_summary=scan_summary,
@@ -2375,6 +2388,7 @@ class ProfilePackService:
             compatibility_issues=compatibility_issues,
             redaction_mode=policy.mode,
             capability_summary=capability_summary,
+            sections=materialized_sections,
         )
         review_labels = sorted(
             set(["official_profile_pack", *(scan_summary.get("review_labels", []) or [])])
@@ -2885,6 +2899,65 @@ class ProfilePackService:
                 target.append(issue_code)
         return groups
 
+    @classmethod
+    def compatibility_issue_details(
+        cls,
+        compatibility_issues: list[str],
+        *,
+        sections: dict[str, Any] | None = None,
+        scan_summary: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        details: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        normalized_sections = dict(sections or {})
+        for item in list(compatibility_issues or []):
+            issue_code = str(item or "").strip()
+            if not issue_code or issue_code in seen:
+                continue
+            seen.add(issue_code)
+            group = cls._compatibility_issue_bucket(issue_code)
+            related_paths = cls._compatibility_issue_related_paths(
+                issue_code,
+                sections=normalized_sections,
+            )
+            related_sections = cls._compatibility_issue_sections(
+                issue_code,
+                related_paths=related_paths,
+                sections=normalized_sections,
+            )
+            details.append(
+                {
+                    "code": issue_code,
+                    "group": group,
+                    "blocking": cls._compatibility_issue_is_blocking(issue_code),
+                    "issue_key": cls._compatibility_issue_i18n_key(issue_code),
+                    "sections": related_sections,
+                    "related_paths": related_paths,
+                    "evidence_refs": cls._compatibility_issue_evidence_refs(
+                        scan_summary=scan_summary,
+                        related_sections=related_sections,
+                        related_paths=related_paths,
+                    ),
+                }
+            )
+        return details
+
+    @staticmethod
+    def _compatibility_issue_i18n_key(issue_code: str) -> str:
+        normalized = str(issue_code or "").strip().lower()
+        if normalized.startswith("section_hash_mismatch:"):
+            return "profile_pack.issue.section_hash_mismatch_with_section"
+        return f"profile_pack.issue.{normalized}"
+
+    @staticmethod
+    def _compatibility_issue_is_blocking(issue_code: str) -> bool:
+        normalized = str(issue_code or "").strip().lower()
+        if not normalized:
+            return False
+        if normalized in {"astrbot_version_mismatch", "plugin_compat_mismatch"}:
+            return True
+        return normalized.startswith("encrypted_secret") or normalized.startswith("signature_")
+
     @staticmethod
     def _compatibility_issue_bucket(issue_code: str) -> str:
         normalized = str(issue_code or "").strip().lower()
@@ -2903,14 +2976,244 @@ class ProfilePackService:
         return "unknown"
 
     @classmethod
+    def _compatibility_issue_related_paths(
+        cls,
+        issue_code: str,
+        *,
+        sections: dict[str, Any],
+    ) -> list[str]:
+        normalized = str(issue_code or "").strip().lower()
+        out: list[str] = []
+        if normalized.startswith("section_hash_mismatch:"):
+            section_codes = [item.strip() for item in normalized.split(":", 1)[1].split(",")]
+            for section_code in section_codes:
+                if section_code:
+                    out.append(section_code)
+            return list(dict.fromkeys(out))
+
+        mapped: dict[str, list[str]] = {
+            "astrbot_version_mismatch": ["manifest.astrbot_version"],
+            "plugin_compat_mismatch": ["manifest.plugin_compat"],
+            "signature_invalid": ["manifest.signature"],
+            "signature_untrusted_key": ["manifest.signature.key_id"],
+            "signature_algorithm_unsupported": ["manifest.signature.algorithm"],
+            "astrbot_raw_import_converted": ["sharelife_meta.astrbot_import.source_type"],
+            "astrbot_backup_runtime_payload_omitted": ["sharelife_meta.astrbot_import.backup_manifest"],
+            "astrbot_operator_fields_omitted": ["astrbot_core.dashboard", "astrbot_core.admins_id"],
+            "astrbot_plugin_wildcard_unresolved": ["plugins"],
+            "environment_container_reconfigure_required": [
+                "environment_manifest.container_runtime",
+                "environment_manifest.requires_container_rebuild",
+            ],
+            "environment_system_dependencies_reconfigure_required": [
+                "environment_manifest.system_dependencies",
+                "environment_manifest.requires_system_dependencies",
+            ],
+            "environment_plugin_binary_reconfigure_required": [
+                "environment_manifest.plugin_binaries",
+                "environment_manifest.requires_plugin_binaries",
+            ],
+            "knowledge_base_storage_sync_required": ["knowledge_base.storage_path"],
+        }
+        if normalized in mapped:
+            out.extend(mapped[normalized])
+
+        if normalized.startswith("encrypted_secret"):
+            out.extend(cls._collect_encrypted_secret_paths(sections))
+        if normalized == "knowledge_base_storage_sync_required":
+            knowledge_base = sections.get("knowledge_base")
+            if isinstance(knowledge_base, (dict, list)):
+                out.extend(
+                    cls._collect_nested_key_paths(
+                        knowledge_base,
+                        target_keys={"storage_path", "external_paths", "index_path", "vector_store_path"},
+                        base_path="knowledge_base",
+                    )
+                )
+        return list(dict.fromkeys([item for item in out if str(item or "").strip()]))
+
+    @classmethod
+    def _compatibility_issue_sections(
+        cls,
+        issue_code: str,
+        *,
+        related_paths: list[str],
+        sections: dict[str, Any],
+    ) -> list[str]:
+        normalized = str(issue_code or "").strip().lower()
+        if normalized.startswith("section_hash_mismatch:"):
+            values = [item.strip() for item in normalized.split(":", 1)[1].split(",")]
+            return [item for item in values if item]
+
+        mapped: dict[str, list[str]] = {
+            "astrbot_raw_import_converted": ["sharelife_meta"],
+            "astrbot_backup_runtime_payload_omitted": ["sharelife_meta"],
+            "astrbot_operator_fields_omitted": ["astrbot_core"],
+            "astrbot_plugin_wildcard_unresolved": ["plugins"],
+            "environment_container_reconfigure_required": ["environment_manifest"],
+            "environment_system_dependencies_reconfigure_required": ["environment_manifest"],
+            "environment_plugin_binary_reconfigure_required": ["environment_manifest"],
+            "knowledge_base_storage_sync_required": ["knowledge_base"],
+        }
+        if normalized in mapped:
+            return mapped[normalized]
+        inferred: list[str] = []
+        known_sections = set(sections.keys())
+        for path in list(related_paths or []):
+            text = str(path or "").strip()
+            if not text:
+                continue
+            root = text.split(".", 1)[0].split("[", 1)[0].strip()
+            if root and root in known_sections and root not in inferred:
+                inferred.append(root)
+        return inferred
+
+    @staticmethod
+    def _collect_encrypted_secret_paths(
+        value: Any,
+        *,
+        base_path: str = "",
+        max_count: int = 12,
+    ) -> list[str]:
+        out: list[str] = []
+
+        def visit(node: Any, path: str, depth: int) -> None:
+            if len(out) >= max_count or depth > 8:
+                return
+            if isinstance(node, dict):
+                for key, nested in node.items():
+                    key_text = str(key or "").strip()
+                    if not key_text:
+                        continue
+                    next_path = f"{path}.{key_text}" if path else key_text
+                    visit(nested, next_path, depth + 1)
+                return
+            if isinstance(node, list):
+                for index, nested in enumerate(node[:80]):
+                    next_path = f"{path}[{index}]"
+                    visit(nested, next_path, depth + 1)
+                return
+            if isinstance(node, str) and node.startswith("enc-v1:"):
+                out.append(path)
+
+        visit(value, str(base_path or "").strip(), 0)
+        return list(dict.fromkeys([item for item in out if item]))
+
+    @staticmethod
+    def _collect_nested_key_paths(
+        value: Any,
+        *,
+        target_keys: set[str],
+        base_path: str,
+        max_count: int = 12,
+    ) -> list[str]:
+        out: list[str] = []
+
+        def visit(node: Any, path: str, depth: int) -> None:
+            if len(out) >= max_count or depth > 8:
+                return
+            if isinstance(node, dict):
+                for key, nested in node.items():
+                    key_text = str(key or "").strip()
+                    if not key_text:
+                        continue
+                    next_path = f"{path}.{key_text}" if path else key_text
+                    if key_text in target_keys and nested not in (None, "", [], {}):
+                        out.append(next_path)
+                    visit(nested, next_path, depth + 1)
+                return
+            if isinstance(node, list):
+                for index, nested in enumerate(node[:80]):
+                    next_path = f"{path}[{index}]"
+                    visit(nested, next_path, depth + 1)
+
+        visit(value, str(base_path or "").strip(), 0)
+        return list(dict.fromkeys(out))
+
+    @classmethod
+    def _compatibility_issue_evidence_refs(
+        cls,
+        *,
+        scan_summary: dict[str, Any] | None,
+        related_sections: list[str],
+        related_paths: list[str],
+    ) -> list[dict[str, Any]]:
+        rows = list((scan_summary or {}).get("risk_evidence", []) or [])
+        if not rows:
+            return []
+        section_files = {f"sections/{section}.json" for section in related_sections if section}
+        normalized_paths = [str(path or "").strip() for path in related_paths if str(path or "").strip()]
+        out: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+        for item in rows:
+            if len(out) >= 8:
+                break
+            if not isinstance(item, dict):
+                continue
+            file_name = str(item.get("file", "") or "").strip()
+            json_path = cls._normalized_scan_path(item.get("path", ""))
+            matched = False
+            if file_name and any(file_name.endswith(ref) for ref in section_files):
+                matched = True
+            if not matched and json_path:
+                for path_ref in normalized_paths:
+                    ref = str(path_ref or "").strip()
+                    if not ref or ref.startswith("manifest."):
+                        continue
+                    if json_path == ref or json_path.startswith(f"{ref}.") or json_path.startswith(f"{ref}["):
+                        matched = True
+                        break
+            if not matched:
+                continue
+            line = item.get("line")
+            column = item.get("column")
+            record = {
+                "file": file_name,
+                "path": json_path,
+                "line": int(line) if isinstance(line, int) else 0,
+                "column": int(column) if isinstance(column, int) else 0,
+                "rule": str(item.get("rule", "") or "").strip(),
+            }
+            key = (
+                record["file"],
+                record["path"],
+                str(record["line"]),
+                str(record["column"]),
+                record["rule"],
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(record)
+        return out
+
+    @staticmethod
+    def _normalized_scan_path(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if text.startswith("$."):
+            return text[2:]
+        if text.startswith("$"):
+            return text[1:].lstrip(".")
+        return text
+
+    @classmethod
     def _build_compatibility_matrix(
         cls,
         *,
         manifest: BotProfilePackManifest,
         compatibility: str,
         compatibility_issues: list[str],
+        sections: dict[str, Any] | None = None,
+        scan_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         issue_groups = cls.compatibility_issue_groups(compatibility_issues)
+        issue_details = cls.compatibility_issue_details(
+            compatibility_issues,
+            sections=sections,
+            scan_summary=scan_summary,
+        )
         return {
             "runtime_result": compatibility,
             "runtime_issues": list(compatibility_issues),
@@ -2919,6 +3222,7 @@ class ProfilePackService:
                 key: len(values)
                 for key, values in issue_groups.items()
             },
+            "runtime_issue_details": issue_details,
             "manifest": {
                 "astrbot_version": manifest.astrbot_version,
                 "plugin_compat": manifest.plugin_compat,
@@ -2934,8 +3238,14 @@ class ProfilePackService:
         compatibility_issues: list[str],
         redaction_mode: str,
         capability_summary: dict[str, Any],
+        sections: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         issue_groups = cls.compatibility_issue_groups(compatibility_issues)
+        issue_details = cls.compatibility_issue_details(
+            compatibility_issues,
+            sections=sections,
+            scan_summary=scan_summary,
+        )
         return {
             "risk_level": str(scan_summary.get("risk_level", "low") or "low"),
             "review_labels": list(scan_summary.get("review_labels", []) or []),
@@ -2943,6 +3253,7 @@ class ProfilePackService:
             "compatibility": compatibility,
             "compatibility_issues": list(compatibility_issues),
             "compatibility_issue_groups": issue_groups,
+            "compatibility_issue_details": issue_details,
             "redaction_mode": redaction_mode,
             "capability_summary": capability_summary,
         }

@@ -30,6 +30,7 @@ Status: `in progress`
 Completed:
 
 1. Compatibility diagnostics now expose deterministic issue-group buckets (`integrity`, `security`, `version`, `conversion`, `environment`, `unknown`) for import payloads and review evidence.
+2. Compatibility diagnostics now expose per-issue details (`sections`, `related_paths`, `evidence_refs`) to support field-level triage without manual payload archaeology.
 
 Remaining:
 

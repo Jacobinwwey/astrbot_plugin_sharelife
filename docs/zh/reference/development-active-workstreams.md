@@ -30,6 +30,7 @@
 已完成：
 
 1. 导入诊断已输出确定性的问题分组桶（`integrity`、`security`、`version`、`conversion`、`environment`、`unknown`），并在导入载荷与审阅证据中保持一致。
+2. 导入诊断已输出字段级 issue 详情（`sections`、`related_paths`、`evidence_refs`），支持无需手工翻 payload 的路径级分诊。
 
 待推进：
 

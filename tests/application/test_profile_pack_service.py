@@ -333,6 +333,20 @@ def test_profile_pack_service_converts_raw_astrbot_backup_zip_into_standard_memb
     assert "astrbot_backup_runtime_payload_omitted" in imported.compatibility_issues
     assert "astrbot_operator_fields_omitted" in imported.compatibility_issues
     assert "astrbot_plugin_wildcard_unresolved" in imported.compatibility_issues
+    imported_details = service.compatibility_issue_details(
+        imported.compatibility_issues,
+        sections=imported.sections,
+        scan_summary=imported.scan_summary,
+    )
+    assert any(
+        item["code"] == "astrbot_raw_import_converted" and "sharelife_meta" in item["sections"]
+        for item in imported_details
+    )
+    assert any(
+        item["code"] == "astrbot_operator_fields_omitted"
+        and "astrbot_core.dashboard" in item["related_paths"]
+        for item in imported_details
+    )
     assert imported.sections["sharelife_meta"]["astrbot_import"]["source_type"] == "astrbot_backup_zip"
     assert "dashboard" not in imported.sections["astrbot_core"]
     assert "admins_id" not in imported.sections["astrbot_core"]
@@ -361,7 +375,15 @@ def test_profile_pack_service_converts_raw_astrbot_backup_zip_into_standard_memb
     assert "astrbot_raw_import_converted" in submission.compatibility_issues
     assert submission.compatibility_matrix["runtime_issue_groups"]["conversion"]
     assert "astrbot_raw_import_converted" in submission.compatibility_matrix["runtime_issue_groups"]["conversion"]
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in submission.compatibility_matrix["runtime_issue_details"]
+    )
     assert submission.review_evidence["compatibility_issue_groups"]["conversion"]
+    assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        for item in submission.review_evidence["compatibility_issue_details"]
+    )
 
 
 def test_profile_pack_service_compatibility_issue_groups_bucket_known_codes():
@@ -390,6 +412,40 @@ def test_profile_pack_service_compatibility_issue_groups_bucket_known_codes():
         "knowledge_base_storage_sync_required",
     ]
     assert grouped["unknown"] == ["custom_future_issue"]
+
+
+def test_profile_pack_service_compatibility_issue_details_attach_related_paths_and_evidence():
+    details = ProfilePackService.compatibility_issue_details(
+        ["environment_plugin_binary_reconfigure_required", "unknown_future_issue"],
+        sections={
+            "environment_manifest": {
+                "plugin_binaries": [
+                    {"id": "bot-a"},
+                ]
+            }
+        },
+        scan_summary={
+            "risk_evidence": [
+                {
+                    "file": "sections/environment_manifest.json",
+                    "path": "$.environment_manifest.plugin_binaries[0].id",
+                    "line": 8,
+                    "column": 3,
+                    "rule": "plugin_binary_untrusted",
+                }
+            ]
+        },
+    )
+    env_issue = next(item for item in details if item["code"] == "environment_plugin_binary_reconfigure_required")
+    assert env_issue["group"] == "environment"
+    assert "environment_manifest" in env_issue["sections"]
+    assert "environment_manifest.plugin_binaries" in env_issue["related_paths"]
+    assert env_issue["evidence_refs"]
+    assert env_issue["evidence_refs"][0]["file"].endswith("sections/environment_manifest.json")
+
+    unknown_issue = next(item for item in details if item["code"] == "unknown_future_issue")
+    assert unknown_issue["group"] == "unknown"
+    assert unknown_issue["evidence_refs"] == []
 
 
 def test_profile_pack_service_converts_raw_astrbot_cmd_config_json(tmp_path):
@@ -1468,7 +1524,9 @@ def test_profile_pack_governance_metadata_and_featured_toggle(tmp_path):
     )
     assert "declared" in submission.capability_summary
     assert "runtime_result" in submission.compatibility_matrix
+    assert "runtime_issue_details" in submission.compatibility_matrix
     assert submission.review_evidence["redaction_mode"] == "exclude_secrets"
+    assert "compatibility_issue_details" in submission.review_evidence
 
     service.decide_submission(
         submission_id=submission.submission_id,
