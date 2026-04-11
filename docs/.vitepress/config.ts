@@ -42,6 +42,8 @@ const publicSidebar: SidebarMap = {
     {
       text: 'Developers (架构与开发)',
       items: [
+        { text: '开发完成归档（公开）', link: '/zh/reference/development-completed-archive' },
+        { text: '开发进行中推进清单', link: '/zh/reference/development-active-workstreams' },
         { text: '权限边界与职责解耦路线图', link: '/zh/reference/permission-boundary-roadmap' },
         { text: '用户面板与市场页重构执行方案', link: '/zh/reference/user-panel-stitch-execution-plan' },
         { text: '存储持久化与冷备执行方案', link: '/zh/reference/storage-cold-backup-execution-plan' },
@@ -71,6 +73,8 @@ const publicSidebar: SidebarMap = {
     {
       text: 'Developers',
       items: [
+        { text: 'Development Completed Archive', link: '/en/reference/development-completed-archive' },
+        { text: 'Development Active Workstreams', link: '/en/reference/development-active-workstreams' },
         { text: 'Permission Boundary Roadmap', link: '/en/reference/permission-boundary-roadmap' },
         { text: 'User Panel + Market Refactor Plan', link: '/en/reference/user-panel-stitch-execution-plan' },
         { text: 'Storage Cold Backup Plan', link: '/en/reference/storage-cold-backup-execution-plan' },
@@ -100,6 +104,8 @@ const publicSidebar: SidebarMap = {
     {
       text: 'Developers (開発とアーキテクチャ)',
       items: [
+        { text: '開発完了アーカイブ（公開）', link: '/ja/reference/development-completed-archive' },
+        { text: '開発の進行中ワークストリーム', link: '/ja/reference/development-active-workstreams' },
         { text: '権限制御境界ロードマップ', link: '/ja/reference/permission-boundary-roadmap' },
         { text: 'ユーザーパネル + マーケット再設計 実行計画', link: '/ja/reference/user-panel-stitch-execution-plan' },
         { text: 'ストレージ永続化 + 冷備 実行計画', link: '/ja/reference/storage-cold-backup-execution-plan' },

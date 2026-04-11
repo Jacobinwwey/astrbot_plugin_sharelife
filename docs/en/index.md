@@ -31,12 +31,14 @@ Sharelife is built to stay with those moments and make bot setup transfer practi
 7. [Public Market Read-Only Hub](/en/how-to/market-public-hub)
 8. [Market Catalog Prototype](/en/how-to/market-catalog-prototype)
 9. [Permission Boundary Roadmap](/en/reference/permission-boundary-roadmap)
-10. [User Panel + Market Refactor Plan](/en/reference/user-panel-stitch-execution-plan)
-11. [Storage Cold Backup Plan](/en/reference/storage-cold-backup-execution-plan)
-12. [Integrated Execution Playbook](/en/reference/integrated-execution-playbook)
-13. [Sharelife v1 Frozen Plan](/en/reference/sharelife-v1-freeze)
-14. [API v1 Reference](/en/reference/api-v1)
-15. [Why Community-First](/en/explanation/community-first)
+10. [Development Completed Archive](/en/reference/development-completed-archive)
+11. [Development Active Workstreams](/en/reference/development-active-workstreams)
+12. [User Panel + Market Refactor Plan](/en/reference/user-panel-stitch-execution-plan)
+13. [Storage Cold Backup Plan](/en/reference/storage-cold-backup-execution-plan)
+14. [Integrated Execution Playbook](/en/reference/integrated-execution-playbook)
+15. [Sharelife v1 Frozen Plan](/en/reference/sharelife-v1-freeze)
+16. [API v1 Reference](/en/reference/api-v1)
+17. [Why Community-First](/en/explanation/community-first)
 
 ## Private Ops Boundary
 
