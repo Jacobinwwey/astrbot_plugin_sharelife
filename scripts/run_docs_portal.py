@@ -24,6 +24,9 @@ def vitepress_command() -> Path:
 
 def is_port_available(port: int, *, host: str = "127.0.0.1") -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Allow quick restart after stopping a previous docs process where
+    # local connections may still keep the port in TIME_WAIT.
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind((host, int(port)))
         return True
