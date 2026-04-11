@@ -3169,6 +3169,13 @@ class ProfilePackService:
                         base_path="knowledge_base",
                     )
                 )
+        if cls._compatibility_issue_bucket(normalized) == "conversion":
+            out.extend(
+                cls._compatibility_issue_conversion_paths(
+                    issue_code=normalized,
+                    sections=sections,
+                )
+            )
         return list(dict.fromkeys([item for item in out if str(item or "").strip()]))
 
     @classmethod
@@ -3206,6 +3213,43 @@ class ProfilePackService:
             if root and root in known_sections and root not in inferred:
                 inferred.append(root)
         return inferred
+
+    @classmethod
+    def _compatibility_issue_conversion_paths(
+        cls,
+        *,
+        issue_code: str,
+        sections: dict[str, Any],
+    ) -> list[str]:
+        meta = sections.get("sharelife_meta")
+        if not isinstance(meta, dict):
+            return []
+        astrbot_import = meta.get("astrbot_import")
+        if not isinstance(astrbot_import, dict):
+            return []
+        summary = astrbot_import.get("summary")
+        if not isinstance(summary, dict):
+            return []
+        diagnostics = summary.get("field_diagnostics")
+        if not isinstance(diagnostics, list):
+            return []
+        normalized_issue = str(issue_code or "").strip().lower()
+        out: list[str] = []
+        for item in diagnostics:
+            if not isinstance(item, dict):
+                continue
+            row_issue = str(item.get("issue_code", "") or "").strip().lower()
+            if normalized_issue == "astrbot_raw_import_converted":
+                pass
+            elif row_issue != normalized_issue:
+                continue
+            target_path = str(item.get("target_path", "") or "").strip()
+            source_path = str(item.get("source_path", "") or "").strip()
+            if target_path:
+                out.append(target_path)
+            elif source_path:
+                out.append(source_path)
+        return list(dict.fromkeys([item for item in out if item]))
 
     @staticmethod
     def _collect_encrypted_secret_paths(

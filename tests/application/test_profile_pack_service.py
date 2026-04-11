@@ -343,6 +343,11 @@ def test_profile_pack_service_converts_raw_astrbot_backup_zip_into_standard_memb
         for item in imported_details
     )
     assert any(
+        item["code"] == "astrbot_raw_import_converted"
+        and "providers.test-openai.api_key" in item["related_paths"]
+        for item in imported_details
+    )
+    assert any(
         item["code"] == "astrbot_operator_fields_omitted"
         and "astrbot_core.dashboard" in item["related_paths"]
         for item in imported_details
